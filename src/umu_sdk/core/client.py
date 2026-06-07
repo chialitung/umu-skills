@@ -36,8 +36,8 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-from .auth import AuthManager
-from .errors import (
+from .core.auth import AuthManager
+from .core.errors import (
     AuthenticationError,
     EnvironmentMismatchError,
     NetworkError,
@@ -46,7 +46,7 @@ from .errors import (
     UMUError,
     ValidationError,
 )
-from .models import LoginCredentials
+from .core.models import LoginCredentials
 
 
 # 预定义环境配置注册表（支持 future 扩展接口路径覆盖）

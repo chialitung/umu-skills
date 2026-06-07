@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from umu_sdk.core.client import UMUClient
+from ..core.client import UMUClient
 
 
 @dataclass

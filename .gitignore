@@ -38,3 +38,4 @@ Thumbs.db
 scripts/release*
 scripts/*.bat
 *.baiduyun.uploading.cfg
+.codegraph/

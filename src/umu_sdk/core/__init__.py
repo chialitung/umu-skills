@@ -3,10 +3,10 @@
 SDK 核心层 — HTTP 客户端、认证、加密、数据模型、错误处理.
 """
 
-from .client import UMUClient
-from .auth import AuthManager
-from .encrypt import encrypt_password, decrypt_password, verify_encryption
-from .errors import (
+from .core.client import UMUClient
+from .core.auth import AuthManager
+from .core.encrypt import encrypt_password, decrypt_password, verify_encryption
+from .core.errors import (
     UMUError,
     EnvironmentMismatchError,
     AuthenticationError,
@@ -14,7 +14,7 @@ from .errors import (
     RateLimitError,
     ServerError,
 )
-from .models import (
+from .core.models import (
     Course,
     CreateCourseRequest,
     UpdateCourseRequest,

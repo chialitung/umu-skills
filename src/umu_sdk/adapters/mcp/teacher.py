@@ -42,7 +42,7 @@ from typing import Annotated, Any, AsyncIterator
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from umu_sdk.core.client import UMUClient
+from ..core.client import UMUClient
 from .cos_upload import (
     ScormUploader,
     UploadResult,

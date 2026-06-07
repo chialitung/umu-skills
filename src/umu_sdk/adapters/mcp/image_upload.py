@@ -4,7 +4,7 @@
 流程：preObject 获取 COS 凭证 → PUT 直传到 COS → resourceCallback 注册到资源库.
 
 Usage:
-    from umu_sdk.adapters.mcp.image_upload import ImageUploader
+    from .adapters.mcp.image_upload import ImageUploader
 
     uploader = ImageUploader(client, client.base_url)
     result = uploader.upload("/path/to/cover.jpg")
