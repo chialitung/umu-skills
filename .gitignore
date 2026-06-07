@@ -34,12 +34,14 @@ tests/**/*.log
 .DS_Store
 Thumbs.db
 
-# Release scripts (personal dev tools, not for repo)
+# 开发工具（不属于 SDK 交付物）
+dev-tools/
+
+# 辅助脚本（不属于 SDK 交付物）
 scripts/
-scripts/release*
-scripts/*.bat
+
+# 百度网盘同步临时文件
 *.baiduyun.uploading.cfg
 
-# Dev tools (internal development tooling, not for distribution)
-dev-tools/
-.codegraph/
+# CodeGraph 索引
+codegraph/
