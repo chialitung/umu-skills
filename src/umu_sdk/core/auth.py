@@ -9,9 +9,9 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from .encrypt import encrypt_password
-from .errors import AuthenticationError, EnvironmentMismatchError, UMUError
-from .models import LoginCredentials
+from .core.encrypt import encrypt_password
+from .core.errors import AuthenticationError, EnvironmentMismatchError, UMUError
+from .core.models import LoginCredentials
 
 
 class AuthManager:

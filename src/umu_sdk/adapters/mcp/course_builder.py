@@ -9,7 +9,7 @@
 - 修改课程: POST /ajax/e_saveGroup (data 中 groupInfo 必须包含 id)
 
 Usage:
-    from umu_sdk.adapters.mcp.course_builder import CourseBuilder
+    from .adapters.mcp.course_builder import CourseBuilder
 
     builder = CourseBuilder(client)
     course = builder.create_course(title="新课程")

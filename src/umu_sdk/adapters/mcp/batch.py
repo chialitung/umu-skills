@@ -27,7 +27,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
-from umu_sdk.core.client import UMUClient
+from ..core.client import UMUClient
 
 
 class AccountSource(str, Enum):

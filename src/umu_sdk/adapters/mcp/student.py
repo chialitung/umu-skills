@@ -27,8 +27,8 @@ from typing import Annotated, Any, AsyncIterator
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from umu_sdk.core.client import UMUClient
-from umu_sdk.core.encrypt import encrypt_password
+from ..core.client import UMUClient
+from ..core.encrypt import encrypt_password
 from . import prompts
 from .batch import AccountImporter, AccountSource, BatchExecutor
 from .session import SessionManager
