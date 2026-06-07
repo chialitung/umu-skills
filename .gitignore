@@ -17,6 +17,13 @@ venv/
 .coverage
 htmlcov/
 
+# 测试产生的日志、报告、缓存、临时文件
+tests/**/logs/
+tests/**/reports/
+tests/**/__pycache__/
+tests/**/.pytest_cache/
+tests/**/*.log
+
 # IDE
 .vscode/
 .idea/
@@ -26,3 +33,7 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Release scripts (personal dev tools, not for repo)
+scripts/release*
+scripts/*.bat
