@@ -44,4 +44,4 @@ scripts/
 *.baiduyun.uploading.cfg
 
 # CodeGraph 索引
-codegraph/
+.codegraph/
