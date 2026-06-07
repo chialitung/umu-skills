@@ -37,3 +37,4 @@ Thumbs.db
 # Release scripts (personal dev tools, not for repo)
 scripts/release*
 scripts/*.bat
+*.baiduyun.uploading.cfg
