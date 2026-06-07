@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "umu-teacher": {
+      "type": "stdio",
+      "command": "umu-skills-teacher"
+    },
+    "umu-student": {
+      "type": "stdio",
+      "command": "umu-skills-student"
+    }
+  }
+}

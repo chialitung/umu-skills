@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "umu-teacher": {
+      "command": "umu-skills-teacher",
+      "env": {
+        "UMU_BASE_URL": "https://www.umu.cn"
+      }
+    },
+    "umu-student": {
+      "command": "umu-skills-student",
+      "env": {
+        "UMU_BASE_URL": "https://www.umu.cn"
+      }
+    }
+  }
+}

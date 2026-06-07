@@ -1,0 +1,20 @@
+{
+  "mcpServers": [
+    {
+      "name": "umu-teacher",
+      "command": "umu-skills-teacher",
+      "type": "stdio",
+      "env": {
+        "UMU_BASE_URL": "https://www.umu.cn"
+      }
+    },
+    {
+      "name": "umu-student",
+      "command": "umu-skills-student",
+      "type": "stdio",
+      "env": {
+        "UMU_BASE_URL": "https://www.umu.cn"
+      }
+    }
+  ]
+}
