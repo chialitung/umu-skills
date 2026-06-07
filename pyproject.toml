@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "umu-skills"
+version = "0.2.0"
+description = "UMU Skills - AI Skill Framework for UMU Learning Platform"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "UMU Skills Team"},
+]
+keywords = ["umu", "lms", "mcp", "ai", "skills", "education"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Education",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+mcp = [
+    "mcp>=1.0.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
+]
+
+[project.scripts]
+umu-skills = "umu_sdk.adapters.mcp.student:main"
+umu-skills-student = "umu_sdk.adapters.mcp.student:main"
+umu-skills-teacher = "umu_sdk.adapters.mcp.teacher:main"
+
+[project.urls]
+Homepage = "https://github.com/your-org/umu-skills"
+Repository = "https://github.com/your-org/umu-skills"
+Documentation = "https://github.com/your-org/umu-skills#readme"
+Issues = "https://github.com/your-org/umu-skills/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/umu_sdk"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
