@@ -35,7 +35,11 @@ tests/**/*.log
 Thumbs.db
 
 # Release scripts (personal dev tools, not for repo)
+scripts/
 scripts/release*
 scripts/*.bat
 *.baiduyun.uploading.cfg
+
+# Dev tools (internal development tooling, not for distribution)
+dev-tools/
 .codegraph/
