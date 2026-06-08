@@ -27,16 +27,6 @@ class UMUError(Exception):
         return " ".join(parts)
 
 
-class EnvironmentMismatchError(UMUError):
-    """环境不匹配错误.
-
-    当请求的域名与 SDK 初始化时配置的环境不一致时抛出.
-    """
-
-    def __init__(self, message: str):
-        super().__init__(message, code="ENVIRONMENT_MISMATCH")
-
-
 class AuthenticationError(UMUError):
     """认证错误."""
 

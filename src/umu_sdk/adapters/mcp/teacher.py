@@ -42,7 +42,7 @@ from typing import Annotated, Any, AsyncIterator
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from ..core.client import UMUClient
+from ...core.client import UMUClient
 from .cos_upload import (
     ScormUploader,
     UploadResult,
@@ -110,8 +110,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
     _session_manager = SessionManager(
         base_url=base_url,
-        environment="default",
-        enable_environment_check=True,
     )
 
     default_session = await _session_manager.create_session()

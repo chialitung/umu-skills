@@ -27,8 +27,8 @@ from typing import Annotated, Any, AsyncIterator
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from ..core.client import UMUClient
-from ..core.encrypt import encrypt_password
+from ...core.client import UMUClient
+from ...core.encrypt import encrypt_password
 from . import prompts
 from .batch import AccountImporter, AccountSource, BatchExecutor
 from .session import SessionManager
@@ -57,8 +57,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     # 创建会话管理器
     _session_manager = SessionManager(
         base_url=base_url,
-        environment="default",
-        enable_environment_check=True,
     )
 
     # 创建默认会话
@@ -3608,7 +3606,6 @@ async def stu_batch_complete_course(
             task_func=complete_course_task,
             course_identifier=course_identifier,
             base_url=base_url,
-            environment=env_name,
         )
 
         return _ok(

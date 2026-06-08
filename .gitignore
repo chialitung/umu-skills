@@ -45,3 +45,6 @@ scripts/
 
 # CodeGraph 索引
 codegraph/
+
+# 用户测试或调用 MCP 时产生的过程文件
+call-records/

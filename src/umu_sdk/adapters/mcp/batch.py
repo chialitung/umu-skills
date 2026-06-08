@@ -27,7 +27,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
-from ..core.client import UMUClient
+from ...core.client import UMUClient
 
 
 class AccountSource(str, Enum):
@@ -256,7 +256,6 @@ class BatchExecutor:
         task_func: Callable[[UMUClient, str], Any],
         course_identifier: str,
         base_url: str,
-        environment: str = "default",
     ) -> BatchReport:
         """执行批量任务.
 
@@ -265,7 +264,6 @@ class BatchExecutor:
             task_func: 任务函数，接收 (client, course_identifier) 参数，返回 dict
             course_identifier: 课程标识
             base_url: UMU 基础 URL
-            environment: 环境标识
 
         Returns:
             BatchReport: 批量执行报告
@@ -288,7 +286,6 @@ class BatchExecutor:
                     # 创建独立客户端
                     client = UMUClient(
                         base_url=base_url,
-                        environment=environment,
                     )
 
                     # 登录
