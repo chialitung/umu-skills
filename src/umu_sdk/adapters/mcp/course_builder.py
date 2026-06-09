@@ -1550,7 +1550,7 @@ class CourseBuilder:
         is_required: bool = True,
         sort_order: int = 0,
     ) -> dict[str, Any]:
-        """在课程中创建 SCORM 类型小节并绑定资源.
+        """在课程中创建 SCORM 类型小节（sessionType=11，与视频微课共用码值）并绑定资源.
 
         采用两步法：
         1. 调用 savesession 创建空小节（不带 resource，避免 Server Error）
