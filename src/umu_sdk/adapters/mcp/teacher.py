@@ -493,6 +493,31 @@ list_sections 返回的每个小节包含 type 字段，对应关系如下：
    - 删除前会自动检查是否被课程小节引用，被引用的会返回 HIGH 级别警告
 
 音视频上传完成后可用于创建视频/音频小节。
+
+【常见后端错误码速查】
+调用 API 返回的错误码（error_code）说明：
+
+认证/请求类 (200xxx)：
+- 200003 → token error：token 加密错误，请重新调用 tch_login 登录
+- 200004 → limit request frequency：请求频率超出限制，请稍后再试
+- 200005 → out of authorized ip list：请求IP不在授权列表中
+- 200006 → unauthorized request：请求认证失败，token 可能已过期
+
+通用业务类 (100xxx / 400xxx / 500xxx)：
+- 100005 → group id empty：课程ID（group_id）参数为空
+- 100008 → group does not exists：课程不存在，请检查 group_id 是否正确
+- 100014 → save failed：保存失败，可能是数据格式错误或服务端异常
+- 400001 → 添加失败：企业额度已满，无法创建新内容
+- 500001 → element data does not exist：数据不存在或已被删除
+
+课程类 (701xxx)：
+- 701003 → no course title：课程标题为空
+- 701005 → course not exists in this enterprise：课程不存在于当前企业
+- 701013 → course title should between 0 and 200：课程标题长度需在 0-200 字符之间
+- 701014 → course category_ids invalid：课程分类 ID 无效，请先调用 tch_get_categories 获取有效分类
+- 701017 → no permission to edit course：当前用户无权编辑该课程
+- 701018 → user not allowed to create course：当前用户无创建课程权限
+- 701020-701028 → 字段格式错误：省/市/区/地址/联系方式等字段格式不合法
 """,
     lifespan=app_lifespan,
 )
