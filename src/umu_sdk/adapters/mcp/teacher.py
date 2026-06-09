@@ -506,18 +506,34 @@ list_sections 返回的每个小节包含 type 字段，对应关系如下：
 通用业务类 (100xxx / 400xxx / 500xxx)：
 - 100005 → group id empty：课程ID（group_id）参数为空
 - 100008 → group does not exists：课程不存在，请检查 group_id 是否正确
+- 100011 → request params (xxx) is not valid：请求参数不合法，请检查参数格式和类型
 - 100014 → save failed：保存失败，可能是数据格式错误或服务端异常
+- 100015 → this (xxx) is not in your enterprise：课程/小节/学习项目不属于当前企业
 - 400001 → 添加失败：企业额度已满，无法创建新内容
 - 500001 → element data does not exist：数据不存在或已被删除
 
 课程类 (701xxx)：
 - 701003 → no course title：课程标题为空
+- 701004 → no course id or format error：课程ID为空或格式错误
 - 701005 → course not exists in this enterprise：课程不存在于当前企业
+- 701006 → lesson_type format error：课程形式（lesson_type）格式错误
+- 701008 → category_ids format error：分类ID格式错误
+- 701009 → tags format error：标签格式错误
+- 701010 → course created successful but query failed：课程创建成功但查询失败（可忽略，课程已创建）
 - 701013 → course title should between 0 and 200：课程标题长度需在 0-200 字符之间
 - 701014 → course category_ids invalid：课程分类 ID 无效，请先调用 tch_get_categories 获取有效分类
+- 701015 → course lesson type invalid：课程形式不合法
+- 701016 → participant_number need great than 0：参与人数需大于 0
 - 701017 → no permission to edit course：当前用户无权编辑该课程
 - 701018 → user not allowed to create course：当前用户无创建课程权限
-- 701020-701028 → 字段格式错误：省/市/区/地址/联系方式等字段格式不合法
+- 701019 → remark invalid：备注格式不合法
+- 701020-701026 → 字段格式错误：省/市/区/地址/联系方式/客户名称等字段格式不合法
+- 701027 → timespan invalid：时间段格式不合法
+- 701028 → course_time invalid：课程时间格式不合法
+
+权限/访问类 (703xxx)：
+- 703001 → access_permission format error：访问权限格式错误
+- 703005 → invalid course access permission：课程访问权限不合法
 """,
     lifespan=app_lifespan,
 )
