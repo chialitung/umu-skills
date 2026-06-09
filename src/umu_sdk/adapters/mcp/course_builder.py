@@ -6769,6 +6769,690 @@ class CourseBuilder:
         )
 
     # ------------------------------------------------------------------
+    # 创建签到小节
+    # ------------------------------------------------------------------
+
+    def create_signin_section(
+        self,
+        group_id: str,
+        session_title: str,
+        signin_info_list: list[dict[str, Any]],
+        auto_check: bool = True,
+        is_required: bool = True,
+        point_ratio: int = 1,
+        is_anti_fraud: bool = False,
+        mini_program_switch: bool = True,
+        share_status: int = 1,
+        result_prompt: str = "",
+        type_name: str = "",
+        desc_richtext: str = "",
+        tags: list[str] | None = None,
+        sort_order: int = 0,
+    ) -> dict[str, Any]:
+        """在课程中创建签到类型小节.
+
+        签到小节使用 sessionType="6"，调用 /api/session/savesession。
+        签到信息（学员签到时需要回答的问题）通过 signin_info_list 传入。
+
+        签到信息格式（signin_info_list 列表中每项为 dict）：
+
+        **文本输入 (type="textarea")：**
+        {
+            "type": "textarea",
+            "title": "您的姓名是？",
+            "required": true,
+            "hint": "提示文字（可选，作为占位提示显示）"
+        }
+
+        **单选题 (type="radio")：**
+        {
+            "type": "radio",
+            "title": "您的性别是？",
+            "required": true,
+            "options": ["女", "男"]
+        }
+
+        **多选题 (type="checkbox")：**
+        {
+            "type": "checkbox",
+            "title": "谁是你的朋友",
+            "required": false,
+            "options": ["黄飞鸿", "洪七公", "周伯通"],
+            "min_options": 1,  // 最少选几项（可选，默认1）
+            "max_options": 2   // 最多选几项（可选，默认等于选项数）
+        }
+
+        **段落说明 (type="paragraph")：**
+        {
+            "type": "paragraph",
+            "content": "<p>这是一个段落说明</p>"  // 支持 HTML
+        }
+
+        签到设置参数：
+        - auto_check: True=自动审核(默认), False=手动审核
+        - is_anti_fraud: True=开启防作弊, False=关闭(默认)
+        - mini_program_switch: True=开启小程序(默认), False=关闭
+        - share_status: 1=课程内公开(默认)
+        - result_prompt: 签到成功提示语（如"签到成功！"）
+
+        Args:
+            group_id: 课程 ID
+            session_title: 签到小节标题
+            signin_info_list: 签到信息（问题）列表
+            auto_check: 是否自动审核签到（默认 True）
+            is_required: 是否必修（默认 True）
+            point_ratio: 积分倍率（默认 1）
+            is_anti_fraud: 是否开启防作弊（默认 False）
+            mini_program_switch: 是否开启小程序（默认 True）
+            share_status: 分享状态（默认 1=课程内公开）
+            result_prompt: 签到成功提示语
+            type_name: 小节类型标签（如"签到"）
+            desc_richtext: 富文本签到说明（HTML）
+            tags: 标签文本列表
+            sort_order: 排序序号，0 表示自动追加
+
+        Returns:
+            包含 session_id、group_id、title、signin_info_count 等信息的字典
+
+        Raises:
+            RuntimeError: 创建小节失败
+            ValueError: 参数不合法
+        """
+        if not signin_info_list:
+            raise ValueError("signin_info_list 不能为空，签到小节至少需要包含一个签到信息")
+
+        # 1. 创建富文本说明（如有）
+        multimedia_id = ""
+        if desc_richtext:
+            try:
+                multimedia_id = self._create_fulltext(desc_richtext)
+                logger.info("签到说明富文本创建成功: multimedia_id=%s", multimedia_id)
+            except Exception as e:
+                logger.warning("签到说明富文本创建失败（非致命）: %s", e)
+
+        # 2. 构建 sectionArr（签到信息数组）
+        cid_counter = 0
+
+        def _next_cid() -> str:
+            nonlocal cid_counter
+            cid = f"c_{int(time.time() * 1000)}_{cid_counter}"
+            cid_counter += 1
+            return cid
+
+        section_arr: list[dict[str, Any]] = []
+
+        for idx, info in enumerate(signin_info_list):
+            info_type = info.get("type", "").lower()
+            title = info.get("title", "")
+            required = bool(info.get("required", False))
+
+            if info_type == "textarea":
+                # 文本输入题
+                hint = info.get("hint", "")
+                answer_arr = [{"answerContent": hint}] if hint else [{"answerContent": ""}]
+
+                question_info = {
+                    "extend": {"pic_url": []},
+                    "setup": {"required": "1" if required else "0"},
+                    "questionId": "",
+                    "questionTitle": title,
+                    "mobileQuestionTitle": title,
+                    "pattern": "3",
+                    "required": False,
+                    "domType": "textarea",
+                    "templateId": "",
+                    "questionIndex": str(idx + 1),
+                    "cid": _next_cid(),
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            elif info_type == "radio":
+                # 单选题
+                options = info.get("options", [])
+                if not options:
+                    raise ValueError(f"第 {idx + 1} 题（单选）必须提供 options")
+
+                answer_arr = []
+                for opt in options:
+                    answer_arr.append({
+                        "answerContent": str(opt),
+                        "extend": {"pic_url": []},
+                    })
+
+                question_info = {
+                    "extend": {"pic_url": []},
+                    "setup": {"required": "1" if required else "0"},
+                    "questionId": "",
+                    "questionTitle": title,
+                    "mobileQuestionTitle": title,
+                    "pattern": "3",
+                    "required": False,
+                    "domType": "radio",
+                    "templateId": "",
+                    "questionIndex": str(idx + 1),
+                    "cid": _next_cid(),
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            elif info_type == "checkbox":
+                # 多选题
+                options = info.get("options", [])
+                if not options:
+                    raise ValueError(f"第 {idx + 1} 题（多选）必须提供 options")
+
+                min_opts = info.get("min_options", 0)
+                max_opts = info.get("max_options", 0)
+
+                answer_arr = []
+                for opt in options:
+                    answer_arr.append({
+                        "answerContent": str(opt),
+                        "extend": {"pic_url": []},
+                        "isFocus": False,
+                    })
+                # 前端惯例：多选题最后一个选项后加一个空选项
+                answer_arr.append({
+                    "answerContent": "",
+                    "answerId": "",
+                    "questionId": "",
+                    "type": 0,
+                    "extend": {"pic_url": []},
+                })
+
+                setup = {"required": "1" if required else "0"}
+                if min_opts > 0:
+                    setup["limitOptionsMin"] = min_opts
+                if max_opts > 0:
+                    setup["limitOptionsMax"] = max_opts
+
+                question_info = {
+                    "extend": {"pic_url": []},
+                    "setup": setup,
+                    "questionId": "",
+                    "questionTitle": title,
+                    "mobileQuestionTitle": title,
+                    "pattern": "3",
+                    "required": False,
+                    "domType": "checkbox",
+                    "templateId": "",
+                    "questionIndex": str(idx + 1),
+                    "cid": _next_cid(),
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            elif info_type == "paragraph":
+                # 段落说明（无答案）
+                content = info.get("content", "")
+                question_info = {
+                    "questionId": "",
+                    "sessionId": "",
+                    "questionTitle": "",
+                    "questionIndex": "",
+                    "pattern": "",
+                    "required": "",
+                    "creatTime": "",
+                    "creatTimeShow": "",
+                    "domType": "paragraph",
+                    "totalCount": "",
+                    "showType": {},
+                    "showIndex": 0,
+                    "setup": {},
+                    "extend": {},
+                    "cid": _next_cid(),
+                    "desc": content,
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": []})
+
+            else:
+                raise ValueError(f"不支持的签到信息类型: {info_type}（第 {idx + 1} 题）")
+
+        # 3. 构造 sessionInfo
+        setup: dict[str, Any] = {
+            "advance": 1 if desc_richtext else 0,
+            "basicQuestionCount": 1,
+            "is_anti_fraud": "1" if is_anti_fraud else "0",
+            "mini_program_switch": "1" if mini_program_switch else "0",
+            "shareStatus": str(share_status),
+            "type_name": type_name or "签到",
+            "allow_drag_track": "1",
+            "allow_adjust_speed": 1,
+            "is_allow_download": 0,
+            "isAllowDownload": 0,
+        }
+        if result_prompt:
+            setup["resultPrompt"] = result_prompt
+
+        session_info: dict[str, Any] = {
+            "autoCheck": 1 if auto_check else 0,
+            "creatTime": "",
+            "creatTimeShow": "",
+            "groupId": "",
+            "onlineUserCount": "",
+            "resultType": "",
+            "sessionId": "",
+            "sessionInUse": False,
+            "sessionIndex": sort_order,
+            "sessionStatus": "",
+            "sessionTitle": session_title,
+            "sessionType": "6",
+            "teacherId": "",
+            "desc": "",
+            "totalCount": "",
+            "studentRegFlag": False,
+            "totalUserCount": "",
+            "multimedia_type": 1,
+            "multimedia_id": multimedia_id or 0,
+            "setup": setup,
+            "extend": {},
+            "point_ratio": point_ratio,
+            "is_require": 1 if is_required else 0,
+        }
+
+        # 4. 构造 session_data
+        session_data = {
+            "sessionInfo": session_info,
+            "sectionArr": section_arr,
+        }
+
+        # 5. 调用 savesession
+        resp = self.client.post(
+            self.client.desktop_url("/api/session/savesession"),
+            data={
+                "group_id": group_id,
+                "session_data": json.dumps(session_data, ensure_ascii=False),
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            logger.error("创建签到小节失败: %s", resp.get("error", "unknown"))
+            raise RuntimeError(f"创建签到小节失败: {resp.get('error', 'unknown')}")
+
+        data = resp.get("data", {})
+        result_session_id = str(data.get("session_id", ""))
+        session_info_resp = data.get("session_info", {})
+
+        logger.info(
+            "签到小节创建成功: session_id=%s, group_id=%s, title=%s, info_count=%d",
+            result_session_id, group_id, session_title, len(signin_info_list),
+        )
+
+        return {
+            "session_id": result_session_id,
+            "group_id": group_id,
+            "title": session_title,
+            "signin_info_count": len(signin_info_list),
+            "multimedia_id": multimedia_id,
+        }
+
+    # ------------------------------------------------------------------
+    # 更新签到小节
+    # ------------------------------------------------------------------
+
+    def update_signin_section(
+        self,
+        group_id: str,
+        session_id: str,
+        session_title: str | None = None,
+        signin_info_list: list[dict[str, Any]] | None = None,
+        auto_check: bool | None = None,
+        is_required: bool | None = None,
+        point_ratio: int | None = None,
+        is_anti_fraud: bool | None = None,
+        mini_program_switch: bool | None = None,
+        share_status: int | None = None,
+        result_prompt: str | None = None,
+        type_name: str | None = None,
+        desc_richtext: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """更新课程中已有的签到类型小节.
+
+        采用"先获取完整数据，再应用变更"的模式：
+        1. 调用 getsessionInfo 获取现有小节最新完整数据
+        2. 过滤只读字段
+        3. 应用用户传入的变更（只改提供的字段，None 表示不修改）
+        4. 调用 savesession 提交完整数据（必须包含 session_id）
+
+        签到信息匹配规则：
+        - signin_info_list 按索引位置与现有 sectionArr 匹配
+        - 相同位置且 type 相同 → 保留原有 questionId/answerId，更新其他字段
+        - type 不同 → 旧信息删除，新信息新增
+        - 新数组长度超过旧数组 → 超出部分为新增
+        - 新数组长度短于旧数组 → 缺少部分保留原信息
+
+        Args:
+            group_id: 课程 ID
+            session_id: 小节 ID
+            session_title: 新小节标题，None 表示不修改
+            signin_info_list: 新的签到信息列表（完整列表，按目标顺序排列），None 表示不修改
+            auto_check: 是否自动审核，None 表示不修改
+            is_required: 是否必修，None 表示不修改
+            point_ratio: 积分倍率，None 表示不修改
+            is_anti_fraud: 是否开启防作弊，None 表示不修改
+            mini_program_switch: 是否开启小程序，None 表示不修改
+            share_status: 分享状态，None 表示不修改
+            result_prompt: 签到成功提示语，None 表示不修改
+            type_name: 小节类型标签，None 表示不修改
+            desc_richtext: 富文本签到说明（HTML），None 表示不修改，空字符串表示清除
+            tags: 标签列表，None 表示不修改
+
+        Returns:
+            包含 session_id 和 changes 列表的字典
+
+        Raises:
+            RuntimeError: 更新失败
+        """
+        # 1. 获取现有小节最新完整数据
+        existing = self._get_session_detail(session_id)
+        session_info = existing.get("sessionInfo", {})
+        existing_sections = existing.get("sectionArr", [])
+
+        # 2. 深拷贝并过滤只读字段
+        updated_info = copy.deepcopy(session_info)
+        for ro_field in _READONLY_SESSIONINFO_FIELDS:
+            updated_info.pop(ro_field, None)
+
+        changes: list[str] = []
+        setup = updated_info.get("setup", {})
+
+        # 3. 处理富文本说明变更
+        current_multimedia_id = str(updated_info.get("multimedia_id", "") or "")
+        if desc_richtext is not None:
+            if desc_richtext:
+                # 创建或更新富文本
+                if current_multimedia_id and current_multimedia_id != "0":
+                    try:
+                        self._update_fulltext(current_multimedia_id, desc_richtext, group_id)
+                        changes.append(f"desc_richtext: 更新富文本 (multimedia_id={current_multimedia_id})")
+                    except Exception as e:
+                        logger.warning("更新富文本失败: %s", e)
+                        # 尝试创建新的
+                        try:
+                            new_mm_id = self._create_fulltext(desc_richtext)
+                            updated_info["multimedia_id"] = int(new_mm_id) if new_mm_id else 0
+                            changes.append(f"desc_richtext: 创建新富文本 (multimedia_id={new_mm_id})")
+                        except Exception as e2:
+                            logger.warning("创建新富文本也失败: %s", e2)
+                else:
+                    try:
+                        new_mm_id = self._create_fulltext(desc_richtext)
+                        updated_info["multimedia_id"] = int(new_mm_id) if new_mm_id else 0
+                        setup["advance"] = 1
+                        changes.append(f"desc_richtext: 创建富文本 (multimedia_id={new_mm_id})")
+                    except Exception as e:
+                        logger.warning("创建富文本失败: %s", e)
+            else:
+                # 清除富文本说明
+                if current_multimedia_id and current_multimedia_id != "0":
+                    updated_info["multimedia_id"] = 0
+                    setup["advance"] = 0
+                    changes.append("desc_richtext: 清除富文本说明")
+
+        # 4. 应用 session 级别的变更
+        if session_title is not None and session_title != updated_info.get("sessionTitle"):
+            updated_info["sessionTitle"] = session_title
+            changes.append(f"sessionTitle: {session_title}")
+
+        if auto_check is not None:
+            new_val = 1 if auto_check else 0
+            if new_val != updated_info.get("autoCheck"):
+                updated_info["autoCheck"] = new_val
+                changes.append(f"autoCheck: {auto_check}")
+
+        if is_required is not None:
+            new_val = 1 if is_required else 0
+            if new_val != updated_info.get("is_require"):
+                updated_info["is_require"] = new_val
+                changes.append(f"is_require: {is_required}")
+
+        if point_ratio is not None and point_ratio != updated_info.get("point_ratio"):
+            updated_info["point_ratio"] = point_ratio
+            changes.append(f"point_ratio: {point_ratio}")
+
+        # 5. 应用 setup 级别的变更
+        if is_anti_fraud is not None:
+            new_val = "1" if is_anti_fraud else "0"
+            if new_val != setup.get("is_anti_fraud"):
+                setup["is_anti_fraud"] = new_val
+                changes.append(f"is_anti_fraud: {is_anti_fraud}")
+
+        if mini_program_switch is not None:
+            new_val = "1" if mini_program_switch else "0"
+            if new_val != setup.get("mini_program_switch"):
+                setup["mini_program_switch"] = new_val
+                changes.append(f"mini_program_switch: {mini_program_switch}")
+
+        if share_status is not None:
+            new_val = str(share_status)
+            if new_val != setup.get("shareStatus"):
+                setup["shareStatus"] = new_val
+                changes.append(f"shareStatus: {share_status}")
+
+        if result_prompt is not None:
+            if result_prompt:
+                setup["resultPrompt"] = result_prompt
+                changes.append(f"resultPrompt: {result_prompt}")
+            elif "resultPrompt" in setup:
+                del setup["resultPrompt"]
+                changes.append("resultPrompt: 清除")
+
+        if type_name is not None:
+            setup["type_name"] = type_name
+            changes.append(f"type_name: {type_name}")
+
+        # 6. 处理签到信息（sectionArr）变更
+        new_section_arr: list[dict[str, Any]] = []
+
+        if signin_info_list is not None:
+            cid_counter = 0
+
+            def _next_cid() -> str:
+                nonlocal cid_counter
+                cid = f"c_{int(time.time() * 1000)}_{cid_counter}"
+                cid_counter += 1
+                return cid
+
+            for idx, info in enumerate(signin_info_list):
+                info_type = info.get("type", "").lower()
+                title = info.get("title", "")
+                required = bool(info.get("required", False))
+
+                # 尝试匹配现有信息（按位置）
+                existing_section = existing_sections[idx] if idx < len(existing_sections) else None
+                existing_qinfo = existing_section.get("questionInfo", {}) if existing_section else {}
+                existing_dom_type = existing_qinfo.get("domType", "")
+                existing_qid = str(existing_qinfo.get("questionId", ""))
+                existing_answers = existing_section.get("answerArr", []) if existing_section else []
+
+                # 如果 domType 不同，不保留 ID
+                preserve_id = False
+                if existing_dom_type and existing_dom_type == info_type:
+                    preserve_id = True
+                elif existing_dom_type:
+                    existing_qid = ""
+                    existing_answers = []
+
+                if info_type == "textarea":
+                    hint = info.get("hint", "")
+                    answer_arr = [{"answerContent": hint}] if hint else [{"answerContent": ""}]
+                    # 保留原有 answerId（如果存在）
+                    if preserve_id and existing_answers:
+                        for i, ans in enumerate(answer_arr):
+                            if i < len(existing_answers):
+                                ans["answerId"] = str(existing_answers[i].get("answerId", ""))
+                                ans["questionId"] = existing_qid
+
+                    question_info = {
+                        "extend": {"pic_url": []},
+                        "setup": {"required": "1" if required else "0"},
+                        "questionId": existing_qid if preserve_id else "",
+                        "questionTitle": title,
+                        "mobileQuestionTitle": title,
+                        "pattern": "3",
+                        "required": False,
+                        "domType": "textarea",
+                        "templateId": "",
+                        "questionIndex": str(idx + 1),
+                        "cid": _next_cid(),
+                    }
+                    new_section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+                elif info_type == "radio":
+                    options = info.get("options", [])
+                    if not options:
+                        raise ValueError(f"第 {idx + 1} 题（单选）必须提供 options")
+
+                    answer_arr = []
+                    for opt_idx, opt in enumerate(options):
+                        old_answer = existing_answers[opt_idx] if opt_idx < len(existing_answers) else {}
+                        answer_arr.append({
+                            "answerContent": str(opt),
+                            "answerId": str(old_answer.get("answerId", "")) if old_answer else "",
+                            "questionId": existing_qid if preserve_id else "",
+                            "extend": {"pic_url": []},
+                        })
+
+                    question_info = {
+                        "extend": {"pic_url": []},
+                        "setup": {"required": "1" if required else "0"},
+                        "questionId": existing_qid if preserve_id else "",
+                        "questionTitle": title,
+                        "mobileQuestionTitle": title,
+                        "pattern": "3",
+                        "required": False,
+                        "domType": "radio",
+                        "templateId": "",
+                        "questionIndex": str(idx + 1),
+                        "cid": _next_cid(),
+                    }
+                    new_section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+                elif info_type == "checkbox":
+                    options = info.get("options", [])
+                    if not options:
+                        raise ValueError(f"第 {idx + 1} 题（多选）必须提供 options")
+
+                    min_opts = info.get("min_options", 0)
+                    max_opts = info.get("max_options", 0)
+
+                    answer_arr = []
+                    for opt_idx, opt in enumerate(options):
+                        old_answer = existing_answers[opt_idx] if opt_idx < len(existing_answers) else {}
+                        answer_arr.append({
+                            "answerContent": str(opt),
+                            "answerId": str(old_answer.get("answerId", "")) if old_answer else "",
+                            "questionId": existing_qid if preserve_id else "",
+                            "type": 0,
+                            "extend": {"pic_url": []},
+                            "isFocus": False,
+                        })
+                    # 空白选项
+                    answer_arr.append({
+                        "answerContent": "",
+                        "answerId": "",
+                        "questionId": existing_qid if preserve_id else "",
+                        "type": 0,
+                        "extend": {"pic_url": []},
+                    })
+
+                    setup_q = {"required": "1" if required else "0"}
+                    if min_opts > 0:
+                        setup_q["limitOptionsMin"] = min_opts
+                    if max_opts > 0:
+                        setup_q["limitOptionsMax"] = max_opts
+
+                    question_info = {
+                        "extend": {"pic_url": []},
+                        "setup": setup_q,
+                        "questionId": existing_qid if preserve_id else "",
+                        "questionTitle": title,
+                        "mobileQuestionTitle": title,
+                        "pattern": "3",
+                        "required": False,
+                        "domType": "checkbox",
+                        "templateId": "",
+                        "questionIndex": str(idx + 1),
+                        "cid": _next_cid(),
+                    }
+                    new_section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+                elif info_type == "paragraph":
+                    content = info.get("content", "")
+                    question_info = {
+                        "questionId": existing_qid if preserve_id else "",
+                        "sessionId": session_id if preserve_id else "",
+                        "questionTitle": "",
+                        "questionIndex": "",
+                        "pattern": "",
+                        "required": "",
+                        "creatTime": "",
+                        "creatTimeShow": "",
+                        "domType": "paragraph",
+                        "totalCount": "",
+                        "showType": {},
+                        "showIndex": 0,
+                        "setup": {},
+                        "extend": {},
+                        "cid": _next_cid(),
+                        "desc": content,
+                    }
+                    new_section_arr.append({"questionInfo": question_info, "answerArr": []})
+
+                else:
+                    raise ValueError(f"不支持的签到信息类型: {info_type}（第 {idx + 1} 题）")
+
+            # 保留未修改的剩余信息（如果新数组比旧数组长已在上面处理，这里处理旧数组更长的情况）
+            # 实际上我们完全替换 sectionArr
+            updated_info["sectionArr"] = new_section_arr
+            changes.append(f"signin_info_list: 更新了 {len(signin_info_list)} 个签到信息")
+        else:
+            # 不修改签到信息，但保留原有 sectionArr
+            # 过滤 sectionArr 中可能存在的只读字段
+            new_section_arr = []
+            for sec in existing_sections:
+                new_sec = copy.deepcopy(sec)
+                qinfo = new_sec.get("questionInfo", {})
+                # 保留必要的字段
+                new_section_arr.append(new_sec)
+            updated_info["sectionArr"] = new_section_arr
+
+        # 7. 处理 tags
+        if tags is not None:
+            updated_info["tags"] = [{"tag": str(tag)} for tag in tags]
+            changes.append(f"tags: {tags}")
+
+        # 8. 构造 session_data
+        session_data = {
+            "sessionInfo": updated_info,
+            "sectionArr": updated_info.pop("sectionArr", []),
+        }
+
+        # 9. 调用 savesession（编辑模式，必须带 session_id）
+        resp = self.client.post(
+            self.client.desktop_url("/api/session/savesession"),
+            data={
+                "group_id": group_id,
+                "session_id": session_id,
+                "session_data": json.dumps(session_data, ensure_ascii=False),
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            logger.error("更新签到小节失败: %s", resp.get("error", "unknown"))
+            raise RuntimeError(f"更新签到小节失败: {resp.get('error', 'unknown')}")
+
+        logger.info(
+            "签到小节更新成功: session_id=%s, changes=%s",
+            session_id, changes,
+        )
+
+        return {
+            "session_id": session_id,
+            "group_id": group_id,
+            "changes": changes,
+        }
+
+    # ------------------------------------------------------------------
     # 删除小节
     # ------------------------------------------------------------------
 
