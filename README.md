@@ -10,7 +10,7 @@ UMU Skills 是一个 AI 技能框架，它将 UMU 学习平台的管理操作封
 ## 功能特性
 
 - **双角色 MCP 服务器**：分别为教师（课程创建、资源管理）和学生（课程报名、学习进度）提供独立的工具集
-- **课程构建器**：支持创建包含多种环节类型的课程 —— SCORM、视频、文档、文章、信息图、问卷
+- **课程构建器**：支持创建包含多种环节类型的课程 —— SCORM、视频、文档、文章、信息图、问卷、考试、签到
 - **资源上传**：SCORM（腾讯云 COS 分片上传）、视频、文档、图片，并支持进度追踪
 - **批量操作**：多用户课程完成处理，支持并发控制
 - **会话管理**：多用户会话隔离，支持并发操作
@@ -90,25 +90,27 @@ umu-skills-teacher
 
 ## 可用工具
 
-### 教师工具（40+）
+### 教师工具（47）
 
 | 分类 | 工具 |
 |----------|-------|
 | 认证 | `tch_login`, `tch_check_auth` |
 | 会话 | `tch_create_session`, `tch_list_sessions`, `tch_destroy_session` |
-| 课程 | `tch_create_course`, `tch_get_course`, `tch_update_course`, `tch_list_courses` |
-| 环节 | `tch_create_scorm_section`, `tch_create_video_section`, `tch_create_document_section`, `tch_create_article_section`, `tch_create_infographic_section`, `tch_create_survey_section` |
+| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course` |
+| 课程列表 | `tch_list_created_courses`, `tch_list_cooperated_courses`, `tch_list_participated_courses` |
+| 环节 | `tch_create_scorm_section`, `tch_create_video_section`, `tch_create_article_section`, `tch_create_infographic_section`, `tch_create_document_section`, `tch_create_survey_section`, `tch_create_exam_section`, `tch_create_signin_section` |
+| 环节修改 | `tch_update_scorm_section`, `tch_update_video_section`, `tch_update_article_section`, `tch_update_infographic_section`, `tch_update_document_section`, `tch_update_survey_section`, `tch_update_exam_section`, `tch_update_signin_section` |
 | 资源 | `tch_upload_scorm`, `tch_upload_document`, `tch_upload_audio_video`, `tch_upload_image` |
 | 批量 | `tch_upload_documents_batch` |
 
-### 学生工具（20+）
+### 学生工具（23）
 
 | 分类 | 工具 |
 |----------|-------|
 | 认证 | `stu_login`, `stu_check_auth` |
 | 会话 | `stu_create_session`, `stu_list_sessions`, `stu_destroy_session` |
-| 学习 | `stu_get_my_courses`, `stu_get_course_structure`, `stu_get_learning_progress` |
-| 操作 | `stu_enroll_course`, `stu_browse_lesson`, `stu_submit_questionnaire`, `stu_check_in`, `stu_start_exam` |
+| 课程 | `stu_get_my_courses`, `stu_list_participated_courses`, `stu_get_course_structure`, `stu_get_learning_progress` |
+| 学习 | `stu_enroll_course`, `stu_browse_lesson`, `stu_submit_questionnaire`, `stu_check_in`, `stu_start_exam` |
 | 批量 | `stu_batch_import_accounts`, `stu_batch_complete_course` |
 
 ## 开发
