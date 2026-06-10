@@ -43,5 +43,11 @@ scripts/
 # 百度网盘同步临时文件
 *.baiduyun.uploading.cfg
 
+# Claude Code 配置
+CLAUDE.md
+
 # CodeGraph 索引
 .codegraph/
+
+# 用户测试或调用 MCP 时产生的过程文件
+call-records/
