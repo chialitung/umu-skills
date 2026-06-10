@@ -19,7 +19,6 @@ from .core.auth import AuthManager
 from .core.encrypt import encrypt_password, decrypt_password, verify_encryption
 from .core.errors import (
     UMUError,
-    EnvironmentMismatchError,
     AuthenticationError,
     ValidationError,
     RateLimitError,
@@ -40,7 +39,6 @@ __all__ = [
     "decrypt_password",
     "verify_encryption",
     "UMUError",
-    "EnvironmentMismatchError",
     "AuthenticationError",
     "ValidationError",
     "RateLimitError",

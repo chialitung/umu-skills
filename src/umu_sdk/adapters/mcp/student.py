@@ -27,8 +27,8 @@ from typing import Annotated, Any, AsyncIterator
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from ..core.client import UMUClient
-from ..core.encrypt import encrypt_password
+from ...core.client import UMUClient
+from ...core.encrypt import encrypt_password
 from . import prompts
 from .batch import AccountImporter, AccountSource, BatchExecutor
 from .session import SessionManager
@@ -57,8 +57,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     # 创建会话管理器
     _session_manager = SessionManager(
         base_url=base_url,
-        environment="default",
-        enable_environment_check=True,
     )
 
     # 创建默认会话
@@ -97,6 +95,7 @@ mcp = FastMCP(
 提供课程学习相关的原子化操作，包括：
 - 课程结构查询（报名状态、小节列表）
 - 学习进度查询
+- 获取我参与的课程列表（支持按学习状态筛选：已学习/学习中/待学习）
 - 课程报名
 - 小节完成（浏览、问卷、签到、考试）
 - 状态验证
@@ -134,6 +133,17 @@ def _get_client(session_id: str | None = None) -> UMUClient:
     if _umu_client is None:
         raise RuntimeError("UMU 客户端未初始化，请先登录")
     return _umu_client
+
+
+def _require_auth(client: UMUClient) -> str | None:
+    """检查客户端认证状态.
+
+    Returns:
+        None 表示认证正常；否则返回错误信息字符串.
+    """
+    if not client.auth.is_authenticated():
+        return "当前未登录或 Token 已过期，请先调用 stu_login 登录"
+    return None
 
 
 def _ok(
@@ -3608,7 +3618,6 @@ async def stu_batch_complete_course(
             task_func=complete_course_task,
             course_identifier=course_identifier,
             base_url=base_url,
-            environment=env_name,
         )
 
         return _ok(
@@ -3637,6 +3646,105 @@ async def stu_batch_complete_course(
         return _err(
             error_code="BATCH_EXECUTE_FAILED",
             error_message=str(e),
+        )
+
+
+@mcp.tool()
+async def stu_list_participated_courses(
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[int, Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100")] = 20,
+    learn_status: Annotated[
+        int,
+        Field(default=0, ge=0, le=3, description="学习状态筛选：0=所有, 1=已学习, 2=学习中, 3=待学习"),
+    ] = 0,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID"),
+    ] = None,
+) -> str:
+    """获取当前学员已参与学习的课程列表.
+
+    触发条件：当需要查看我参与学习的所有课程时调用。
+    前置依赖：需先调用 stu_login 完成登录。
+    副作用：无（只读查询）。
+
+    返回的课程列表包含 group_id、标题、学习状态、完成进度等信息。
+    支持按学习状态筛选：0=所有, 1=已学习, 2=学习中, 3=待学习。
+    获取 group_id 后，可调用 stu_get_course_structure 获取课程详情。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 stu_login 完成登录后再重试",
+        )
+
+    try:
+        resp = client.get(
+            client.desktop_url("/api/group/getmyparticipatedgrouplist"),
+            params={
+                "t": str(int(time.time() * 1000)),
+                "learn_status": str(learn_status),
+                "page": str(page),
+                "size": str(page_size),
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            return _err(
+                error_code="LIST_PARTICIPATED_COURSES_FAILED",
+                error_message=resp.get("error", "获取已参与课程列表失败"),
+                suggested_action="请检查登录状态是否正确",
+            )
+
+        data = resp.get("data", {})
+        page_info = data.get("page_info", {})
+        course_list = data.get("list", [])
+
+        status_map = {0: "all", 1: "pending", 2: "learning", 3: "completed"}
+
+        formatted_list = []
+        for item in course_list:
+            formatted_list.append({
+                "group_id": item.get("group_id", ""),
+                "title": item.get("group_title", ""),
+                "learn_status": item.get("learn_status", 0),
+                "learn_status_label": status_map.get(item.get("learn_status", 0), "unknown"),
+                "finish_ratio": item.get("finish_ratio", 0),
+                "cover_url": item.get("show_pic", ""),
+                "access_code": item.get("access_code", ""),
+                "group_url": item.get("group_url", ""),
+                "share_pc_url": item.get("share_pc_url", ""),
+                "session_num": item.get("session_num", 0),
+                "participant_time": item.get("participant_time", ""),
+            })
+
+        return _ok(
+            data={
+                "courses": formatted_list,
+                "filter": {
+                    "learn_status": learn_status,
+                    "learn_status_label": status_map.get(learn_status, "unknown"),
+                },
+                "pagination": {
+                    "total": int(page_info.get("list_total_num", 0) or 0),
+                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
+                    "current_page": int(page_info.get("current_page", 1) or 1),
+                    "page_size": int(page_info.get("size", page_size) or page_size),
+                },
+            },
+            next_action="proceed",
+            suggested_action="选择要学习的课程，调用 stu_get_course_structure 获取详情",
+        )
+
+    except Exception as e:
+        return _err(
+            error_code="LIST_PARTICIPATED_COURSES_ERROR",
+            error_message=str(e),
+            suggested_action="请检查网络连接后重试",
         )
 
 
@@ -3692,7 +3800,8 @@ def main() -> None:
     print("  认证: stu_login, stu_check_auth")
     print("  会话: stu_create_session, stu_list_sessions, stu_destroy_session")
     print("  解析: stu_resolve_course_url")
-    print("  查结构: stu_get_my_courses, stu_get_course_structure, stu_get_learning_progress")
+    print("  查结构: stu_get_my_courses, stu_list_participated_courses,")
+    print("          stu_get_course_structure, stu_get_learning_progress")
     print("  操作: stu_enroll_course, stu_browse_lesson,")
     print("        stu_get_questionnaire_questions, stu_submit_questionnaire,")
     print("        stu_check_in, stu_check_in_with_rating,")

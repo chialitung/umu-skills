@@ -1,26 +1,21 @@
 """UMU 认证管理器.
 
-处理登录、Token 管理、环境验证.
+处理登录、Token 管理.
 """
 
 import time
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
 
-from .core.encrypt import encrypt_password
-from .core.errors import AuthenticationError, EnvironmentMismatchError, UMUError
-from .core.models import LoginCredentials
+from .encrypt import encrypt_password
+from .errors import AuthenticationError, UMUError
+from .models import LoginCredentials
 
 
 class AuthManager:
-    """认证管理器.
-
-    环境安全：
-    - 所有请求自动验证目标 URL 与初始化时的 baseURL 一致
-    - 禁止将 Token 发送到非授权域名
-    """
+    """认证管理器."""
 
     def __init__(
         self,
@@ -31,32 +26,10 @@ class AuthManager:
         self.http = http
         self.credentials = credentials
         self.base_url = base_url or (credentials.base_url if credentials else "")
-        self.allowed_domains = self._extract_allowed_domains(self.base_url)
 
         self._token: str | None = None
         self._refresh_token: str | None = None
         self._token_expires_at: float = 0.0
-
-    def _extract_allowed_domains(self, url: str) -> list[str]:
-        """提取允许的域名列表.
-
-        保留此方法以兼容现有代码，但不再维护复杂的白名单。
-        环境验证策略已简化为：仅禁止测试环境调用生产环境主域名。
-        """
-        if not url:
-            return []
-        try:
-            hostname = urlparse(url).hostname or ""
-            return [hostname.lower()]
-        except Exception:
-            return [url.lower()]
-
-    def validate_request_url(self, url: str) -> None:
-        """验证请求 URL 的环境安全性.
-
-        当前仅支持生产环境，不对正常业务请求做限制。
-        """
-        pass
 
     def login(self, username: str | None = None, password: str | None = None) -> str:
         """使用用户名密码登录。
@@ -74,7 +47,6 @@ class AuthManager:
 
         Raises:
             AuthenticationError: 登录失败
-            EnvironmentMismatchError: 环境不匹配
         """
         user = username or (self.credentials.username if self.credentials else None)
         pwd = password or (self.credentials.password if self.credentials else None)
@@ -91,10 +63,6 @@ class AuthManager:
 
         # UMU 登录端点
         endpoint = "/passport/ajax/account/login"
-        full_url = urljoin(self.base_url, endpoint)
-
-        # 环境验证
-        self.validate_request_url(full_url)
 
         try:
             response = self.http.post(
@@ -129,8 +97,6 @@ class AuthManager:
             error_msg = data.get("error") or data.get("message") or data.get("error_message") or "登录失败"
             raise AuthenticationError(error_msg)
 
-        except EnvironmentMismatchError:
-            raise
         except AuthenticationError:
             raise
         except httpx.HTTPStatusError as e:

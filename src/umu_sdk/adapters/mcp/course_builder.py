@@ -1550,7 +1550,7 @@ class CourseBuilder:
         is_required: bool = True,
         sort_order: int = 0,
     ) -> dict[str, Any]:
-        """在课程中创建 SCORM 类型小节并绑定资源.
+        """在课程中创建 SCORM 类型小节（sessionType=11，与视频微课共用码值）并绑定资源.
 
         采用两步法：
         1. 调用 savesession 创建空小节（不带 resource，避免 Server Error）
@@ -4883,6 +4883,929 @@ class CourseBuilder:
         }
 
     # ------------------------------------------------------------------
+    # 创建考试小节
+    # ------------------------------------------------------------------
+
+    def _build_exam_section_arr(
+        self,
+        questions: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], int]:
+        """根据题目列表构建考试小节的 sectionArr.
+
+        Args:
+            questions: 题目列表，每项为 dict，格式与 create_exam_section 相同
+
+        Returns:
+            (section_arr, total_score)
+
+        Raises:
+            ValueError: 参数不合法
+        """
+        section_arr: list[dict[str, Any]] = []
+        total_score = 0
+        cid_counter = 0
+
+        def _next_cid() -> str:
+            nonlocal cid_counter
+            cid = f"c_{int(time.time() * 1000)}_{cid_counter}"
+            cid_counter += 1
+            return cid
+
+        for q_idx, q in enumerate(questions):
+            q_type = q.get("type", "").lower()
+            title = q.get("title", "")
+            score = int(q.get("score", 0))
+            total_score += score
+            explanation = q.get("explanation", "")
+            difficulty = int(q.get("difficulty", 1))
+
+            if not title:
+                raise ValueError(f"第 {q_idx + 1} 题必须提供 title（题目内容）")
+
+            if q_type == "radio":
+                options = q.get("options", [])
+                correct_indices = q.get("correct_indices", [])
+
+                if not options:
+                    raise ValueError(f"第 {q_idx + 1} 题（单选）必须提供 options")
+                if not correct_indices:
+                    raise ValueError(f"第 {q_idx + 1} 题（单选）必须提供 correct_indices")
+
+                answer_arr: list[dict[str, Any]] = []
+                for opt_idx, opt in enumerate(options):
+                    answer_arr.append({
+                        "answerContent": str(opt),
+                        "answerId": 0,
+                        "questionId": 0,
+                        "type": 0,
+                        "extend": {"pic_url": [], "media_url": []},
+                        "isFocus": False,
+                        "isRight": 1 if opt_idx in correct_indices else 0,
+                    })
+                answer_arr.append({
+                    "answerContent": "",
+                    "answerId": 0,
+                    "questionId": 0,
+                    "type": 0,
+                    "extend": {"pic_url": [], "media_url": []},
+                    "isFocus": False,
+                })
+
+                question_info = {
+                    "questionId": 0,
+                    "sessionId": 0,
+                    "questionTitle": title,
+                    "questionIndex": "",
+                    "pattern": 0,
+                    "required": "",
+                    "creatTime": 0,
+                    "creatTimeShow": "",
+                    "domType": "radio",
+                    "totalCount": "",
+                    "showType": {},
+                    "showIndex": 0,
+                    "setup": {
+                        "score": str(score),
+                        "screenOrderType": "0",
+                    },
+                    "extend": {
+                        "pic_url": [],
+                        "media_url": [],
+                    },
+                    "cid": _next_cid(),
+                    "level": difficulty,
+                    "questionExplain": {
+                        "pic_url": [],
+                        "desc": explanation,
+                    },
+                    "score_type": 0,
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            elif q_type == "checkbox":
+                options = q.get("options", [])
+                correct_indices = q.get("correct_indices", [])
+                scoring_rule = q.get("scoring_rule", "all_correct")
+                partial_score = int(q.get("partial_score", 0))
+
+                if not options:
+                    raise ValueError(f"第 {q_idx + 1} 题（多选）必须提供 options")
+                if not correct_indices:
+                    raise ValueError(f"第 {q_idx + 1} 题（多选）必须提供 correct_indices")
+
+                if scoring_rule == "partial":
+                    score_type = 2
+                    if partial_score <= 0:
+                        raise ValueError(
+                            f"第 {q_idx + 1} 题（多选）scoring_rule='partial' 时必须提供 partial_score（少选得分）"
+                        )
+                else:
+                    score_type = 0
+                    partial_score = 0
+
+                answer_arr = []
+                for opt_idx, opt in enumerate(options):
+                    answer_arr.append({
+                        "answerContent": str(opt),
+                        "answerId": 0,
+                        "questionId": 0,
+                        "type": 0,
+                        "extend": {"pic_url": [], "media_url": []},
+                        "isFocus": False,
+                        "isRight": 1 if opt_idx in correct_indices else 0,
+                    })
+                answer_arr.append({
+                    "answerContent": "",
+                    "answerId": 0,
+                    "questionId": 0,
+                    "type": 0,
+                    "extend": {"pic_url": [], "media_url": []},
+                    "isFocus": False,
+                })
+
+                q_setup: dict[str, Any] = {
+                    "score": str(score),
+                    "screenOrderType": "0",
+                }
+                if partial_score > 0:
+                    q_setup["partial_score"] = partial_score
+
+                question_info = {
+                    "questionId": 0,
+                    "sessionId": 0,
+                    "questionTitle": title,
+                    "questionIndex": "",
+                    "pattern": 0,
+                    "required": "",
+                    "creatTime": 0,
+                    "creatTimeShow": "",
+                    "domType": "checkbox",
+                    "totalCount": "",
+                    "showType": {},
+                    "showIndex": 0,
+                    "setup": q_setup,
+                    "extend": {
+                        "pic_url": [],
+                        "media_url": [],
+                    },
+                    "cid": _next_cid(),
+                    "level": difficulty,
+                    "questionExplain": {
+                        "pic_url": [],
+                        "desc": explanation,
+                    },
+                    "score_type": score_type,
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            elif q_type == "input":
+                standard_answers = q.get("standard_answers", [])
+
+                answer_arr = []
+                if standard_answers:
+                    for sa_idx, sa in enumerate(standard_answers):
+                        if sa:
+                            answer_arr.append({
+                                "answerContent": str(sa),
+                                "answerId": 0,
+                                "questionId": 0,
+                                "type": 0,
+                                "extend": {"pic_url": []},
+                                "isRight": 1,
+                                "isFocus": sa_idx == len(standard_answers) - 1,
+                            })
+
+                answer_arr.append({
+                    "answerContent": "",
+                    "answerId": 0,
+                    "questionId": 0,
+                    "type": 0,
+                    "extend": {"pic_url": []},
+                    "isRight": 1 if not standard_answers else 0,
+                })
+
+                question_info = {
+                    "questionId": 0,
+                    "sessionId": 0,
+                    "questionTitle": title,
+                    "questionIndex": "",
+                    "pattern": 0,
+                    "required": "",
+                    "creatTime": 0,
+                    "creatTimeShow": "",
+                    "domType": "input",
+                    "totalCount": "",
+                    "showType": {},
+                    "showIndex": 0,
+                    "setup": {
+                        "score": str(score),
+                        "kw": [],
+                    },
+                    "extend": {
+                        "pic_url": [],
+                        "media_url": [],
+                    },
+                    "cid": _next_cid(),
+                    "level": difficulty,
+                    "questionExplain": {
+                        "pic_url": [],
+                        "desc": explanation,
+                    },
+                    "score_type": 0,
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            else:
+                raise ValueError(
+                    f"第 {q_idx + 1} 题: 不支持的题目类型 '{q_type}'。"
+                    f"支持: radio（单选）, checkbox（多选）, input（开放题）"
+                )
+
+        return section_arr, total_score
+
+    def create_exam_section(
+        self,
+        group_id: str,
+        session_title: str,
+        questions: list[dict[str, Any]],
+        description: str = "",
+        exam_duration_seconds: int = 0,
+        quiz_count_limit: int = 0,
+        quiz_pass_mark: int = 0,
+        random_option: bool = False,
+        show_user_result: bool = True,
+        submit_one_by_one: bool = False,
+        accept_submission_time: int = 0,
+        refuse_submission_time: int = 0,
+        is_required: bool = True,
+        type_name: str = "",
+        tags: list[str] | None = None,
+        sort_order: int = 0,
+        question_show_mode: str = "0",
+        allow_answer_type: str = "1",
+        exam_result_setting: str = "0",
+        switch_window_limit: int = 0,
+        quiz_completion_condition: str = "0",
+        share_status: int = 1,
+        submit_permission: int = 1,
+        show_answer_after_submit: bool = False,
+        allow_add_question_collection: bool = True,
+        is_show_quiz_ranking: bool = True,
+        is_answer_paste: bool = True,
+        quiz_cover_tips_type: str = "1",
+        quiz_cover_tips_content: str = "",
+        point_ratio: int = 1,
+        is_set_quiz_cover: bool = True,
+        jump_button: bool = False,
+        jump_url: str = "",
+        jump_button_title: str = "",
+        result_prompt: str = "",
+        show_user_result_mode: str | None = None,
+        display_score: bool = True,
+    ) -> dict[str, Any]:
+        """在课程中创建考试类型小节.
+
+        考试小节使用 sessionType="10"，调用 /megrez/exam/v1/saveExam。
+
+        题目格式（questions 列表中每项为 dict）：
+
+        **单选题 (type="radio")：**
+        {
+            "type": "radio",
+            "title": "题目内容",
+            "score": 5,
+            "options": ["选项A", "选项B", "选项C"],
+            "correct_indices": [2],          # 正确选项的索引（0-based）
+            "explanation": "答案说明",       # 可选
+            "difficulty": 1,                 # 1=低, 2=中, 3=高，可选，默认1
+        }
+
+        **多选题 - 全部正确才得分 (type="checkbox")：**
+        {
+            "type": "checkbox",
+            "title": "题目内容",
+            "score": 7,
+            "options": ["选项A", "选项B", "选项C", "选项D"],
+            "correct_indices": [0, 1, 2, 3],
+            "explanation": "答案说明",
+            "difficulty": 3,
+            "scoring_rule": "all_correct",   # 全部正确才得分（默认）
+        }
+
+        **多选题 - 部分正确得分 (type="checkbox")：**
+        {
+            "type": "checkbox",
+            "title": "题目内容",
+            "score": 10,
+            "options": ["选项A", "选项B", "选项C", "选项D", "选项E"],
+            "correct_indices": [0, 1, 2, 3],
+            "explanation": "答案说明",
+            "difficulty": 2,
+            "scoring_rule": "partial",       # 部分正确得分
+            "partial_score": 6,              # 少选得6分
+        }
+
+        **开放题 (type="input")：**
+        {
+            "type": "input",
+            "title": "题目内容",
+            "score": 10,
+            "explanation": "答案说明",
+            "difficulty": 3,
+            "standard_answers": ["标准答案1", "标准答案2"],  # 可选
+        }
+
+        开放题标准答案说明：
+        - 设置 standard_answers 时，学员提交答案与任一标准答案一致则自动得分
+        - 不设置 standard_answers（空列表或不传）时，学员提交后不会立即得分，需 teacher 手动评分
+
+        Args:
+            group_id: 课程 ID
+            session_title: 考试小节标题
+            questions: 题目列表
+            description: 考试说明/描述（学员进入考试前展示）
+            exam_duration_seconds: 考试时长（秒），0=不限时
+            quiz_count_limit: 考试次数限制，0=不限次数
+            quiz_pass_mark: 及格线（分），0=不设及格线
+            random_option: 是否随机展示选项
+            show_user_result: 是否向学员展示成绩（布尔简写）。True="1"正确答案, False="0"已提交答案
+            show_user_result_mode: 提交后展示内容的精确模式。"0"=已提交答案, "1"=正确答案, "2"=不展示答案, "3"=展示对错不展示答案。None 时使用 show_user_result
+            display_score: 是否向学员展示考试分数，True=展示(默认), False=不展示
+            submit_one_by_one: 是否逐题提交（True=逐题提交，False=整卷提交）
+            accept_submission_time: 开始接受提交时间（Unix 时间戳，0=不限制）
+            refuse_submission_time: 截止提交时间（Unix 时间戳，0=不限制）
+            is_required: 是否必修（默认 True）
+            type_name: 小节类型标签
+            tags: 标签文本列表
+            sort_order: 排序序号，0 表示自动追加到末尾
+            question_show_mode: 展示样式，"0"=一页式(默认)，"1"=逐题式
+            allow_answer_type: 开放式问题提交格式，"1"=文字+图片(默认)，"0"=仅文字
+            exam_result_setting: 成绩设置，"0"=最后一次提交为准(默认)
+            switch_window_limit: 防切屏次数，0=不设置(默认)
+            quiz_completion_condition: 完成条件，"0"=不设置(默认)
+            share_status: 访问权限，1=课程内公开(默认)，2=企业内公开，3=仅自己
+            submit_permission: 提交权限，1=课程内学员(默认)
+            show_answer_after_submit: 提交后展示正确答案，False=不展示(默认)，True=展示
+            allow_add_question_collection: 允许将题目加入考题本，True=允许(默认)，False=不允许
+            is_show_quiz_ranking: 提交后展示考试排行榜，True=展示(默认)，False=不展示
+            is_answer_paste: 回答开放式问题是否允许粘贴，True=允许(默认)，False=不允许
+            quiz_cover_tips_type: 封面提示类型，"1"=自动设置(默认)，"0"=手动设置
+            quiz_cover_tips_content: 封面提示内容。quiz_cover_tips_type="1"时为空则自动生成
+            point_ratio: 小节基本积分倍率，默认 1
+            is_set_quiz_cover: 是否设置考试封面，True=设置(默认)，False=不设置
+            jump_button: 提交成功页是否显示跳转按钮，False=不跳转(默认)，True=显示
+            jump_url: 跳转按钮的目标 URL（jump_button=True 时有效）
+            jump_button_title: 跳转按钮的文本（jump_button=True 时有效）
+            result_prompt: 提交成功提示语，默认"提交成功！"
+
+        Returns:
+            包含 session_id、group_id、title、question_count 等信息的字典
+
+        Raises:
+            RuntimeError: 创建小节失败
+            ValueError: 参数不合法
+        """
+        if not questions:
+            raise ValueError("questions 不能为空，考试至少需要包含一个题目")
+
+        # 1. 创建富文本内容（考试说明）
+        if description:
+            content_html = f"<p>{description}</p>"
+        else:
+            content_html = f"<p>{session_title}</p>"
+
+        multimedia_id = self._create_fulltext(
+            content=content_html,
+            ref_type="",
+        )
+
+        # _create_fulltext 已经创建了包含 description 的富文本内容，
+        # 无需额外调用 _update_fulltext
+
+        # 2. 构建 sectionArr
+        section_arr, total_score = self._build_exam_section_arr(questions)
+
+        # 3. 构造封面提示内容
+        if quiz_cover_tips_type == "0" and quiz_cover_tips_content:
+            # 手动设置封面提示
+            quiz_cover_tips = quiz_cover_tips_content
+        else:
+            # 自动生成封面提示
+            quiz_cover_tips = f"本次考试共有{len(questions)}道题，满分{total_score}分。"
+            if quiz_count_limit > 0:
+                quiz_cover_tips += f"每人有{quiz_count_limit}次考试机会。"
+            else:
+                quiz_cover_tips += "考试次数不限。"
+            if exam_duration_seconds > 0:
+                quiz_cover_tips += f"考试时长{exam_duration_seconds // 60}分钟。"
+            # 多选题特殊说明
+            for q_idx, q in enumerate(questions):
+                if q.get("type", "").lower() == "checkbox":
+                    scoring_rule = q.get("scoring_rule", "all_correct")
+                    if scoring_rule == "all_correct":
+                        quiz_cover_tips += f"第{q_idx + 1}题为多选题，全部正确才得分。"
+                    elif scoring_rule == "partial":
+                        partial_score = q.get("partial_score", 0)
+                        quiz_cover_tips += (
+                            f"第{q_idx + 1}题为多选题，全部正确得满分，"
+                            f"少选得{partial_score}分，错选、多选、不选均不得分。"
+                        )
+            if quiz_count_limit > 0:
+                quiz_cover_tips += '点击"开始考试"按钮，立即开始考试，此时将会使用1次考试机会。'
+
+        # 4. 构造 sessionInfo.setup
+        # isQuizCountLimit: "0"=不限定, "1"=1次, "2"=限定N次(quizCountLimit)
+        if quiz_count_limit == 0:
+            is_quiz_count_limit_val = "0"
+        elif quiz_count_limit == 1:
+            is_quiz_count_limit_val = "1"
+        else:
+            is_quiz_count_limit_val = "2"
+
+        # showUserResult: "0"=已提交答案, "1"=正确答案, "2"=不展示答案, "3"=展示对错不展示答案
+        if show_user_result_mode is not None:
+            show_user_result_val = show_user_result_mode
+        else:
+            show_user_result_val = "1" if show_user_result else "0"
+
+        setup: dict[str, Any] = {
+            "examDuration": exam_duration_seconds,
+            "randomOption": "1" if random_option else "0",
+            "isQuizCountLimit": is_quiz_count_limit_val,
+            "isExamDurationLimit": "1" if exam_duration_seconds > 0 else "0",
+            "quizPassMark": 1 if quiz_pass_mark > 0 else 0,
+            "quizPassMarkScore": quiz_pass_mark,
+            "jumpButton": "1" if jump_button else "0",
+            "showUserResult": show_user_result_val,
+            "allow_add_question_collection": "1" if allow_add_question_collection else "0",
+            "shareStatus": share_status,
+            "submitOneByOne": 1 if submit_one_by_one else 0,
+            "submitPermission": submit_permission,
+            "allowAnswerType": allow_answer_type,
+            "isSetQuizCover": "1" if is_set_quiz_cover else "0",
+            "quizCoverTipsType": quiz_cover_tips_type,
+            "quizCoverTipsContent": quiz_cover_tips,
+            "accept_submission_time": accept_submission_time,
+            "refuse_submission_time": refuse_submission_time,
+            "display_score_to_student": "1" if display_score else "0",
+            "show_answer_after_last_submit": "1" if show_answer_after_submit else "0",
+            "allow_drag_track": "1",
+            "allow_adjust_speed": 1,
+            "is_allow_download": 0,
+            "isAllowDownload": 0,
+            "checkbox_share_scoring_rule": "0",
+            "checkbox_share_scoring_ratio": "1,2",
+            "quizCountLimit": quiz_count_limit,
+            "questionShowMode": question_show_mode,
+            "exam_result_setting": exam_result_setting,
+            "quizCompletionCondition": quiz_completion_condition,
+            "isShowQuizRanking": "1" if is_show_quiz_ranking else "0",
+            "is_answer_paste": "1" if is_answer_paste else "0",
+            "switch_window_limit": switch_window_limit,
+        }
+        if result_prompt:
+            setup["result_prompt"] = result_prompt
+        if type_name:
+            setup["type_name"] = type_name
+        if jump_button and jump_url:
+            setup["jump_url"] = jump_url
+        if jump_button and jump_button_title:
+            setup["jump_button_title"] = jump_button_title
+
+        # 5. 构造 sessionInfo
+        session_info: dict[str, Any] = {
+            "autoCheck": 1,
+            "creatTime": "",
+            "creatTimeShow": "",
+            "groupId": "",
+            "onlineUserCount": "",
+            "resultType": "",
+            "sessionId": "",
+            "sessionInUse": False,
+            "sessionIndex": sort_order,
+            "sessionStatus": "",
+            "sessionTitle": session_title,
+            "sessionType": "10",
+            "teacherId": "",
+            "desc": "",
+            "totalCount": "",
+            "studentRegFlag": False,
+            "totalUserCount": "",
+            "multimedia_type": 1,
+            "multimedia_id": int(multimedia_id),
+            "setup": setup,
+            "extend": {},
+            "point_ratio": point_ratio,
+            "is_require": 1 if is_required else 0,
+            "access_permission": share_status,
+            "tags": [{"tag": str(tag)} for tag in (tags or [])],
+        }
+
+        # 6. 构造 session_data
+        session_data = {
+            "importMark": "",
+            "sessionInfo": session_info,
+            "sectionArr": section_arr,
+            "questionRules": {},
+            "questionBankQuestionRules": {},
+        }
+
+        # 7. 调用 saveExam
+        resp = self.client.post(
+            self.client.desktop_url("/megrez/exam/v1/saveExam"),
+            data={
+                "group_id": group_id,
+                "session_data": json.dumps(session_data, ensure_ascii=False),
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            logger.error(
+                "saveExam 错误响应: %s",
+                json.dumps(resp, ensure_ascii=False),
+            )
+            raise RuntimeError(
+                f"保存考试小节失败: {resp.get('error', resp.get('error_message', 'unknown'))}"
+            )
+
+        result_data = resp.get("data", {})
+        result_session_id = str(result_data.get("session_id", ""))
+
+        if not result_session_id:
+            raise RuntimeError("保存考试小节成功但返回的 session_id 为空")
+
+        logger.info(
+            "考试小节创建成功: session_id=%s, group_id=%s, questions=%d, total_score=%d",
+            result_session_id,
+            group_id,
+            len(questions),
+            total_score,
+        )
+
+        # 保存标签（非致命）
+        try:
+            self._save_keywords(result_session_id, tags=(tags or []))
+        except Exception as e:
+            logger.warning("标签保存失败（非致命）: %s", e)
+
+        return {
+            "session_id": result_session_id,
+            "group_id": group_id,
+            "title": session_title,
+            "question_count": len(questions),
+            "total_score": total_score,
+            "session_type": "10",
+            "is_required": is_required,
+        }
+
+    # ------------------------------------------------------------------
+    # 更新考试小节
+    # ------------------------------------------------------------------
+
+    def update_exam_section(
+        self,
+        group_id: str,
+        session_id: str,
+        session_title: str | None = None,
+        questions: list[dict[str, Any]] | None = None,
+        description: str | None = None,
+        exam_duration_seconds: int | None = None,
+        quiz_count_limit: int | None = None,
+        quiz_pass_mark: int | None = None,
+        random_option: bool | None = None,
+        show_user_result: bool | None = None,
+        submit_one_by_one: bool | None = None,
+        accept_submission_time: int | None = None,
+        refuse_submission_time: int | None = None,
+        is_required: bool | None = None,
+        type_name: str | None = None,
+        tags: list[str] | None = None,
+        question_show_mode: str | None = None,
+        allow_answer_type: str | None = None,
+        exam_result_setting: str | None = None,
+        switch_window_limit: int | None = None,
+        quiz_completion_condition: str | None = None,
+        share_status: int | None = None,
+        submit_permission: int | None = None,
+        show_answer_after_submit: bool | None = None,
+        allow_add_question_collection: bool | None = None,
+        is_show_quiz_ranking: bool | None = None,
+        is_answer_paste: bool | None = None,
+        quiz_cover_tips_type: str | None = None,
+        quiz_cover_tips_content: str | None = None,
+        point_ratio: int | None = None,
+        is_set_quiz_cover: bool | None = None,
+        jump_button: bool | None = None,
+        jump_url: str | None = None,
+        jump_button_title: str | None = None,
+        result_prompt: str | None = None,
+        show_user_result_mode: str | None = None,
+        display_score: bool | None = None,
+    ) -> dict[str, Any]:
+        """更新课程中已有的考试类型小节.
+
+        采用"先获取完整数据，再应用变更"的模式：
+        1. 调用 getsessionInfo 获取现有小节最新完整数据
+        2. 过滤只读字段（统计数据等）
+        3. 应用用户传入的变更（只改提供的字段，None 表示不修改）
+        4. 调用 saveExam 提交完整数据（必须包含 session_id）
+
+        Args:
+            group_id: 课程 ID
+            session_id: 小节 ID
+            session_title: 新小节标题，None 表示不修改
+            questions: 新的题目列表（完整列表，按目标顺序排列），None 表示不修改题目
+            description: 考试说明/描述，None 表示不修改
+            exam_duration_seconds: 考试时长（秒），0=不限时，None 表示不修改
+            quiz_count_limit: 考试次数限制，0=不限次数，None 表示不修改
+            quiz_pass_mark: 及格线（分），0=不设及格线，None 表示不修改
+            random_option: 是否随机展示选项，None 表示不修改
+            show_user_result: 是否向学员展示成绩（布尔简写），None 表示不修改
+            show_user_result_mode: 提交后展示内容精确模式。"0"=已提交答案, "1"=正确答案, "2"=不展示答案, "3"=展示对错不展示答案。None 表示不修改
+            display_score: 是否向学员展示考试分数，None 表示不修改
+            submit_one_by_one: 是否逐题提交，None 表示不修改
+            accept_submission_time: 开始接受提交时间（Unix 时间戳），None 表示不修改
+            refuse_submission_time: 截止提交时间（Unix 时间戳），None 表示不修改
+            is_required: 是否必修，None 表示不修改
+            type_name: 小节类型标签，None 表示不修改
+            tags: 标签文本列表，None 表示不修改
+            question_show_mode: 展示样式，"0"=一页式，"1"=逐题式，None 表示不修改
+            allow_answer_type: 开放式问题提交格式，"1"=文字+图片，"0"=仅文字，None 表示不修改
+            exam_result_setting: 成绩设置，"0"=最后一次提交为准，"1"=最高分为准，None 表示不修改
+            switch_window_limit: 防切屏次数，0=不设置，None 表示不修改
+            quiz_completion_condition: 完成条件，"0"=不设置，"1"=考试成绩达到及格分，None 表示不修改
+            share_status: 访问权限，1=课程内公开，2=企业内公开，0=关闭，None 表示不修改
+            submit_permission: 提交权限，1=课程内学员，None 表示不修改
+            show_answer_after_submit: 提交后展示正确答案，None 表示不修改
+            allow_add_question_collection: 允许将题目加入考题本，None 表示不修改
+            is_show_quiz_ranking: 提交后展示考试排行榜，None 表示不修改
+            is_answer_paste: 回答开放式问题是否允许粘贴，None 表示不修改
+            quiz_cover_tips_type: 封面提示类型，"1"=自动设置，"0"=手动设置，None 表示不修改
+            quiz_cover_tips_content: 封面提示内容，None 表示不修改
+            point_ratio: 小节基本积分倍率，None 表示不修改
+            is_set_quiz_cover: 是否设置考试封面，None 表示不修改
+            jump_button: 提交成功页是否显示跳转按钮，None 表示不修改
+            jump_url: 跳转按钮的目标 URL，None 表示不修改
+            jump_button_title: 跳转按钮的文本，None 表示不修改
+            result_prompt: 提交成功提示语，None 表示不修改
+
+        Returns:
+            包含 session_id 和 changes 列表的字典
+
+        Raises:
+            RuntimeError: 更新失败
+        """
+        # 1. 获取现有小节最新完整数据
+        existing = self._get_session_detail(session_id)
+        session_info = existing.get("sessionInfo", {})
+        existing_sections = existing.get("sectionArr", [])
+
+        # 2. 深拷贝并过滤只读字段
+        updated_info = copy.deepcopy(session_info)
+        for ro_field in _READONLY_SESSIONINFO_FIELDS:
+            updated_info.pop(ro_field, None)
+
+        # 额外过滤考试小节特有的只读字段
+        exam_readonly = {
+            "pass_mark_score", "pass_mark_count", "pass_mark_rate",
+            "highest_score", "average_score", "lowest_score", "full_marks",
+            "has_objective_question", "has_subjective_question",
+            "question_dom", "rank_count", "submitUserCount",
+            "templateId", "scenario", "is_show_exam_ranking",
+            "questionBankIds", "question_bank_random_mode",
+            "questionBankRandomMode", "exam_ranking_share_qrc",
+            "exam_ranking_share_url",
+        }
+        for ro_field in exam_readonly:
+            updated_info.pop(ro_field, None)
+
+        changes: list[str] = []
+        setup = updated_info.get("setup", {})
+
+        # Helper: 同时更新 snake_case 和 camelCase 版本的字段
+        def _update_setup_pair(sc_key: str, cc_key: str, value: Any) -> None:
+            """同时更新 snake_case 和 camelCase 版本的 setup 字段."""
+            setup[sc_key] = value
+            if cc_key != sc_key:
+                setup[cc_key] = value
+
+        # 3. 应用 session 级别的变更
+        if session_title is not None and session_title != updated_info.get("sessionTitle"):
+            updated_info["sessionTitle"] = session_title
+            changes.append(f"sessionTitle: {session_title}")
+
+        if is_required is not None:
+            new_val = 1 if is_required else 0
+            if new_val != updated_info.get("is_require"):
+                updated_info["is_require"] = new_val
+                changes.append(f"is_require: {is_required}")
+
+        if point_ratio is not None and point_ratio != updated_info.get("point_ratio"):
+            updated_info["point_ratio"] = point_ratio
+            changes.append(f"point_ratio: {point_ratio}")
+
+        if type_name is not None:
+            _update_setup_pair("type_name", "typeName", type_name)
+            changes.append(f"type_name: {type_name}")
+
+        # 4. 应用 setup 级别的变更
+        if exam_duration_seconds is not None:
+            _update_setup_pair("exam_duration", "examDuration", exam_duration_seconds)
+            _update_setup_pair("is_exam_duration_limit", "isExamDurationLimit", "1" if exam_duration_seconds > 0 else "0")
+            changes.append(f"exam_duration_seconds: {exam_duration_seconds}")
+
+        if quiz_count_limit is not None:
+            _update_setup_pair("quiz_count_limit", "quizCountLimit", quiz_count_limit)
+            if quiz_count_limit == 0:
+                is_qcl_val = "0"
+            elif quiz_count_limit == 1:
+                is_qcl_val = "1"
+            else:
+                is_qcl_val = "2"
+            _update_setup_pair("is_quiz_count_limit", "isQuizCountLimit", is_qcl_val)
+            changes.append(f"quiz_count_limit: {quiz_count_limit}")
+
+        if quiz_pass_mark is not None:
+            _update_setup_pair("quiz_pass_mark", "quizPassMark", 1 if quiz_pass_mark > 0 else 0)
+            _update_setup_pair("quiz_pass_mark_score", "quizPassMarkScore", quiz_pass_mark)
+            changes.append(f"quiz_pass_mark: {quiz_pass_mark}")
+
+        if random_option is not None:
+            val = "1" if random_option else "0"
+            _update_setup_pair("random_option", "randomOption", val)
+            changes.append(f"random_option: {random_option}")
+
+        if show_user_result is not None:
+            val = "1" if show_user_result else "0"
+            _update_setup_pair("show_user_result", "showUserResult", val)
+            changes.append(f"show_user_result: {show_user_result}")
+
+        if show_user_result_mode is not None:
+            _update_setup_pair("show_user_result", "showUserResult", show_user_result_mode)
+            changes.append(f"show_user_result_mode: {show_user_result_mode}")
+
+        if display_score is not None:
+            val = "1" if display_score else "0"
+            _update_setup_pair("display_score_to_student", "displayScoreToStudent", val)
+            changes.append(f"display_score: {display_score}")
+
+        if submit_one_by_one is not None:
+            val = 1 if submit_one_by_one else 0
+            _update_setup_pair("submit_one_by_one", "submitOneByOne", val)
+            changes.append(f"submit_one_by_one: {submit_one_by_one}")
+
+        if accept_submission_time is not None:
+            _update_setup_pair("accept_submission_time", "acceptSubmissionTime", accept_submission_time)
+            changes.append(f"accept_submission_time: {accept_submission_time}")
+
+        if refuse_submission_time is not None:
+            _update_setup_pair("refuse_submission_time", "refuseSubmissionTime", refuse_submission_time)
+            changes.append(f"refuse_submission_time: {refuse_submission_time}")
+
+        if question_show_mode is not None:
+            _update_setup_pair("question_show_mode", "questionShowMode", question_show_mode)
+            changes.append(f"question_show_mode: {question_show_mode}")
+
+        if allow_answer_type is not None:
+            _update_setup_pair("allow_answer_type", "allowAnswerType", allow_answer_type)
+            changes.append(f"allow_answer_type: {allow_answer_type}")
+
+        if exam_result_setting is not None:
+            _update_setup_pair("exam_result_setting", "examResultSetting", exam_result_setting)
+            changes.append(f"exam_result_setting: {exam_result_setting}")
+
+        if switch_window_limit is not None:
+            _update_setup_pair("switch_window_limit", "switchWindowLimit", switch_window_limit)
+            changes.append(f"switch_window_limit: {switch_window_limit}")
+
+        if quiz_completion_condition is not None:
+            _update_setup_pair("quiz_completion_condition", "quizCompletionCondition", quiz_completion_condition)
+            _update_setup_pair("quiz_completed_condition", "quizCompletedCondition", quiz_completion_condition)
+            changes.append(f"quiz_completion_condition: {quiz_completion_condition}")
+
+        if share_status is not None:
+            _update_setup_pair("share_status", "shareStatus", share_status)
+            updated_info["access_permission"] = share_status
+            changes.append(f"share_status: {share_status}")
+
+        if submit_permission is not None:
+            _update_setup_pair("submit_permission", "submitPermission", submit_permission)
+            changes.append(f"submit_permission: {submit_permission}")
+
+        if show_answer_after_submit is not None:
+            val = "1" if show_answer_after_submit else "0"
+            _update_setup_pair("show_answer_after_last_submit", "showAnswerAfterLastSubmit", val)
+            changes.append(f"show_answer_after_submit: {show_answer_after_submit}")
+
+        if allow_add_question_collection is not None:
+            val = "1" if allow_add_question_collection else "0"
+            _update_setup_pair("allow_add_question_collection", "allowAddQuestionCollection", val)
+            changes.append(f"allow_add_question_collection: {allow_add_question_collection}")
+
+        if is_show_quiz_ranking is not None:
+            val = "1" if is_show_quiz_ranking else "0"
+            _update_setup_pair("is_show_quiz_ranking", "isShowQuizRanking", val)
+            changes.append(f"is_show_quiz_ranking: {is_show_quiz_ranking}")
+
+        if is_answer_paste is not None:
+            val = "1" if is_answer_paste else "0"
+            _update_setup_pair("is_answer_paste", "isAnswerPaste", val)
+            changes.append(f"is_answer_paste: {is_answer_paste}")
+
+        if quiz_cover_tips_type is not None:
+            _update_setup_pair("quiz_cover_tips_type", "quizCoverTipsType", quiz_cover_tips_type)
+            changes.append(f"quiz_cover_tips_type: {quiz_cover_tips_type}")
+
+        if quiz_cover_tips_content is not None:
+            _update_setup_pair("quiz_cover_tips_content", "quizCoverTipsContent", quiz_cover_tips_content)
+            changes.append(f"quiz_cover_tips_content: ...")
+
+        if is_set_quiz_cover is not None:
+            val = "1" if is_set_quiz_cover else "0"
+            _update_setup_pair("is_set_quiz_cover", "isSetQuizCover", val)
+            changes.append(f"is_set_quiz_cover: {is_set_quiz_cover}")
+
+        if jump_button is not None:
+            val = "1" if jump_button else "0"
+            _update_setup_pair("jump_button", "jumpButton", val)
+            changes.append(f"jump_button: {jump_button}")
+
+        if jump_url is not None:
+            _update_setup_pair("jump_url", "jumpUrl", jump_url)
+            changes.append(f"jump_url: {jump_url}")
+
+        if jump_button_title is not None:
+            _update_setup_pair("jump_button_title", "jumpButtonTitle", jump_button_title)
+            changes.append(f"jump_button_title: {jump_button_title}")
+
+        if result_prompt is not None:
+            setup["result_prompt"] = result_prompt
+            changes.append(f"result_prompt: {result_prompt}")
+
+        # 5. 处理 description 变更
+        if description is not None:
+            multimedia_id = updated_info.get("multimedia_id")
+            if multimedia_id:
+                self._update_fulltext(
+                    top_section_id=str(multimedia_id),
+                    content=f"<p>{description}</p>",
+                )
+                changes.append(f"description: updated")
+
+        # 6. 处理题目更新（如提供）
+        section_arr = existing_sections
+        if questions is not None:
+            # 使用 create_exam_section 中的题目构建逻辑
+            section_arr = self._build_exam_section_arr(questions)
+            changes.append(f"questions: {len(questions)} questions updated")
+
+        # 7. 构建 session_data 并调用 saveExam
+        session_data = {
+            "sessionInfo": updated_info,
+            "sectionArr": section_arr,
+            "questionRules": {},
+            "questionBankQuestionRules": {},
+        }
+
+        resp = self.client.post(
+            self.client.desktop_url("/megrez/exam/v1/saveExam"),
+            data={
+                "group_id": group_id,
+                "session_id": session_id,
+                "session_data": json.dumps(session_data, ensure_ascii=False),
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            logger.error(
+                "saveExam 错误响应: %s",
+                json.dumps(resp, ensure_ascii=False),
+            )
+            raise RuntimeError(
+                f"更新考试小节失败: {resp.get('error', resp.get('error_message', 'unknown'))}"
+            )
+
+        # 8. 保存标签（非致命）
+        if tags is not None:
+            try:
+                self._save_keywords(session_id, tags=tags)
+                changes.append(f"tags: {tags}")
+            except Exception as e:
+                logger.warning("标签保存失败（非致命）: %s", e)
+
+        logger.info(
+            "考试小节更新成功: session_id=%s, changes=%s",
+            session_id,
+            changes,
+        )
+
+        return {
+            "session_id": session_id,
+            "group_id": group_id,
+            "changes": changes,
+        }
+
+    # ------------------------------------------------------------------
     # 更新问卷小节
     # ------------------------------------------------------------------
 
@@ -5844,6 +6767,690 @@ class CourseBuilder:
             new_resource_id,
             old_resource_id,
         )
+
+    # ------------------------------------------------------------------
+    # 创建签到小节
+    # ------------------------------------------------------------------
+
+    def create_signin_section(
+        self,
+        group_id: str,
+        session_title: str,
+        signin_info_list: list[dict[str, Any]],
+        auto_check: bool = True,
+        is_required: bool = True,
+        point_ratio: int = 1,
+        is_anti_fraud: bool = False,
+        mini_program_switch: bool = True,
+        share_status: int = 1,
+        result_prompt: str = "",
+        type_name: str = "",
+        desc_richtext: str = "",
+        tags: list[str] | None = None,
+        sort_order: int = 0,
+    ) -> dict[str, Any]:
+        """在课程中创建签到类型小节.
+
+        签到小节使用 sessionType="6"，调用 /api/session/savesession。
+        签到信息（学员签到时需要回答的问题）通过 signin_info_list 传入。
+
+        签到信息格式（signin_info_list 列表中每项为 dict）：
+
+        **文本输入 (type="textarea")：**
+        {
+            "type": "textarea",
+            "title": "您的姓名是？",
+            "required": true,
+            "hint": "提示文字（可选，作为占位提示显示）"
+        }
+
+        **单选题 (type="radio")：**
+        {
+            "type": "radio",
+            "title": "您的性别是？",
+            "required": true,
+            "options": ["女", "男"]
+        }
+
+        **多选题 (type="checkbox")：**
+        {
+            "type": "checkbox",
+            "title": "谁是你的朋友",
+            "required": false,
+            "options": ["黄飞鸿", "洪七公", "周伯通"],
+            "min_options": 1,  // 最少选几项（可选，默认1）
+            "max_options": 2   // 最多选几项（可选，默认等于选项数）
+        }
+
+        **段落说明 (type="paragraph")：**
+        {
+            "type": "paragraph",
+            "content": "<p>这是一个段落说明</p>"  // 支持 HTML
+        }
+
+        签到设置参数：
+        - auto_check: True=自动审核(默认), False=手动审核
+        - is_anti_fraud: True=开启防作弊, False=关闭(默认)
+        - mini_program_switch: True=开启小程序(默认), False=关闭
+        - share_status: 1=课程内公开(默认)
+        - result_prompt: 签到成功提示语（如"签到成功！"）
+
+        Args:
+            group_id: 课程 ID
+            session_title: 签到小节标题
+            signin_info_list: 签到信息（问题）列表
+            auto_check: 是否自动审核签到（默认 True）
+            is_required: 是否必修（默认 True）
+            point_ratio: 积分倍率（默认 1）
+            is_anti_fraud: 是否开启防作弊（默认 False）
+            mini_program_switch: 是否开启小程序（默认 True）
+            share_status: 分享状态（默认 1=课程内公开）
+            result_prompt: 签到成功提示语
+            type_name: 小节类型标签（如"签到"）
+            desc_richtext: 富文本签到说明（HTML）
+            tags: 标签文本列表
+            sort_order: 排序序号，0 表示自动追加
+
+        Returns:
+            包含 session_id、group_id、title、signin_info_count 等信息的字典
+
+        Raises:
+            RuntimeError: 创建小节失败
+            ValueError: 参数不合法
+        """
+        if not signin_info_list:
+            raise ValueError("signin_info_list 不能为空，签到小节至少需要包含一个签到信息")
+
+        # 1. 创建富文本说明（如有）
+        multimedia_id = ""
+        if desc_richtext:
+            try:
+                multimedia_id = self._create_fulltext(desc_richtext)
+                logger.info("签到说明富文本创建成功: multimedia_id=%s", multimedia_id)
+            except Exception as e:
+                logger.warning("签到说明富文本创建失败（非致命）: %s", e)
+
+        # 2. 构建 sectionArr（签到信息数组）
+        cid_counter = 0
+
+        def _next_cid() -> str:
+            nonlocal cid_counter
+            cid = f"c_{int(time.time() * 1000)}_{cid_counter}"
+            cid_counter += 1
+            return cid
+
+        section_arr: list[dict[str, Any]] = []
+
+        for idx, info in enumerate(signin_info_list):
+            info_type = info.get("type", "").lower()
+            title = info.get("title", "")
+            required = bool(info.get("required", False))
+
+            if info_type == "textarea":
+                # 文本输入题
+                hint = info.get("hint", "")
+                answer_arr = [{"answerContent": hint}] if hint else [{"answerContent": ""}]
+
+                question_info = {
+                    "extend": {"pic_url": []},
+                    "setup": {"required": "1" if required else "0"},
+                    "questionId": "",
+                    "questionTitle": title,
+                    "mobileQuestionTitle": title,
+                    "pattern": "3",
+                    "required": False,
+                    "domType": "textarea",
+                    "templateId": "",
+                    "questionIndex": str(idx + 1),
+                    "cid": _next_cid(),
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            elif info_type == "radio":
+                # 单选题
+                options = info.get("options", [])
+                if not options:
+                    raise ValueError(f"第 {idx + 1} 题（单选）必须提供 options")
+
+                answer_arr = []
+                for opt in options:
+                    answer_arr.append({
+                        "answerContent": str(opt),
+                        "extend": {"pic_url": []},
+                    })
+
+                question_info = {
+                    "extend": {"pic_url": []},
+                    "setup": {"required": "1" if required else "0"},
+                    "questionId": "",
+                    "questionTitle": title,
+                    "mobileQuestionTitle": title,
+                    "pattern": "3",
+                    "required": False,
+                    "domType": "radio",
+                    "templateId": "",
+                    "questionIndex": str(idx + 1),
+                    "cid": _next_cid(),
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            elif info_type == "checkbox":
+                # 多选题
+                options = info.get("options", [])
+                if not options:
+                    raise ValueError(f"第 {idx + 1} 题（多选）必须提供 options")
+
+                min_opts = info.get("min_options", 0)
+                max_opts = info.get("max_options", 0)
+
+                answer_arr = []
+                for opt in options:
+                    answer_arr.append({
+                        "answerContent": str(opt),
+                        "extend": {"pic_url": []},
+                        "isFocus": False,
+                    })
+                # 前端惯例：多选题最后一个选项后加一个空选项
+                answer_arr.append({
+                    "answerContent": "",
+                    "answerId": "",
+                    "questionId": "",
+                    "type": 0,
+                    "extend": {"pic_url": []},
+                })
+
+                setup = {"required": "1" if required else "0"}
+                if min_opts > 0:
+                    setup["limitOptionsMin"] = min_opts
+                if max_opts > 0:
+                    setup["limitOptionsMax"] = max_opts
+
+                question_info = {
+                    "extend": {"pic_url": []},
+                    "setup": setup,
+                    "questionId": "",
+                    "questionTitle": title,
+                    "mobileQuestionTitle": title,
+                    "pattern": "3",
+                    "required": False,
+                    "domType": "checkbox",
+                    "templateId": "",
+                    "questionIndex": str(idx + 1),
+                    "cid": _next_cid(),
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            elif info_type == "paragraph":
+                # 段落说明（无答案）
+                content = info.get("content", "")
+                question_info = {
+                    "questionId": "",
+                    "sessionId": "",
+                    "questionTitle": "",
+                    "questionIndex": "",
+                    "pattern": "",
+                    "required": "",
+                    "creatTime": "",
+                    "creatTimeShow": "",
+                    "domType": "paragraph",
+                    "totalCount": "",
+                    "showType": {},
+                    "showIndex": 0,
+                    "setup": {},
+                    "extend": {},
+                    "cid": _next_cid(),
+                    "desc": content,
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": []})
+
+            else:
+                raise ValueError(f"不支持的签到信息类型: {info_type}（第 {idx + 1} 题）")
+
+        # 3. 构造 sessionInfo
+        setup: dict[str, Any] = {
+            "advance": 1 if desc_richtext else 0,
+            "basicQuestionCount": 1,
+            "is_anti_fraud": "1" if is_anti_fraud else "0",
+            "mini_program_switch": "1" if mini_program_switch else "0",
+            "shareStatus": str(share_status),
+            "type_name": type_name or "签到",
+            "allow_drag_track": "1",
+            "allow_adjust_speed": 1,
+            "is_allow_download": 0,
+            "isAllowDownload": 0,
+        }
+        if result_prompt:
+            setup["resultPrompt"] = result_prompt
+
+        session_info: dict[str, Any] = {
+            "autoCheck": 1 if auto_check else 0,
+            "creatTime": "",
+            "creatTimeShow": "",
+            "groupId": "",
+            "onlineUserCount": "",
+            "resultType": "",
+            "sessionId": "",
+            "sessionInUse": False,
+            "sessionIndex": sort_order,
+            "sessionStatus": "",
+            "sessionTitle": session_title,
+            "sessionType": "6",
+            "teacherId": "",
+            "desc": "",
+            "totalCount": "",
+            "studentRegFlag": False,
+            "totalUserCount": "",
+            "multimedia_type": 1,
+            "multimedia_id": multimedia_id or 0,
+            "setup": setup,
+            "extend": {},
+            "point_ratio": point_ratio,
+            "is_require": 1 if is_required else 0,
+        }
+
+        # 4. 构造 session_data
+        session_data = {
+            "sessionInfo": session_info,
+            "sectionArr": section_arr,
+        }
+
+        # 5. 调用 savesession
+        resp = self.client.post(
+            self.client.desktop_url("/api/session/savesession"),
+            data={
+                "group_id": group_id,
+                "session_data": json.dumps(session_data, ensure_ascii=False),
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            logger.error("创建签到小节失败: %s", resp.get("error", "unknown"))
+            raise RuntimeError(f"创建签到小节失败: {resp.get('error', 'unknown')}")
+
+        data = resp.get("data", {})
+        result_session_id = str(data.get("session_id", ""))
+        session_info_resp = data.get("session_info", {})
+
+        logger.info(
+            "签到小节创建成功: session_id=%s, group_id=%s, title=%s, info_count=%d",
+            result_session_id, group_id, session_title, len(signin_info_list),
+        )
+
+        return {
+            "session_id": result_session_id,
+            "group_id": group_id,
+            "title": session_title,
+            "signin_info_count": len(signin_info_list),
+            "multimedia_id": multimedia_id,
+        }
+
+    # ------------------------------------------------------------------
+    # 更新签到小节
+    # ------------------------------------------------------------------
+
+    def update_signin_section(
+        self,
+        group_id: str,
+        session_id: str,
+        session_title: str | None = None,
+        signin_info_list: list[dict[str, Any]] | None = None,
+        auto_check: bool | None = None,
+        is_required: bool | None = None,
+        point_ratio: int | None = None,
+        is_anti_fraud: bool | None = None,
+        mini_program_switch: bool | None = None,
+        share_status: int | None = None,
+        result_prompt: str | None = None,
+        type_name: str | None = None,
+        desc_richtext: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """更新课程中已有的签到类型小节.
+
+        采用"先获取完整数据，再应用变更"的模式：
+        1. 调用 getsessionInfo 获取现有小节最新完整数据
+        2. 过滤只读字段
+        3. 应用用户传入的变更（只改提供的字段，None 表示不修改）
+        4. 调用 savesession 提交完整数据（必须包含 session_id）
+
+        签到信息匹配规则：
+        - signin_info_list 按索引位置与现有 sectionArr 匹配
+        - 相同位置且 type 相同 → 保留原有 questionId/answerId，更新其他字段
+        - type 不同 → 旧信息删除，新信息新增
+        - 新数组长度超过旧数组 → 超出部分为新增
+        - 新数组长度短于旧数组 → 缺少部分保留原信息
+
+        Args:
+            group_id: 课程 ID
+            session_id: 小节 ID
+            session_title: 新小节标题，None 表示不修改
+            signin_info_list: 新的签到信息列表（完整列表，按目标顺序排列），None 表示不修改
+            auto_check: 是否自动审核，None 表示不修改
+            is_required: 是否必修，None 表示不修改
+            point_ratio: 积分倍率，None 表示不修改
+            is_anti_fraud: 是否开启防作弊，None 表示不修改
+            mini_program_switch: 是否开启小程序，None 表示不修改
+            share_status: 分享状态，None 表示不修改
+            result_prompt: 签到成功提示语，None 表示不修改
+            type_name: 小节类型标签，None 表示不修改
+            desc_richtext: 富文本签到说明（HTML），None 表示不修改，空字符串表示清除
+            tags: 标签列表，None 表示不修改
+
+        Returns:
+            包含 session_id 和 changes 列表的字典
+
+        Raises:
+            RuntimeError: 更新失败
+        """
+        # 1. 获取现有小节最新完整数据
+        existing = self._get_session_detail(session_id)
+        session_info = existing.get("sessionInfo", {})
+        existing_sections = existing.get("sectionArr", [])
+
+        # 2. 深拷贝并过滤只读字段
+        updated_info = copy.deepcopy(session_info)
+        for ro_field in _READONLY_SESSIONINFO_FIELDS:
+            updated_info.pop(ro_field, None)
+
+        changes: list[str] = []
+        setup = updated_info.get("setup", {})
+
+        # 3. 处理富文本说明变更
+        current_multimedia_id = str(updated_info.get("multimedia_id", "") or "")
+        if desc_richtext is not None:
+            if desc_richtext:
+                # 创建或更新富文本
+                if current_multimedia_id and current_multimedia_id != "0":
+                    try:
+                        self._update_fulltext(current_multimedia_id, desc_richtext, group_id)
+                        changes.append(f"desc_richtext: 更新富文本 (multimedia_id={current_multimedia_id})")
+                    except Exception as e:
+                        logger.warning("更新富文本失败: %s", e)
+                        # 尝试创建新的
+                        try:
+                            new_mm_id = self._create_fulltext(desc_richtext)
+                            updated_info["multimedia_id"] = int(new_mm_id) if new_mm_id else 0
+                            changes.append(f"desc_richtext: 创建新富文本 (multimedia_id={new_mm_id})")
+                        except Exception as e2:
+                            logger.warning("创建新富文本也失败: %s", e2)
+                else:
+                    try:
+                        new_mm_id = self._create_fulltext(desc_richtext)
+                        updated_info["multimedia_id"] = int(new_mm_id) if new_mm_id else 0
+                        setup["advance"] = 1
+                        changes.append(f"desc_richtext: 创建富文本 (multimedia_id={new_mm_id})")
+                    except Exception as e:
+                        logger.warning("创建富文本失败: %s", e)
+            else:
+                # 清除富文本说明
+                if current_multimedia_id and current_multimedia_id != "0":
+                    updated_info["multimedia_id"] = 0
+                    setup["advance"] = 0
+                    changes.append("desc_richtext: 清除富文本说明")
+
+        # 4. 应用 session 级别的变更
+        if session_title is not None and session_title != updated_info.get("sessionTitle"):
+            updated_info["sessionTitle"] = session_title
+            changes.append(f"sessionTitle: {session_title}")
+
+        if auto_check is not None:
+            new_val = 1 if auto_check else 0
+            if new_val != updated_info.get("autoCheck"):
+                updated_info["autoCheck"] = new_val
+                changes.append(f"autoCheck: {auto_check}")
+
+        if is_required is not None:
+            new_val = 1 if is_required else 0
+            if new_val != updated_info.get("is_require"):
+                updated_info["is_require"] = new_val
+                changes.append(f"is_require: {is_required}")
+
+        if point_ratio is not None and point_ratio != updated_info.get("point_ratio"):
+            updated_info["point_ratio"] = point_ratio
+            changes.append(f"point_ratio: {point_ratio}")
+
+        # 5. 应用 setup 级别的变更
+        if is_anti_fraud is not None:
+            new_val = "1" if is_anti_fraud else "0"
+            if new_val != setup.get("is_anti_fraud"):
+                setup["is_anti_fraud"] = new_val
+                changes.append(f"is_anti_fraud: {is_anti_fraud}")
+
+        if mini_program_switch is not None:
+            new_val = "1" if mini_program_switch else "0"
+            if new_val != setup.get("mini_program_switch"):
+                setup["mini_program_switch"] = new_val
+                changes.append(f"mini_program_switch: {mini_program_switch}")
+
+        if share_status is not None:
+            new_val = str(share_status)
+            if new_val != setup.get("shareStatus"):
+                setup["shareStatus"] = new_val
+                changes.append(f"shareStatus: {share_status}")
+
+        if result_prompt is not None:
+            if result_prompt:
+                setup["resultPrompt"] = result_prompt
+                changes.append(f"resultPrompt: {result_prompt}")
+            elif "resultPrompt" in setup:
+                del setup["resultPrompt"]
+                changes.append("resultPrompt: 清除")
+
+        if type_name is not None:
+            setup["type_name"] = type_name
+            changes.append(f"type_name: {type_name}")
+
+        # 6. 处理签到信息（sectionArr）变更
+        new_section_arr: list[dict[str, Any]] = []
+
+        if signin_info_list is not None:
+            cid_counter = 0
+
+            def _next_cid() -> str:
+                nonlocal cid_counter
+                cid = f"c_{int(time.time() * 1000)}_{cid_counter}"
+                cid_counter += 1
+                return cid
+
+            for idx, info in enumerate(signin_info_list):
+                info_type = info.get("type", "").lower()
+                title = info.get("title", "")
+                required = bool(info.get("required", False))
+
+                # 尝试匹配现有信息（按位置）
+                existing_section = existing_sections[idx] if idx < len(existing_sections) else None
+                existing_qinfo = existing_section.get("questionInfo", {}) if existing_section else {}
+                existing_dom_type = existing_qinfo.get("domType", "")
+                existing_qid = str(existing_qinfo.get("questionId", ""))
+                existing_answers = existing_section.get("answerArr", []) if existing_section else []
+
+                # 如果 domType 不同，不保留 ID
+                preserve_id = False
+                if existing_dom_type and existing_dom_type == info_type:
+                    preserve_id = True
+                elif existing_dom_type:
+                    existing_qid = ""
+                    existing_answers = []
+
+                if info_type == "textarea":
+                    hint = info.get("hint", "")
+                    answer_arr = [{"answerContent": hint}] if hint else [{"answerContent": ""}]
+                    # 保留原有 answerId（如果存在）
+                    if preserve_id and existing_answers:
+                        for i, ans in enumerate(answer_arr):
+                            if i < len(existing_answers):
+                                ans["answerId"] = str(existing_answers[i].get("answerId", ""))
+                                ans["questionId"] = existing_qid
+
+                    question_info = {
+                        "extend": {"pic_url": []},
+                        "setup": {"required": "1" if required else "0"},
+                        "questionId": existing_qid if preserve_id else "",
+                        "questionTitle": title,
+                        "mobileQuestionTitle": title,
+                        "pattern": "3",
+                        "required": False,
+                        "domType": "textarea",
+                        "templateId": "",
+                        "questionIndex": str(idx + 1),
+                        "cid": _next_cid(),
+                    }
+                    new_section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+                elif info_type == "radio":
+                    options = info.get("options", [])
+                    if not options:
+                        raise ValueError(f"第 {idx + 1} 题（单选）必须提供 options")
+
+                    answer_arr = []
+                    for opt_idx, opt in enumerate(options):
+                        old_answer = existing_answers[opt_idx] if opt_idx < len(existing_answers) else {}
+                        answer_arr.append({
+                            "answerContent": str(opt),
+                            "answerId": str(old_answer.get("answerId", "")) if old_answer else "",
+                            "questionId": existing_qid if preserve_id else "",
+                            "extend": {"pic_url": []},
+                        })
+
+                    question_info = {
+                        "extend": {"pic_url": []},
+                        "setup": {"required": "1" if required else "0"},
+                        "questionId": existing_qid if preserve_id else "",
+                        "questionTitle": title,
+                        "mobileQuestionTitle": title,
+                        "pattern": "3",
+                        "required": False,
+                        "domType": "radio",
+                        "templateId": "",
+                        "questionIndex": str(idx + 1),
+                        "cid": _next_cid(),
+                    }
+                    new_section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+                elif info_type == "checkbox":
+                    options = info.get("options", [])
+                    if not options:
+                        raise ValueError(f"第 {idx + 1} 题（多选）必须提供 options")
+
+                    min_opts = info.get("min_options", 0)
+                    max_opts = info.get("max_options", 0)
+
+                    answer_arr = []
+                    for opt_idx, opt in enumerate(options):
+                        old_answer = existing_answers[opt_idx] if opt_idx < len(existing_answers) else {}
+                        answer_arr.append({
+                            "answerContent": str(opt),
+                            "answerId": str(old_answer.get("answerId", "")) if old_answer else "",
+                            "questionId": existing_qid if preserve_id else "",
+                            "type": 0,
+                            "extend": {"pic_url": []},
+                            "isFocus": False,
+                        })
+                    # 空白选项
+                    answer_arr.append({
+                        "answerContent": "",
+                        "answerId": "",
+                        "questionId": existing_qid if preserve_id else "",
+                        "type": 0,
+                        "extend": {"pic_url": []},
+                    })
+
+                    setup_q = {"required": "1" if required else "0"}
+                    if min_opts > 0:
+                        setup_q["limitOptionsMin"] = min_opts
+                    if max_opts > 0:
+                        setup_q["limitOptionsMax"] = max_opts
+
+                    question_info = {
+                        "extend": {"pic_url": []},
+                        "setup": setup_q,
+                        "questionId": existing_qid if preserve_id else "",
+                        "questionTitle": title,
+                        "mobileQuestionTitle": title,
+                        "pattern": "3",
+                        "required": False,
+                        "domType": "checkbox",
+                        "templateId": "",
+                        "questionIndex": str(idx + 1),
+                        "cid": _next_cid(),
+                    }
+                    new_section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+                elif info_type == "paragraph":
+                    content = info.get("content", "")
+                    question_info = {
+                        "questionId": existing_qid if preserve_id else "",
+                        "sessionId": session_id if preserve_id else "",
+                        "questionTitle": "",
+                        "questionIndex": "",
+                        "pattern": "",
+                        "required": "",
+                        "creatTime": "",
+                        "creatTimeShow": "",
+                        "domType": "paragraph",
+                        "totalCount": "",
+                        "showType": {},
+                        "showIndex": 0,
+                        "setup": {},
+                        "extend": {},
+                        "cid": _next_cid(),
+                        "desc": content,
+                    }
+                    new_section_arr.append({"questionInfo": question_info, "answerArr": []})
+
+                else:
+                    raise ValueError(f"不支持的签到信息类型: {info_type}（第 {idx + 1} 题）")
+
+            # 保留未修改的剩余信息（如果新数组比旧数组长已在上面处理，这里处理旧数组更长的情况）
+            # 实际上我们完全替换 sectionArr
+            updated_info["sectionArr"] = new_section_arr
+            changes.append(f"signin_info_list: 更新了 {len(signin_info_list)} 个签到信息")
+        else:
+            # 不修改签到信息，但保留原有 sectionArr
+            # 过滤 sectionArr 中可能存在的只读字段
+            new_section_arr = []
+            for sec in existing_sections:
+                new_sec = copy.deepcopy(sec)
+                qinfo = new_sec.get("questionInfo", {})
+                # 保留必要的字段
+                new_section_arr.append(new_sec)
+            updated_info["sectionArr"] = new_section_arr
+
+        # 7. 处理 tags
+        if tags is not None:
+            updated_info["tags"] = [{"tag": str(tag)} for tag in tags]
+            changes.append(f"tags: {tags}")
+
+        # 8. 构造 session_data
+        session_data = {
+            "sessionInfo": updated_info,
+            "sectionArr": updated_info.pop("sectionArr", []),
+        }
+
+        # 9. 调用 savesession（编辑模式，必须带 session_id）
+        resp = self.client.post(
+            self.client.desktop_url("/api/session/savesession"),
+            data={
+                "group_id": group_id,
+                "session_id": session_id,
+                "session_data": json.dumps(session_data, ensure_ascii=False),
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            logger.error("更新签到小节失败: %s", resp.get("error", "unknown"))
+            raise RuntimeError(f"更新签到小节失败: {resp.get('error', 'unknown')}")
+
+        logger.info(
+            "签到小节更新成功: session_id=%s, changes=%s",
+            session_id, changes,
+        )
+
+        return {
+            "session_id": session_id,
+            "group_id": group_id,
+            "changes": changes,
+        }
 
     # ------------------------------------------------------------------
     # 删除小节

@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..core.client import UMUClient
+from ...core.client import UMUClient
 
 
 @dataclass
@@ -76,16 +76,12 @@ class SessionManager:
     def __init__(
         self,
         base_url: str,
-        environment: str = "default",
         endpoint_overrides: dict[str, str] | None = None,
-        enable_environment_check: bool = True,
         session_ttl: int = DEFAULT_SESSION_TTL,
         max_sessions: int = DEFAULT_MAX_SESSIONS,
     ):
         self.base_url = base_url
-        self.environment = environment
         self.endpoint_overrides = endpoint_overrides or {}
-        self.enable_environment_check = enable_environment_check
         self.session_ttl = session_ttl
         self.max_sessions = max_sessions
 
@@ -96,9 +92,7 @@ class SessionManager:
         """创建新的 UMUClient 实例."""
         return UMUClient(
             base_url=self.base_url,
-            environment=self.environment,
             endpoint_overrides=self.endpoint_overrides,
-            enable_environment_check=self.enable_environment_check,
         )
 
     def _generate_session_id(self) -> str:

@@ -36,28 +36,18 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-from .core.auth import AuthManager
-from .core.errors import (
+from .auth import AuthManager
+from .errors import (
     AuthenticationError,
-    EnvironmentMismatchError,
     NetworkError,
     RateLimitError,
     ServerError,
     UMUError,
     ValidationError,
 )
-from .core.models import LoginCredentials
+from .models import LoginCredentials
 
 
-# 预定义环境配置注册表（支持 future 扩展接口路径覆盖）
-ENVIRONMENT_REGISTRY: dict[str, dict[str, Any]] = {
-    "prod": {
-        "base_url": "https://www.umu.cn",
-        "desktop_domain": "www.umu.cn",
-        "mobile_domain": "m.umu.cn",
-        "endpoint_overrides": {},
-    },
-}
 
 
 class UMUClient:
@@ -78,9 +68,7 @@ class UMUClient:
         auth: LoginCredentials | None = None,
         timeout: float = 30.0,
         retries: int = 3,
-        enable_environment_check: bool = True,
         follow_redirects: bool = True,
-        environment: str = "default",
         endpoint_overrides: dict[str, str] | None = None,
     ):
         """初始化 UMU 客户端.
@@ -90,10 +78,8 @@ class UMUClient:
             auth: 可选的登录凭据
             timeout: 请求超时（秒）
             retries: 重试次数
-            enable_environment_check: 是否启用环境验证
             follow_redirects: 是否跟随重定向
-            environment: 环境标识（如 "prod", "default"）
-            endpoint_overrides: 接口路径覆盖（用于极少数环境间接口路径不同的情况）
+            endpoint_overrides: 接口路径覆盖（用于极少数接口路径不同的情况）
         """
         if not base_url:
             raise ValueError("UMUClient 初始化失败: base_url 不能为空")
@@ -109,8 +95,6 @@ class UMUClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.retries = retries
-        self.enable_environment_check = enable_environment_check
-        self.environment = environment
         self.endpoint_overrides = endpoint_overrides or {}
 
         # 从 base_url 推断 desktop_domain 和 mobile_domain
@@ -120,14 +104,6 @@ class UMUClient:
             self.mobile_domain = "m." + hostname[4:]
         else:
             self.mobile_domain = "m." + hostname
-
-        # 合并内置环境配置的 endpoint_overrides
-        env_config = ENVIRONMENT_REGISTRY.get(environment, {})
-        builtin_overrides = env_config.get("endpoint_overrides", {})
-        # 用户传入的覆盖优先级高于内置配置
-        merged_overrides = dict(builtin_overrides)
-        merged_overrides.update(self.endpoint_overrides)
-        self.endpoint_overrides = merged_overrides
 
         # 初始化 HTTP 客户端
         self.http = httpx.Client(
@@ -143,7 +119,7 @@ class UMUClient:
         # 初始化认证管理器
         self.auth = AuthManager(self.http, auth, self.base_url)
 
-        print(f"[UMUClient] 初始化完成，环境: {environment}, 目标: {self.base_url}")
+        print(f"[UMUClient] 初始化完成，目标: {self.base_url}")
         print(f"[UMUClient] desktop_domain: {self.desktop_domain}, mobile_domain: {self.mobile_domain}")
 
     def desktop_url(self, path: str) -> str:
@@ -205,33 +181,6 @@ class UMUClient:
         # httpx 会自动管理 cookies
         return token
 
-    def _validate_environment(self, url: str) -> None:
-        """验证请求 URL 是否在允许的环境内."""
-        if not self.enable_environment_check:
-            return
-
-        try:
-            request_hostname = urlparse(url).hostname or ""
-            request_hostname = request_hostname.lower()
-
-            # 使用 AuthManager 的 allowed_domains 进行验证
-            allowed_domains = self.auth.allowed_domains if self.auth else []
-            is_allowed = any(
-                request_hostname == allowed or request_hostname.endswith(f".{allowed}")
-                for allowed in allowed_domains
-            )
-
-            if not is_allowed:
-                allowed_str = ", ".join(allowed_domains) if allowed_domains else self.base_url
-                raise EnvironmentMismatchError(
-                    f"SDK 安全拦截：请求域名 '{request_hostname}' 与初始化环境不匹配。"
-                    f"当前允许的环境: {allowed_str}。请求 URL: {url}"
-                )
-        except EnvironmentMismatchError:
-            raise
-        except Exception:
-            pass  # URL 解析失败时跳过验证
-
     def _request(
         self,
         method: str,
@@ -239,10 +188,6 @@ class UMUClient:
         **kwargs: Any,
     ) -> httpx.Response:
         """发送 HTTP 请求（带重试和错误处理）."""
-        # 环境验证
-        full_url = url if url.startswith("http") else urljoin(self.base_url, url)
-        self._validate_environment(full_url)
-
         # 附加认证信息
         auth_headers = self.auth.get_auth_headers()
         headers = kwargs.pop("headers", {})
@@ -274,8 +219,6 @@ class UMUClient:
 
                 break
 
-            except EnvironmentMismatchError:
-                raise
             except Exception as e:
                 last_error = e
                 if attempt < self.retries - 1:
