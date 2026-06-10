@@ -1,9 +1,8 @@
 # UMU Skills
 
-[![CI](https://github.com/your-org/umu-skills/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/umu-skills/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/umu-skills)](https://pypi.org/project/umu-skills/)
-[![Python](https://img.shields.io/pypi/pyversions/umu-skills)](https://pypi.org/project/umu-skills/)
-[![License](https://img.shields.io/pypi/l/umu-skills)](LICENSE)
+[![CI](https://github.com/chialitung/umu-skills/actions/workflows/ci.yml/badge.svg)](https://github.com/chialitung/umu-skills/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 UMU Skills 是一个 AI 技能框架，它将 UMU 学习平台的管理操作封装为可供 AI 助手调用的工具。它通过 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 与 Claude、Cursor、Cline 等 AI 客户端集成。
 
