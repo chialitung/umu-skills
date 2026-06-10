@@ -3,6 +3,8 @@
 基于 httpx 构建，提供同步/异步请求支持、认证拦截、错误处理、环境验证.
 """
 
+from __future__ import annotations
+
 import os
 from typing import Any
 from urllib.parse import urlparse

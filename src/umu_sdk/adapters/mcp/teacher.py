@@ -16,6 +16,8 @@ Environment Variables:
     MCP_LOG_LEVEL: 日志级别 (DEBUG|INFO|WARNING|ERROR，默认: INFO)
 """
 
+from __future__ import annotations
+
 # Windows 中文编码修复 —— 必须在所有导入之前执行
 import io
 import sys

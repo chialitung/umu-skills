@@ -4,6 +4,8 @@
 AI 可以根据实际情况自主决定调用顺序。
 """
 
+from __future__ import annotations
+
 
 def course_completion_workflow() -> str:
     """课程完成的标准操作流程（SOP）.

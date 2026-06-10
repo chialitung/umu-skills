@@ -3,6 +3,8 @@
 处理登录、Token 管理.
 """
 
+from __future__ import annotations
+
 import time
 
 import httpx

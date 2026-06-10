@@ -1,5 +1,7 @@
 """UMU SDK 异常类."""
 
+from __future__ import annotations
+
 
 class UMUError(Exception):
     """UMU SDK 基础异常."""
