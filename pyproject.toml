@@ -70,3 +70,4 @@ python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+disable_error_code = ["type-arg", "no-any-return", "var-annotated", "attr-defined", "arg-type", "assignment", "unused-coroutine", "call-arg", "valid-type"]

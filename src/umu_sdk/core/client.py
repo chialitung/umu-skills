@@ -5,7 +5,7 @@
 
 import os
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 import httpx
 
@@ -36,8 +36,8 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-from .auth import AuthManager
-from .errors import (
+from .auth import AuthManager  # noqa: E402
+from .errors import (  # noqa: E402
     AuthenticationError,
     NetworkError,
     RateLimitError,
@@ -45,7 +45,7 @@ from .errors import (
     UMUError,
     ValidationError,
 )
-from .models import LoginCredentials
+from .models import LoginCredentials  # noqa: E402
 
 
 

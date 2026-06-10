@@ -2049,9 +2049,6 @@ async def tch_upload_audio_video(
             suggested_action="请提供支持的音视频格式，文件大小须在 1024MB 以内",
         )
 
-    file_size = os.path.getsize(file_path)
-    display_name = name or os.path.basename(file_path)
-
     try:
         uploader = VideoUploader(client, client.base_url)
         result: UploadResult = await uploader.run(file_path, name)
@@ -5258,12 +5255,15 @@ async def tch_toggle_section_visibility(
         )
 
         status_text = "打开" if visible else "关闭"
+        if visible:
+            toggle_hint = f"如需再次关闭，调用 tch_toggle_section_visibility(section_id='{section_id}', visible=False)"
+        else:
+            toggle_hint = f"如需重新打开，调用 tch_toggle_section_visibility(section_id='{section_id}', visible=True)"
+
         return _ok(
             data=result,
             next_action="proceed",
-            suggested_action=f"小节已{status_text}。学员现在{'可以' if visible else '无法'}看到并学习此小节。"
-                        f"{'如需再次关闭，调用 tch_toggle_section_visibility(section_id=' + "'" + section_id + "', visible=False)" if visible else '如需重新打开，调用 tch_toggle_section_visibility(section_id=' + "'" + section_id + "', visible=True)"}"
-                        f"；如需查看详情，调用 tch_get_section(section_id='{section_id}')。",
+            suggested_action=f"小节已{status_text}。学员现在{'可以' if visible else '无法'}看到并学习此小节。{toggle_hint}；如需查看详情，调用 tch_get_section(section_id='{section_id}')。",
         )
 
     except RuntimeError as e:

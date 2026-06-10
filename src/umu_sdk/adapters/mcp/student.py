@@ -28,7 +28,6 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
-from ...core.encrypt import encrypt_password
 from . import prompts
 from .batch import AccountImporter, AccountSource, BatchExecutor
 from .session import SessionManager
@@ -695,20 +694,20 @@ async def stu_get_course_structure(
                         )
                     )
                     questions = r.get("data", {}).get("list", [])
-                    type_counts: dict[str, int] = {}
-                    preview: list[dict[str, Any]] = []
+                    exam_type_counts: dict[str, int] = {}
+                    exam_preview: list[dict[str, Any]] = []
                     for q in questions:
                         qtype = q.get("type")
                         tname = _question_type_name(qtype, is_exam=True)
-                        type_counts[tname] = type_counts.get(tname, 0) + 1
-                        preview.append({
+                        exam_type_counts[tname] = exam_type_counts.get(tname, 0) + 1
+                        exam_preview.append({
                             "type": tname,
                             "required": _is_question_required(q),
                             "title": q.get("title", "")[:50],
                         })
                     lesson["question_count"] = len(questions)
-                    lesson["question_types"] = type_counts
-                    lesson["questions_preview"] = preview
+                    lesson["question_types"] = exam_type_counts
+                    lesson["questions_preview"] = exam_preview
                 except Exception:
                     pass
         elif etype == 11:  # 视频
@@ -727,7 +726,7 @@ async def stu_get_course_structure(
         lessons.append(lesson)
 
     total = len(lessons)
-    completed = sum(1 for l in lessons if l.get("is_completed"))
+    completed = sum(1 for lesson in lessons if lesson.get("is_completed"))
 
     data = {
         "group_id": group_id,
@@ -2848,9 +2847,6 @@ async def stu_complete_course(
             except json.JSONDecodeError:
                 pass
 
-        # 构建小节序号映射（用于 lesson_answers_by_index）
-        lesson_index_map = _build_lesson_index_map(elements)
-
         # 逐个完成小节
         for lesson_idx, el in enumerate(elements, start=1):
             eid = str(el.get("element_id", ""))
@@ -3267,6 +3263,7 @@ async def stu_batch_complete_course(
     # 定义批量任务函数
     async def complete_course_task(client: UMUClient, course_id: str) -> dict[str, Any]:
         """单个账号的课程完成逻辑."""
+        nonlocal q_answers_map, e_answers_map
         details: list[dict[str, Any]] = []
         completed = 0
         total = 0
@@ -3353,9 +3350,6 @@ async def stu_batch_complete_course(
                         lesson_answers_map = parsed
                 except json.JSONDecodeError:
                     pass
-
-            # 构建小节序号映射
-            lesson_index_map = _build_lesson_index_map(elements)
 
             # 逐个完成小节
             for lesson_idx, el in enumerate(elements, start=1):

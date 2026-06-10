@@ -528,7 +528,6 @@ class CourseBuilder:
         for item in raw_list:
             sinfo = item.get("sessionInfo", {})
             section_arr = item.get("sectionArr", [])
-            question_arr = item.get("questionArr", [])
             resource_info = item.get("resource_info", {})
 
             session_id = str(sinfo.get("sessionId", ""))
@@ -1056,7 +1055,6 @@ class CourseBuilder:
         Returns:
             替换后的 HTML
         """
-        import re
 
         result = html
         for path in image_paths:
@@ -3205,9 +3203,9 @@ class CourseBuilder:
         section_arr = existing.get("sectionArr", [])
         if section_arr:
             question_info = section_arr[0].get("questionInfo", {})
-            extend = question_info.get("extend", {})
-            old_resource_id = extend.get("resource_video_id", "")
-            old_cover_resource_id = extend.get("custom_cover_resource_id", "")
+            old_extend = question_info.get("extend", {})
+            old_resource_id = old_extend.get("resource_video_id", "")
+            old_cover_resource_id = old_extend.get("custom_cover_resource_id", "")
 
         # 3. 深拷贝并过滤只读字段（防止覆盖统计数据和动态内容）
         updated_info = copy.deepcopy(session_info)
@@ -3388,9 +3386,9 @@ class CourseBuilder:
         section_arr = existing.get("sectionArr", [])
         if section_arr:
             question_info = section_arr[0].get("questionInfo", {})
-            extend = question_info.get("extend", {})
-            old_resource_id = extend.get("resource_id", "")
-            old_cover_resource_id = extend.get("custom_cover_resource_id", "")
+            old_extend = question_info.get("extend", {})
+            old_resource_id = old_extend.get("resource_id", "")
+            old_cover_resource_id = old_extend.get("custom_cover_resource_id", "")
 
         # 3. 深拷贝并过滤只读字段
         updated_info = copy.deepcopy(session_info)
@@ -5718,7 +5716,7 @@ class CourseBuilder:
 
         if quiz_cover_tips_content is not None:
             _update_setup_pair("quiz_cover_tips_content", "quizCoverTipsContent", quiz_cover_tips_content)
-            changes.append(f"quiz_cover_tips_content: ...")
+            changes.append("quiz_cover_tips_content: ...")
 
         if is_set_quiz_cover is not None:
             val = "1" if is_set_quiz_cover else "0"
@@ -5750,7 +5748,7 @@ class CourseBuilder:
                     top_section_id=str(multimedia_id),
                     content=f"<p>{description}</p>",
                 )
-                changes.append(f"description: updated")
+                changes.append("description: updated")
 
         # 6. 处理题目更新（如提供）
         section_arr = existing_sections
@@ -6959,15 +6957,15 @@ class CourseBuilder:
                     "extend": {"pic_url": []},
                 })
 
-                setup = {"required": "1" if required else "0"}
+                question_setup = {"required": "1" if required else "0"}
                 if min_opts > 0:
-                    setup["limitOptionsMin"] = min_opts
+                    question_setup["limitOptionsMin"] = min_opts
                 if max_opts > 0:
-                    setup["limitOptionsMax"] = max_opts
+                    question_setup["limitOptionsMax"] = max_opts
 
                 question_info = {
                     "extend": {"pic_url": []},
-                    "setup": setup,
+                    "setup": question_setup,
                     "questionId": "",
                     "questionTitle": title,
                     "mobileQuestionTitle": title,
@@ -7069,7 +7067,6 @@ class CourseBuilder:
 
         data = resp.get("data", {})
         result_session_id = str(data.get("session_id", ""))
-        session_info_resp = data.get("session_info", {})
 
         logger.info(
             "签到小节创建成功: session_id=%s, group_id=%s, title=%s, info_count=%d",
@@ -7411,7 +7408,6 @@ class CourseBuilder:
             new_section_arr = []
             for sec in existing_sections:
                 new_sec = copy.deepcopy(sec)
-                qinfo = new_sec.get("questionInfo", {})
                 # 保留必要的字段
                 new_section_arr.append(new_sec)
             updated_info["sectionArr"] = new_section_arr

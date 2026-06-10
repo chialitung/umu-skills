@@ -4,13 +4,11 @@
 """
 
 import time
-from typing import Any
-from urllib.parse import urljoin
 
 import httpx
 
 from .encrypt import encrypt_password
-from .errors import AuthenticationError, UMUError
+from .errors import AuthenticationError
 from .models import LoginCredentials
 
 

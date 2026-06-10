@@ -18,7 +18,6 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
 
 from ...core.client import UMUClient
 

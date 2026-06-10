@@ -29,7 +29,6 @@ from .cos_upload import (
     UploadResult,
     _cos_auth_header,
     read_file_chunks,
-    validate_file_path,
 )
 
 logger = logging.getLogger("umu.mcp.teacher.document")

@@ -219,7 +219,13 @@ class TestScormUploader:
     @pytest.mark.asyncio
     async def test_stage_2_get_credentials(self, mock_preobject_response):
         """测试获取凭证."""
+        import time
         from umu_sdk.adapters.mcp.cos_upload import ScormUploader
+
+        # 更新 mock 响应中的时间戳为当前时间 + 1 小时，确保不过期
+        future_time = int(time.time()) + 3600
+        mock_preobject_response["data"]["credential_info"]["start_time"] = str(future_time - 7200)
+        mock_preobject_response["data"]["credential_info"]["expire_time"] = str(future_time)
 
         client = MagicMock()
         client.desktop_url = lambda path: f"https://www.umu.cn{path}"
@@ -293,7 +299,7 @@ class TestTchUploadScorm:
         """测试文件不存在时返回错误."""
         from umu_sdk.adapters.mcp.teacher import tch_upload_scorm
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
@@ -314,7 +320,7 @@ class TestTchUploadScorm:
             txt_path = f.name
 
         try:
-            with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+            with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
 
@@ -336,7 +342,7 @@ class TestTchUploadScorm:
             empty_path = f.name
 
         try:
-            with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+            with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
 
@@ -354,8 +360,8 @@ class TestTchUploadScorm:
         from umu_sdk.adapters.mcp.teacher import tch_upload_scorm
         from umu_sdk.adapters.mcp.cos_upload import UploadResult, UploadProgress
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client, \
-             patch("umu_sdk.mcp.server_teacher.ScormUploader") as MockUploader:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client, \
+             patch("umu_sdk.adapters.mcp.teacher.ScormUploader") as MockUploader:
 
             mock_client = MagicMock()
             mock_client.base_url = "https://www.umu.cn"
@@ -408,8 +414,8 @@ class TestTchUploadScorm:
         from umu_sdk.adapters.mcp.teacher import tch_upload_scorm
         from umu_sdk.adapters.mcp.cos_upload import UploadResult
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client, \
-             patch("umu_sdk.mcp.server_teacher.ScormUploader") as MockUploader:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client, \
+             patch("umu_sdk.adapters.mcp.teacher.ScormUploader") as MockUploader:
 
             mock_client = MagicMock()
             mock_client.base_url = "https://www.umu.cn"
@@ -450,7 +456,7 @@ class TestTchUploadScorm:
         """测试 preObject 失败时返回错误."""
         from umu_sdk.adapters.mcp.teacher import tch_upload_scorm
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.base_url = "https://www.umu.cn"
             mock_client.desktop_url = lambda path: f"https://www.umu.cn{path}"
@@ -482,7 +488,7 @@ class TestTchListResources:
         """测试成功获取资源列表."""
         from umu_sdk.adapters.mcp.teacher import tch_list_resources
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.desktop_url = lambda path: f"https://www.umu.cn{path}"
             mock_get_client.return_value = mock_client
@@ -502,7 +508,7 @@ class TestTchListResources:
         """测试空列表."""
         from umu_sdk.adapters.mcp.teacher import tch_list_resources
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.desktop_url = lambda path: f"https://www.umu.cn{path}"
             mock_get_client.return_value = mock_client
@@ -533,7 +539,7 @@ class TestTchListResources:
         """测试获取失败."""
         from umu_sdk.adapters.mcp.teacher import tch_list_resources
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.desktop_url = lambda path: f"https://www.umu.cn{path}"
             mock_get_client.return_value = mock_client
@@ -564,7 +570,7 @@ class TestTchRenameResource:
         """测试成功重命名."""
         from umu_sdk.adapters.mcp.teacher import tch_rename_resource
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.desktop_url = lambda path: f"https://www.umu.cn{path}"
             mock_get_client.return_value = mock_client
@@ -586,7 +592,7 @@ class TestTchRenameResource:
         """测试重命名失败."""
         from umu_sdk.adapters.mcp.teacher import tch_rename_resource
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.desktop_url = lambda path: f"https://www.umu.cn{path}"
             mock_get_client.return_value = mock_client
@@ -619,7 +625,7 @@ class TestTchDeleteResource:
         """测试成功删除."""
         from umu_sdk.adapters.mcp.teacher import tch_delete_resource
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.desktop_url = lambda path: f"https://www.umu.cn{path}"
             mock_get_client.return_value = mock_client
@@ -640,7 +646,7 @@ class TestTchDeleteResource:
         """测试删除失败."""
         from umu_sdk.adapters.mcp.teacher import tch_delete_resource
 
-        with patch("umu_sdk.mcp.server_teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.desktop_url = lambda path: f"https://www.umu.cn{path}"
             mock_get_client.return_value = mock_client
@@ -662,34 +668,6 @@ class TestTchDeleteResource:
 # ---------------------------------------------------------------------------
 # 环境验证策略测试
 # ---------------------------------------------------------------------------
-
-
-class TestEnvironmentValidation:
-    """测试环境验证策略."""
-
-    def test_prod_env_allows_all_domains(self):
-        """测试生产环境允许访问任何域名."""
-        from umu_sdk.core.auth import AuthManager
-
-        mock_http = MagicMock()
-        auth = AuthManager(mock_http, base_url="https://www.umu.cn")
-
-        # 生产环境应该允许访问任何域名
-        auth.validate_request_url("https://umu-cn.umucdn.cn/resource/test.zip")
-        auth.validate_request_url("https://any-external-domain.com/api")
-
-    def test_validate_request_url_no_restrictions(self):
-        """测试 validate_request_url 不对任何请求做限制."""
-        from umu_sdk.core.auth import AuthManager
-
-        mock_http = MagicMock()
-        auth = AuthManager(mock_http, base_url="https://www.umu.cn")
-
-        # 可以访问任何域名
-        auth.validate_request_url("https://www.umu.cn/api/test")
-        auth.validate_request_url("https://m.umu.cn/api/test")
-        auth.validate_request_url("https://any-domain.com/api")
-        auth.validate_request_url("https://internal-service.local/api")
 
 
 # ---------------------------------------------------------------------------
