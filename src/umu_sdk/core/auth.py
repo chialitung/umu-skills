@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 import httpx
@@ -12,6 +13,8 @@ import httpx
 from .encrypt import encrypt_password
 from .errors import AuthenticationError
 from .models import LoginCredentials
+
+logger = logging.getLogger("umu.sdk.auth")
 
 
 class AuthManager:
@@ -54,9 +57,9 @@ class AuthManager:
         if not user or not pwd:
             raise AuthenticationError("缺少登录凭据")
 
-        print(f"[Auth] 正在登录: {user}")
+        logger.info("正在登录: %s", user)
         if self.base_url:
-            print(f"[Auth] 目标环境: {self.base_url}")
+            logger.debug("目标环境: %s", self.base_url)
 
         # 加密密码
         encrypted_password = encrypt_password(pwd)
@@ -90,7 +93,7 @@ class AuthManager:
                 if token:
                     self._token = token
                     self._token_expires_at = time.time() + 3600 * 24  # 假设 24 小时过期
-                    print("[Auth] 登录成功")
+                    logger.info("登录成功")
                     return token
 
             # 登录失败
@@ -111,7 +114,7 @@ class AuthManager:
     def get_token(self) -> str | None:
         """获取当前 Token."""
         if self._token and time.time() >= self._token_expires_at - 60:
-            print("[Auth] Token 即将过期")
+            logger.warning("Token 即将过期")
         return self._token
 
     def is_authenticated(self) -> bool:
@@ -123,7 +126,7 @@ class AuthManager:
         self._token = None
         self._refresh_token = None
         self._token_expires_at = 0
-        print("[Auth] 已登出")
+        logger.info("已登出")
 
     def get_auth_headers(self) -> dict[str, str]:
         """获取认证请求头."""
