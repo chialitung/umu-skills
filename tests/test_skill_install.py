@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from pathlib import Path
 from typing import Any
 
@@ -16,9 +18,12 @@ class TestConfigureMcpServers:
         assert "mcpServers" in result
         servers = result["mcpServers"]
         assert set(servers.keys()) == {"umu-teacher", "umu-student", "umu-admin"}
-        assert servers["umu-teacher"]["command"] == "umu-skills-teacher"
-        assert servers["umu-student"]["command"] == "umu-skills-student"
-        assert servers["umu-admin"]["command"] == "umu-skills-admin"
+        assert servers["umu-teacher"]["command"] == sys.executable
+        assert servers["umu-student"]["command"] == sys.executable
+        assert servers["umu-admin"]["command"] == sys.executable
+        assert servers["umu-teacher"]["args"] == ["-m", "umu_sdk.adapters.mcp.teacher"]
+        assert servers["umu-student"]["args"] == ["-m", "umu_sdk.adapters.mcp.student"]
+        assert servers["umu-admin"]["args"] == ["-m", "umu_sdk.adapters.mcp.admin"]
 
     def test_preserves_existing_settings(self) -> None:
         settings = {"otherKey": "value", "mcpServers": {"existing": {}}}

@@ -67,8 +67,8 @@ export UMU_BASE_URL=https://www.umu.cn
 export UMU_TEACHER_USERNAME=your_username
 export UMU_TEACHER_PASSWORD=your_password
 
-# 启动 MCP 服务器
-umu-skills-teacher
+# 启动 MCP 服务器（无需将 Scripts 目录加入 PATH）
+python -m umu_sdk.adapters.mcp.teacher
 ```
 
 管理员端启动示例：
@@ -76,7 +76,7 @@ umu-skills-teacher
 ```bash
 export UMU_ADMIN_USERNAME=your_admin_username
 export UMU_ADMIN_PASSWORD=your_admin_password
-umu-skills-admin
+python -m umu_sdk.adapters.mcp.admin
 ```
 
 ### 在 Claude Code 中配置
@@ -88,7 +88,8 @@ umu-skills-admin
   "servers": {
     "umu-teacher": {
       "type": "stdio",
-      "command": "umu-skills-teacher"
+      "command": "python",
+      "args": ["-m", "umu_sdk.adapters.mcp.teacher"]
     }
   }
 }
@@ -215,7 +216,7 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 ```bash
 # 启动统一编排 MCP（自动连接 teacher/student/admin 三个子 MCP）
 export UMU_BASE_URL=https://www.umu.cn
-umu-skills-orchestrator
+python -m umu_sdk.skills.server
 ```
 
 暴露的核心工具：

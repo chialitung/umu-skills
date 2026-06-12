@@ -113,16 +113,21 @@ def _configure_mcp_servers(settings: dict) -> dict:
         "MCP_LOG_LEVEL": "${MCP_LOG_LEVEL:-INFO}",
     }
 
+    # 使用 `python -m` 启动 MCP server，避免依赖 console scripts 所在目录在 PATH 中
+    python_cmd = sys.executable
     mcp_servers["umu-teacher"] = {
-        "command": "umu-skills-teacher",
+        "command": python_cmd,
+        "args": ["-m", "umu_sdk.adapters.mcp.teacher"],
         "env": {**base_env},
     }
     mcp_servers["umu-student"] = {
-        "command": "umu-skills-student",
+        "command": python_cmd,
+        "args": ["-m", "umu_sdk.adapters.mcp.student"],
         "env": {**base_env},
     }
     mcp_servers["umu-admin"] = {
-        "command": "umu-skills-admin",
+        "command": python_cmd,
+        "args": ["-m", "umu_sdk.adapters.mcp.admin"],
         "env": {**base_env},
     }
 

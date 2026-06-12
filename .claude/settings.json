@@ -1,7 +1,8 @@
 {
   "mcpServers": {
     "umu-teacher": {
-      "command": "umu-skills-teacher",
+      "command": "python",
+      "args": ["-m", "umu_sdk.adapters.mcp.teacher"],
       "env": {
         "UMU_TEACHER_USERNAME": "${UMU_TEACHER_USERNAME}",
         "UMU_TEACHER_PASSWORD": "${UMU_TEACHER_PASSWORD}",
@@ -10,7 +11,8 @@
       }
     },
     "umu-student": {
-      "command": "umu-skills-student",
+      "command": "python",
+      "args": ["-m", "umu_sdk.adapters.mcp.student"],
       "env": {
         "UMU_STUDENT_USERNAME": "${UMU_STUDENT_USERNAME}",
         "UMU_STUDENT_PASSWORD": "${UMU_STUDENT_PASSWORD}",
@@ -19,7 +21,8 @@
       }
     },
     "umu-admin": {
-      "command": "umu-skills-admin",
+      "command": "python",
+      "args": ["-m", "umu_sdk.adapters.mcp.admin"],
       "env": {
         "UMU_ADMIN_USERNAME": "${UMU_ADMIN_USERNAME}",
         "UMU_ADMIN_PASSWORD": "${UMU_ADMIN_PASSWORD}",
