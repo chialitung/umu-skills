@@ -55,5 +55,5 @@ RELEASING.md
 # CodeGraph 索引
 .codegraph/
 
-# 用户测试或调用 MCP 时产生的过程文件
-call-records/
+# 文档目录（仅本地开发维护，不属于 SDK 交付物）
+docs/
