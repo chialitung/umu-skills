@@ -10,7 +10,7 @@
 |------|-----------|---------|
 | Teacher | `umu-teacher` | 课程创建、资源管理、小节编辑、课程设置 |
 | Student | `umu-student` | 课程学习、报名、进度查询、考试/问卷/签到 |
-| Admin | `umu-admin` | 账号管理、组织架构、批量启用/禁用账号 |
+| Admin | `umu-admin` | 账号管理、组织架构、学习数据查询、批量启用/禁用账号 |
 
 ## Teacher 工具
 
@@ -122,6 +122,14 @@
 ### 组织架构
 - `adm_list_departments` — 列出部门
 - `adm_list_groups` — 列出群组
+
+### 学习数据
+- `adm_list_learning_records` — 查询企业账号的课程学习明细
+  - 支持按最后学习时间范围、学员关键词、课程名称、部门、分组、班级筛选
+  - `student_keywords` 会自动解析为学员 uids 进行精确筛选
+  - `class_names` 会自动查询班级列表并解析为班级 IDs 进行精确筛选
+  - 支持 `fetch_all=True` 自动获取全量数据
+- `adm_list_classes` — 查询企业班级列表（含班级名称、访问码、创建者等信息）
 
 ## 工具命名规律
 

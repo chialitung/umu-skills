@@ -240,3 +240,47 @@ def admin_account_management_guide() -> str:
 2. 根据返回的 umu_id 执行操作：`adm_disable_account(umu_id="12345")`
 3. 验证结果：再次调用 `adm_list_accounts` 检查账号状态
 """
+
+
+def admin_learning_records_guide() -> str:
+    """管理员学习记录查询操作指南."""
+    return """UMU 管理员学习记录查询操作指南：
+
+【查询课程学习明细】
+调用 `adm_list_learning_records` 查询企业账号的课程学习明细。
+
+1. **何时使用 `fetch_all=True`**
+   - 用户说“获取所有学习记录”“导出学习数据”“不分页”
+   - 需要基于全部记录做统计或进一步处理
+   - 设置为 True 时会自动遍历分页，最多获取 50 页
+
+2. **常用筛选条件**
+   - 按最后学习时间：`start_day="2026-06-01"`, `end_day="2026-06-30"`
+   - 按学员关键词：`student_keywords="张三"`（自动解析为 uids）
+   - 按课程名称：`course_title="高效沟通"`（模糊搜索）
+   - 按部门：`department_ids="251103,251104"`
+   - 按企业分组：`group_ids="177124,177125"`
+   - 按班级名称：`class_names="复仇者联盟"`（自动查询班级列表并解析为 class_ids）
+   - 按班级 ID：`class_ids="442992,442993"`
+
+3. **先查班级列表**
+   - 如果不确定班级 ID，调用 `adm_list_classes` 查询企业班级列表
+   - 返回字段包括 `id`、`name`、`access_code`、`create_teacher_id`
+
+3. **响应字段说明**
+   - `records`: 学习记录列表
+   - `first_learning_time` / `last_learning_time`: Unix 时间戳（秒）
+   - `*_readable`: 对应时间戳的北京时间字符串
+   - `group_completion_rate` / `group_overall_completion_rate`: 完成率（0-1）
+   - `sum_learning_time` / `vlt`: 学习时长
+
+4. **处理大结果集**
+   - 如果 `fetch_all=True` 达到 50 页上限仍未获取完整数据，应告知用户已获取部分数据
+   - 响应中的 `pagination.total_all` 是服务端总数量，`total` 是当前返回数量
+
+【标准工作流示例】
+1. 查询某学员学习记录：`adm_list_learning_records(student_keywords="张三", fetch_all=True)`
+2. 查询某部门某时间段学习情况：`adm_list_learning_records(department_ids="251103", start_day="2026-06-01", end_day="2026-06-30", fetch_all=True)`
+3. 查询某课程学习情况：`adm_list_learning_records(course_title="高效沟通", fetch_all=True)`
+4. 查询某班级某时间段学习情况：`adm_list_learning_records(class_names="复仇者联盟", start_day="2026-06-01", end_day="2026-06-30", fetch_all=True)`
+"""

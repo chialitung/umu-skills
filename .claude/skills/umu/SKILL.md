@@ -123,7 +123,7 @@ python -m umu_sdk.skills.install --upgrade
 |------|---------|
 | Teacher | 创建课程、上传资源、添加/修改小节、设置课程信息 |
 | Student | 报名课程、学习、完成小节、查看进度、考试/问卷/签到 |
-| Admin | 创建/禁用/启用账号、查询账号、管理部门/群组 |
+| Admin | 创建/禁用/启用账号、查询账号、管理部门/群组/班级、**查询学习记录** |
 
 如果请求涉及多个角色（例如"批量创建学员账号并报名某课程"），按正确顺序调用：通常 Admin → Student。
 
@@ -207,6 +207,28 @@ python -m umu_sdk.skills.install --upgrade
 2. 调用 `stu_get_course_structure` 获取课程结构与完成状态。
 3. 如有需要，调用 `stu_get_learning_progress` 获取更详细进度。
 4. 以清晰格式汇报。
+
+**"查询某学员最近的学习记录"**
+1. 询问学员姓名/邮箱/手机号/用户名，或从上下文获取。
+2. 调用 `adm_list_learning_records(student_keywords=..., fetch_all=True)`。
+3. 工具内部自动解析学员关键词并返回学习明细。
+4. 按课程名称、完成率、学习时长汇总汇报。
+
+**"查询某班级在某时间段内的学习完成情况"**
+1. 如不确定班级名称或 ID，调用 `adm_list_classes` 获取班级列表。
+2. 调用 `adm_list_learning_records(class_names=..., start_day=..., end_day=..., fetch_all=True)`。
+3. 工具内部自动解析班级名称并返回学习明细。
+4. 汇总统计完成率、学习时长等指标。
+
+**"查询某部门在某时间段内的学习完成情况"**
+1. 如不确定部门 ID，调用 `adm_list_departments` 获取部门列表。
+2. 调用 `adm_list_learning_records(department_ids=..., start_day=..., end_day=..., fetch_all=True)`。
+3. 汇总统计完成率、学习时长等指标。
+
+**"查询某课程最近被哪些学员学习过"**
+1. 询问课程名称关键词。
+2. 调用 `adm_list_learning_records(course_title=..., fetch_all=True)`。
+3. 按学员、部门、完成状态汇总汇报。
 
 ## 参数收集原则
 
