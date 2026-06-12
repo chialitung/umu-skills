@@ -32,6 +32,13 @@ from .core.models import (
     PaginatedResponse,
 )
 
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("umu-skills")
+except PackageNotFoundError:  # pragma: no cover
+    __version__ = "unknown"
+
 __all__ = [
     "UMUClient",
     "AuthManager",
@@ -49,5 +56,3 @@ __all__ = [
     "ListCoursesParams",
     "PaginatedResponse",
 ]
-
-__version__ = "0.2.0"

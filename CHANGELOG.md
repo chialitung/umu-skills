@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-06-12
+
+### Fixed
+- `umu_sdk.__version__` 改为通过 `importlib.metadata` 动态读取 `pyproject.toml` 版本，解决硬编码 `0.2.0` 与实际包版本不一致的问题
+
 ## [0.7.1] - 2026-06-12
 
 ### Fixed
