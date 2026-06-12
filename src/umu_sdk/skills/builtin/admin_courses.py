@@ -1,0 +1,87 @@
+"""Admin 课程查询相关 Skill."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from ..decorators import SkillContext, skill
+
+
+@skill(
+    name="list_courses",
+    description="查询企业课程清单，支持按名称/标签/访问码/创建人/权限/审核状态等筛选",
+    required_servers=["admin"],
+    return_description="课程列表及分页信息",
+)
+async def list_courses(
+    ctx: SkillContext,
+    keywords: str = "",
+    owner_keywords: str = "",
+    owner_uids: str = "",
+    access_permission: int | None = None,
+    source: str = "",
+    is_course_in_lib: int | None = None,
+    audit_status: int | None = None,
+    start_day: str = "",
+    end_day: str = "",
+    page: int = 1,
+    page_size: int = 20,
+    fetch_all: bool = False,
+) -> dict[str, Any]:
+    """列出企业课程清单.
+
+    支持通过 keywords 同时模糊匹配课程名称、标签、访问码；
+    支持通过 owner_keywords 自动解析创建人 UID，或直接传入 owner_uids；
+    支持按课程权限、来源、知识库状态、审核状态、创建时间范围筛选。
+    """
+    arguments: dict[str, Any] = {
+        "page": page,
+        "page_size": page_size,
+        "fetch_all": fetch_all,
+    }
+    if keywords:
+        arguments["keywords"] = keywords
+    if owner_keywords:
+        arguments["owner_keywords"] = owner_keywords
+    if owner_uids:
+        arguments["owner_uids"] = owner_uids
+    if access_permission is not None:
+        arguments["access_permission"] = access_permission
+    if source:
+        arguments["source"] = source
+    if is_course_in_lib is not None:
+        arguments["is_course_in_lib"] = is_course_in_lib
+    if audit_status is not None:
+        arguments["audit_status"] = audit_status
+    if start_day:
+        arguments["start_day"] = start_day
+    if end_day:
+        arguments["end_day"] = end_day
+
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_list_courses",
+        arguments=arguments,
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "LIST_COURSES_FAILED",
+            "error_message": result.get("error_message") or "课程列表获取失败",
+            "suggested_action": "请确认管理员已登录",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+__all__ = ["list_courses"]
