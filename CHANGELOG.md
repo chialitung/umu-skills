@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-06-12
+
+### Fixed
+- `umu-skills-admin` 等 console scripts 因 user Scripts 目录不在 PATH 中而无法找到
+- `install.py` 现在生成 `python -m umu_sdk.adapters.mcp.<role>` 的 MCP server 配置，不再依赖 console scripts
+- 更新 `.claude/settings.json` 示例与 README，统一使用 `python -m` 方式启动 MCP server
+
 ## [0.4.1] - 2026-06-12
 
 ### Fixed
