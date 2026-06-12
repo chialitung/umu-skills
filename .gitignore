@@ -46,6 +46,12 @@ scripts/
 # Claude Code 配置
 CLAUDE.md
 
+# 发布流程文档（仅本地开发使用）
+RELEASING.md
+
+# Claude Code 运行时配置与 skill 定义（不属于 SDK 交付物）
+.claude/
+
 # CodeGraph 索引
 .codegraph/
 
