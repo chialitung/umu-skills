@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Annotated, Any, AsyncIterator
@@ -30,7 +31,10 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
+from ...core.admin_models import AdminAccount, AdminAccountRaw, format_timestamp_beijing
+from ...core.env_loader import load_env_credentials
 from .session import SessionManager
+from . import prompts
 
 # ---------------------------------------------------------------------------
 # 日志配置
@@ -79,8 +83,12 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     global _umu_client, _session_manager
 
     base_url = os.getenv("UMU_BASE_URL", "https://www.umu.cn")
-    username = os.getenv("UMU_ADMIN_USERNAME")
-    password = os.getenv("UMU_ADMIN_PASSWORD")
+    # 每次启动都重新读取 .env 中的管理员账号凭据
+    username, password = load_env_credentials("admin")
+    if not username:
+        username = os.getenv("UMU_ADMIN_USERNAME")
+    if not password:
+        password = os.getenv("UMU_ADMIN_PASSWORD")
 
     _session_manager = SessionManager(
         base_url=base_url,
@@ -484,6 +492,7 @@ _ROLE_TYPE_MAP = {
     2: "讲师",
     3: "学习负责人",
     4: "系统管理员",
+    5: "子管理员",
 }
 
 # 账号状态文本映射
@@ -1062,7 +1071,7 @@ async def adm_list_accounts(
         int | None,
         Field(
             default=None,
-            description="角色筛选：1=学员, 2=讲师, 3=学习负责人, 4=系统管理员。不提供则不筛选。",
+            description="角色筛选：1=学员, 2=讲师, 3=学习负责人, 4=系统管理员, 5=子管理员。不提供则不筛选。",
         ),
     ] = None,
     account_status: Annotated[
@@ -1075,7 +1084,7 @@ async def adm_list_accounts(
     ] = None,
     is_manager: Annotated[
         int,
-        Field(default=0, description="0=普通成员, 1=管理员"),
+        Field(default=0, description="0=返回全部账号（不限制角色）, 1=仅返回管理视角账号"),
     ] = 0,
     page: Annotated[
         int,
@@ -1083,8 +1092,8 @@ async def adm_list_accounts(
     ] = 1,
     page_size: Annotated[
         int,
-        Field(default=20, ge=1, le=100, description="每页数量（1-100），默认20"),
-    ] = 20,
+        Field(default=500, ge=1, le=500, description="每页数量（1-500），默认500"),
+    ] = 500,
     fetch_all: Annotated[
         bool,
         Field(
@@ -1119,7 +1128,9 @@ async def adm_list_accounts(
     - account_status: 状态码（数字），不同企业平台映射可能不同
     - status_text: 状态人读文本（基于常见映射，仅供参考）
     - is_active: "1"=活跃
-    - role_type: 1=学员, 2=讲师, 3=学习负责人, 4=系统管理员
+    - role_type: 1=学员, 2=讲师, 3=学习负责人, 4=系统管理员, 5=子管理员
+    - account_joining_time / first_login_time / last_login_time: Unix 时间戳（秒）
+    - *_readable: 对应时间戳的北京时间字符串（%Y-%m-%d %H:%M:%S）
     """
     client = _get_client(session_id)
 
@@ -1159,26 +1170,42 @@ async def adm_list_accounts(
         user_list = resp.get("data", {}).get("list", [])
         accounts = []
         for user in user_list:
-            status_code = int(user.get("account_status", 0) or 0)
-            accounts.append(
-                {
-                    "umu_id": str(user.get("umu_id", "")),
-                    "user_name": user.get("user_name", ""),
-                    "email": user.get("email", ""),
-                    "phone": user.get("phone", ""),
-                    "login_name": user.get("login_name", ""),
-                    "number": user.get("number", ""),
-                    "account_status": status_code,
-                    "status_text": _get_status_text(status_code),
-                    "is_active": user.get("is_active", ""),
-                    "role_type": int(user.get("role_type", 0) or 0),
-                    "role_name": _ROLE_TYPE_MAP.get(
-                        int(user.get("role_type", 0) or 0), "未知"
-                    ),
-                    "departments": user.get("departments", ""),
-                    "account_joining_time": user.get("account_joining_time", 0),
-                }
-            )
+            try:
+                raw = AdminAccountRaw(**user)
+                accounts.append(AdminAccount.from_raw(raw).model_dump())
+            except Exception:
+                # 如果个别账号字段异常，回退到原始字典构造逻辑，保证列表不中断
+                status_code = int(user.get("account_status", 0) or 0)
+                accounts.append(
+                    {
+                        "umu_id": str(user.get("umu_id", "")),
+                        "user_name": user.get("user_name", ""),
+                        "email": user.get("email", ""),
+                        "phone": user.get("phone", ""),
+                        "login_name": user.get("login_name", ""),
+                        "number": user.get("number", ""),
+                        "account_status": status_code,
+                        "status_text": _get_status_text(status_code),
+                        "is_active": user.get("is_active", ""),
+                        "role_type": int(user.get("role_type", 0) or 0),
+                        "role_name": _ROLE_TYPE_MAP.get(
+                            int(user.get("role_type", 0) or 0), "未知"
+                        ),
+                        "departments": user.get("departments", ""),
+                        "account_joining_time": user.get("account_joining_time", 0),
+                        "account_joining_time_readable": format_timestamp_beijing(
+                            user.get("account_joining_time", 0) or 0
+                        ),
+                        "first_login_time": user.get("first_login_time", 0),
+                        "first_login_time_readable": format_timestamp_beijing(
+                            user.get("first_login_time", 0) or 0
+                        ),
+                        "last_login_time": user.get("last_login_time", 0),
+                        "last_login_time_readable": format_timestamp_beijing(
+                            user.get("last_login_time", 0) or 0
+                        ),
+                    }
+                )
 
         total_all = int(
             resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0
@@ -1190,17 +1217,42 @@ async def adm_list_accounts(
             # 自动获取全量数据
             all_accounts: list[dict] = []
             current_page = 1
-            batch_size = 100
+            batch_size = 500
             total_all = 0
 
             while True:
                 accounts, total_all = _fetch_page(current_page, batch_size)
                 all_accounts.extend(accounts)
+
+                # 控制台进度提示（输出到 stderr，避免干扰 MCP stdio 协议）
+                progress_pct = ""
+                if total_all > 0:
+                    pct = min(100, int(len(all_accounts) / total_all * 100))
+                    progress_pct = f" ({pct}%)"
+                if total_all > 0 and current_page == 1:
+                    print(
+                        f"[adm_list_accounts] 共 {total_all} 条，预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
+                        file=sys.stderr,
+                    )
+                print(
+                    f"[adm_list_accounts] 已获取第 {current_page} 页，累计 {len(all_accounts)} / {total_all} 条{progress_pct}",
+                    file=sys.stderr,
+                )
+
                 if len(all_accounts) >= total_all or not accounts:
+                    print(
+                        f"[adm_list_accounts] 获取完成，共 {len(all_accounts)} 条，合计 {current_page} 页",
+                        file=sys.stderr,
+                    )
                     break
                 current_page += 1
                 # 安全上限：最多 50 页
                 if current_page > 50:
+                    warning_msg = (
+                        f"[adm_list_accounts] 警告：达到 50 页安全上限，停止获取"
+                        f"（已获取 {len(all_accounts)} 条）"
+                    )
+                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -1843,6 +1895,16 @@ async def adm_batch_enable_accounts(
 
 
 # ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
+
+@mcp.prompt()
+def adm_account_management_guide() -> str:
+    """管理员账号管理操作指南（含分页策略）."""
+    return prompts.admin_account_management_guide()
+
+
+# ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 
@@ -1850,7 +1912,6 @@ async def adm_batch_enable_accounts(
 def main() -> None:
     """MCP 服务入口."""
     import asyncio
-    import sys
 
     print("=" * 60)
     print("UMU 管理员端 MCP Server")
@@ -1873,6 +1934,9 @@ def main() -> None:
     print("        adm_batch_disable_accounts, adm_batch_enable_accounts,")
     print("        adm_get_scheduled_disables,")
     print("        adm_list_departments, adm_list_groups")
+    print()
+    print("可用 Prompts:")
+    print("  - adm_account_management_guide")
     print()
 
     transport = os.getenv("MCP_TRANSPORT", "stdio")
