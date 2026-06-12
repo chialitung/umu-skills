@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "umu-teacher": {
+      "command": "umu-skills-teacher",
+      "env": {
+        "UMU_TEACHER_USERNAME": "${UMU_TEACHER_USERNAME}",
+        "UMU_TEACHER_PASSWORD": "${UMU_TEACHER_PASSWORD}",
+        "UMU_BASE_URL": "${UMU_BASE_URL:-https://www.umu.cn}",
+        "MCP_LOG_LEVEL": "${MCP_LOG_LEVEL:-INFO}"
+      }
+    },
+    "umu-student": {
+      "command": "umu-skills-student",
+      "env": {
+        "UMU_STUDENT_USERNAME": "${UMU_STUDENT_USERNAME}",
+        "UMU_STUDENT_PASSWORD": "${UMU_STUDENT_PASSWORD}",
+        "UMU_BASE_URL": "${UMU_BASE_URL:-https://www.umu.cn}",
+        "MCP_LOG_LEVEL": "${MCP_LOG_LEVEL:-INFO}"
+      }
+    },
+    "umu-admin": {
+      "command": "umu-skills-admin",
+      "env": {
+        "UMU_ADMIN_USERNAME": "${UMU_ADMIN_USERNAME}",
+        "UMU_ADMIN_PASSWORD": "${UMU_ADMIN_PASSWORD}",
+        "UMU_BASE_URL": "${UMU_BASE_URL:-https://www.umu.cn}",
+        "MCP_LOG_LEVEL": "${MCP_LOG_LEVEL:-INFO}"
+      }
+    }
+  }
+}

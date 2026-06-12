@@ -33,6 +33,7 @@ dependencies = [
 [project.optional-dependencies]
 mcp = [
     "mcp>=1.0.0",
+    "keyring>=25.0.0",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -48,6 +49,7 @@ umu-skills = "umu_sdk.adapters.mcp.student:main"
 umu-skills-student = "umu_sdk.adapters.mcp.student:main"
 umu-skills-teacher = "umu_sdk.adapters.mcp.teacher:main"
 umu-skills-admin = "umu_sdk.adapters.mcp.admin:main"
+umu-skills-orchestrator = "umu_sdk.skills.server:main"
 
 [project.urls]
 Homepage = "https://github.com/your-org/umu-skills"
