@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-12
+
+### Added
+- Admin MCP server 工具集扩展：账号管理、学习记录查询等核心管理员能力
+- `src/umu_sdk/core/admin_models.py` 新增 Admin 领域 Pydantic 模型
+- `src/umu_sdk/adapters/mcp/prompts.py` 扩展 Admin 角色 prompts
+- `tests/test_admin_learning_records.py` 新增学习记录相关单元测试
+
 ## [0.4.3] - 2026-06-12
 
 ### Fixed
