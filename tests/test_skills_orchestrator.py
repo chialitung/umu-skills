@@ -198,6 +198,181 @@ class TestSkillRun:
         assert parsed["data"]["group_id"] == "mock-group-id"
 
 
+class TestSkillCallAtomicTool:
+    async def test_call_atomic_tool_success(self, mock_mcp: MockMCPClientManager) -> None:
+        skills_server._mcp_client = mock_mcp
+        result = await skills_server.skill_call_atomic_tool(
+            server="teacher",
+            tool="tch_get_categories",
+            arguments={},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"] == {"mock": True}
+        assert mock_mcp.calls == [("teacher", "tch_get_categories", {})]
+
+    async def test_call_atomic_tool_server_unavailable(
+        self, mock_mcp: MockMCPClientManager
+    ) -> None:
+        mock_mcp.list_servers = lambda: ["student"]  # type: ignore[method-assign]
+        skills_server._mcp_client = mock_mcp
+        result = await skills_server.skill_call_atomic_tool(
+            server="teacher",
+            tool="tch_get_categories",
+            arguments={},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "SERVER_UNAVAILABLE"
+
+    async def test_call_atomic_tool_failure(self, mock_mcp: MockMCPClientManager) -> None:
+        responses = {
+            ("teacher", "tch_delete_section"): {
+                "success": False,
+                "error_code": "SECTION_NOT_FOUND",
+                "error_message": "小节不存在",
+            },
+        }
+        mock_mcp_with_error = MockMCPClientManager(responses)
+        skills_server._mcp_client = mock_mcp_with_error
+        result = await skills_server.skill_call_atomic_tool(
+            server="teacher",
+            tool="tch_delete_section",
+            arguments={"section_id": "123"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "SECTION_NOT_FOUND"
+        assert parsed["error_message"] == "小节不存在"
+
+    async def test_call_atomic_tool_server_not_ready(self) -> None:
+        skills_server._mcp_client = None
+        result = await skills_server.skill_call_atomic_tool(
+            server="teacher",
+            tool="tch_get_categories",
+            arguments={},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "SERVER_NOT_READY"
+
+
+class TestBuiltinSkillParameterFixes:
+    async def test_enroll_course_uses_enroll_id(self) -> None:
+        responses = {
+            ("student", "stu_enroll_course"): {
+                "success": True,
+                "data": {"is_enrolled": True},
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        registry = SkillRegistry()
+        registry.load_builtin_skills()
+        skills_server._skill_registry = registry
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="enroll_course",
+            arguments={"enroll_id": "mock-enroll-id"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("student", "stu_enroll_course", {"enroll_id": "mock-enroll-id"}),
+        ]
+
+    async def test_batch_onboard_users_uses_correct_parameters(self) -> None:
+        responses = {
+            ("admin", "adm_create_account"): {
+                "success": True,
+                "data": {"user_id": "mock-user-id"},
+            },
+            ("student", "stu_enroll_course"): {
+                "success": True,
+                "data": {"is_enrolled": True},
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        registry = SkillRegistry()
+        registry.load_builtin_skills()
+        skills_server._skill_registry = registry
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="batch_onboard_users",
+            arguments={
+                "users": [
+                    {
+                        "user_name": "张三",
+                        "accounts": "zhangsan@example.com",
+                        "role_type": 1,
+                    },
+                ],
+                "enroll_id": "mock-enroll-id",
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["created"] == 1
+        assert parsed["data"]["enrolled"] == 1
+
+        # 验证 adm_create_account 使用了正确的参数名
+        admin_call = mock_mcp.calls[0]
+        assert admin_call[0] == "admin"
+        assert admin_call[1] == "adm_create_account"
+        assert admin_call[2] == {
+            "user_name": "张三",
+            "accounts": "zhangsan@example.com",
+            "role_type": 1,
+        }
+
+        # 验证 stu_enroll_course 使用了 enroll_id
+        student_call = mock_mcp.calls[1]
+        assert student_call[0] == "student"
+        assert student_call[1] == "stu_enroll_course"
+        assert student_call[2] == {"enroll_id": "mock-enroll-id"}
+
+    async def test_batch_onboard_users_compatible_with_old_format(self) -> None:
+        responses = {
+            ("admin", "adm_create_account"): {
+                "success": True,
+                "data": {"user_id": "mock-user-id"},
+            },
+            ("student", "stu_enroll_course"): {
+                "success": True,
+                "data": {"is_enrolled": True},
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        registry = SkillRegistry()
+        registry.load_builtin_skills()
+        skills_server._skill_registry = registry
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="batch_onboard_users",
+            arguments={
+                "users": [
+                    {
+                        "name": "李四",
+                        "email": "lisi@example.com",
+                        "role": "student",
+                    },
+                ],
+                "enroll_id": "mock-enroll-id",
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+
+        admin_call = mock_mcp.calls[0]
+        assert admin_call[2] == {
+            "user_name": "李四",
+            "accounts": "lisi@example.com",
+            "role_type": 1,
+        }
+
+
 @pytest.mark.asyncio
 async def test_skill_double_direct() -> None:
     """直接验证 @skill 装饰后的函数可被调用."""

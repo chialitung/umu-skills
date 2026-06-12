@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Skill 层高频封装：Teacher 17 个、Student 13 个、Admin 8 个 Skill（资源上传、小节管理、学习流程、问卷考试、组织架构、账号管理、学习记录等）
+- 新增 `skill_call_atomic_tool` 透传工具，作为未封装原子工具的兜底调用方式
+- 新增 `tests/test_teacher_skills.py`、`tests/test_student_skills.py`、`tests/test_admin_skills.py`、`tests/test_skills_integration.py`
+
+### Fixed
+- 修复 `batch_onboard_users` 调用 `adm_create_account` 和 `stu_enroll_course` 时的参数不匹配问题
+- 修复 `enroll_course` 调用 `stu_enroll_course` 时错误传递 `course_identifier` 的问题，改为接收 `enroll_id`
+
+### Changed
+- 更新 `tests/test_skills_registry.py` 验证所有新增 Skill 正确注册
+- 更新 `README.md` 与 `CLAUDE.md` 补充 Skill 列表与透传工具说明
+
 ## [0.5.0] - 2026-06-12
 
 ### Added

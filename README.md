@@ -9,6 +9,7 @@ UMU Skills 是一个 AI 技能框架，它将 UMU 学习平台的管理操作封
 ## 功能特性
 
 - **三角色 MCP 服务器**：分别为教师（课程创建、资源管理）、学生（课程报名、学习进度）和管理员（账号管理、学习记录、数据查询）提供独立的工具集
+- **高阶 Skill 编排**：将高频、跨角色流程封装为 `skill_run` 可调用的 Skill，并保留 `skill_call_atomic_tool` 透传兜底
 - **课程构建器**：支持创建包含多种环节类型的课程 —— SCORM、视频、文档、文章、信息图、问卷、考试、签到
 - **资源上传**：SCORM（腾讯云 COS 分片上传）、视频、文档、图片，并支持进度追踪
 - **批量操作**：多用户课程完成处理，支持并发控制
@@ -218,7 +219,7 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 ### 技能编排层（Skills Orchestrator）
 
 当 Teacher / Student / Admin 三个 MCP 的原子工具数量增多后，直接让 AI 记住每个工具名和调用顺序会变得困难。
-`umu-skills-orchestrator` 是一个统一入口，它将高频、跨角色的多步流程封装为更高阶的 **Skill**：
+`umu-skills-orchestrator` 是一个统一入口，它将高频、跨角色的多步流程封装为更高阶的 **Skill**，同时为低频或新增原子工具保留受控的 **透传调用** 能力：
 
 ```bash
 # 启动统一编排 MCP（自动连接 teacher/student/admin 三个子 MCP）
@@ -233,15 +234,68 @@ python -m umu_sdk.skills.server
 | `skill_list` | 列出所有可用 Skill |
 | `skill_describe` | 查看指定 Skill 的输入参数 |
 | `skill_run` | 执行指定 Skill |
+| `skill_call_atomic_tool` | 透传调用任意原子工具（兜底/探索场景） |
 
-内置示例 Skill：
+**`skill_call_atomic_tool` 使用示例：**
+
+```json
+{
+  "server": "teacher",
+  "tool": "tch_get_course_stats",
+  "arguments": {"group_id": "123456"}
+}
+```
+
+透传工具遵循以下约束：
+- 仅允许 `teacher` / `student` / `admin` 三个目标服务器
+- 返回与 Skill 统一的标准信封格式
+- AI 应优先使用 `skill_run` 调用已封装 Skill，仅在工具未覆盖时使用透传
+
+内置 Skill 覆盖高频场景（共 40+）：
 
 | Skill | 涉及子 MCP | 说明 |
 |-------|-----------|------|
 | `create_course_with_scorm` | teacher | 创建空课程并添加 SCORM 小节 |
+| `upload_scorm_resource` | teacher | 上传 SCORM 资源 |
+| `upload_document_resource` | teacher | 上传文档资源 |
+| `upload_video_resource` | teacher | 上传视频资源 |
+| `list_scorm_resources` | teacher | 列出 SCORM 资源 |
+| `list_document_resources` | teacher | 列出文档资源 |
+| `list_video_resources` | teacher | 列出视频资源 |
+| `add_video_section` | teacher | 为课程添加视频小节 |
+| `add_article_section` | teacher | 为课程添加文章小节 |
+| `add_infographic_section` | teacher | 为课程添加图文小节 |
+| `add_document_section` | teacher | 为课程添加文档小节 |
+| `add_survey_section` | teacher | 为课程添加问卷小节 |
+| `add_exam_section` | teacher | 为课程添加考试小节 |
+| `add_signin_section` | teacher | 为课程添加签到小节 |
+| `list_course_sections` | teacher | 列出课程小节 |
+| `get_course_categories` | teacher | 获取课程分类 |
+| `get_course_info` | teacher | 获取课程详情 |
+| `list_my_courses` | teacher | 列出讲师创建的课程 |
 | `enroll_course` | student | 学员报名课程 |
 | `get_course_progress` | student | 查询学员课程进度 |
+| `resolve_course_identifier` | student | 解析课程访问码/短域名/URL |
+| `list_my_courses_student` | student | 列出学员的课程 |
+| `complete_browse_lesson` | student | 完成浏览类小节 |
+| `complete_checkin` | student | 完成签到 |
+| `complete_rating_checkin` | student | 完成评分签到 |
+| `check_lesson_completion` | student | 查询小节完成状态 |
+| `get_questionnaire` | student | 获取问卷题目 |
+| `submit_questionnaire` | student | 提交问卷（JSON） |
+| `submit_questionnaire_simple` | student | 使用简化配置提交问卷 |
+| `start_exam` | student | 开始考试 |
+| `submit_exam` | student | 提交考试（JSON） |
+| `submit_exam_simple` | student | 使用简化配置提交考试 |
+| `complete_entire_course` | student | 自动完成整门课程 |
 | `batch_onboard_users` | admin + student | 批量创建学员账号并报名课程 |
+| `list_departments` | admin | 列出部门 |
+| `list_groups` | admin | 列出分组 |
+| `list_classes` | admin | 列出班级 |
+| `list_accounts` | admin | 查询账号列表 |
+| `disable_account` | admin | 禁用账号 |
+| `enable_account` | admin | 启用账号 |
+| `get_learning_records` | admin | 查询学习记录 |
 
 自定义 Skill 示例（`src/umu_sdk/skills/builtin/`）：
 

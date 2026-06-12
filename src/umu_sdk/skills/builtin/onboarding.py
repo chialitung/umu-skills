@@ -10,20 +10,22 @@ from ..decorators import SkillContext, skill
 
 @skill(
     name="batch_onboard_users",
-    description="批量创建学员账号并为其报名指定课程",
+    description="批量创建账号并为其报名指定课程（在当前 student 会话中报名）",
     required_servers=["admin", "student"],
     return_description="每个账号的创建与报名结果",
 )
 async def batch_onboard_users(
     ctx: SkillContext,
     users: list[dict[str, Any]],
-    course_identifier: str,
+    enroll_id: str,
 ) -> dict[str, Any]:
-    """批量创建学员账号并报名课程.
+    """批量创建账号并报名课程.
 
     Args:
-        users: 每个元素为 {"name": "", "phone": "", "email": ""} 的字典列表。
-        course_identifier: 要报名的课程标识。
+        users: 每个元素为账号信息字典，推荐格式：
+            {"user_name": "", "accounts": "邮箱", "role_type": 1}
+            为兼容旧调用，也支持 {"name": "", "email": "", "role": "student"}。
+        enroll_id: 报名 ID，来自 stu_get_course_structure 返回的 enroll_id。
 
     Returns:
         标准返回信封，data 中 reports 包含每条记录的结果。
@@ -34,32 +36,35 @@ async def batch_onboard_users(
     ctx.logger.info("[batch_onboard_users] 开始处理 %d 条账号", total)
 
     for index, user in enumerate(users, start=1):
-        name = user.get("name", "")
-        phone = user.get("phone", "")
-        email = user.get("email", "")
+        user_name, accounts, role_type = _normalize_user_info(user)
+
         print(
-            f"[batch_onboard_users] 正在处理第 {index} / {total} 条: {name}",
+            f"[batch_onboard_users] 正在处理第 {index} / {total} 条: {user_name}",
             file=sys.stderr,
         )
 
         report: dict[str, Any] = {
-            "name": name,
-            "phone": phone,
-            "email": email,
+            "user_name": user_name,
+            "accounts": accounts,
+            "role_type": role_type,
             "create_success": False,
             "enroll_success": False,
             "error": "",
         }
+
+        if not accounts:
+            report["error"] = "缺少账号邮箱（accounts）"
+            reports.append(report)
+            continue
 
         # 1. 创建账号
         create_result = await ctx.call_tool(
             server="admin",
             tool="adm_create_account",
             arguments={
-                "name": name,
-                "phone": phone,
-                "email": email,
-                "role": "student",
+                "user_name": user_name,
+                "accounts": accounts,
+                "role_type": role_type,
             },
         )
         if not create_result["success"]:
@@ -71,14 +76,12 @@ async def batch_onboard_users(
         user_id = _extract_user_id(create_result.get("data"))
         report["user_id"] = user_id
 
-        # 2. 报名课程
+        # 2. 报名课程（在当前 student 会话中执行）
         enroll_result = await ctx.call_tool(
             server="student",
             tool="stu_enroll_course",
             arguments={
-                "course_identifier": course_identifier,
-                # 如果子 MCP 支持按 user_id 代报名可传入
-                "user_id": user_id,
+                "enroll_id": enroll_id,
             },
         )
         if not enroll_result["success"]:
@@ -113,6 +116,42 @@ async def batch_onboard_users(
         "suggested_action": "",
         "next_action": "proceed",
     }
+
+
+def _normalize_user_info(user: dict[str, Any]) -> tuple[str, str, int]:
+    """将多种用户输入格式归一化为 (user_name, accounts, role_type).
+
+    支持：
+    - 推荐格式：{"user_name": "", "accounts": "", "role_type": 1}
+    - 兼容格式：{"name": "", "email": "", "role": "student"}
+    """
+    user_name = user.get("user_name") or user.get("name") or ""
+    accounts = user.get("accounts") or user.get("email") or ""
+
+    role_type: int | None = user.get("role_type")
+    if role_type is None:
+        role = user.get("role", "student")
+        role_type = _role_to_type(role)
+
+    return str(user_name), str(accounts), int(role_type)
+
+
+def _role_to_type(role: Any) -> int:
+    """将角色字符串或数字映射为 role_type."""
+    if isinstance(role, int):
+        return role
+    role_str = str(role).lower().strip()
+    mapping = {
+        "student": 1,
+        "学员": 1,
+        "teacher": 2,
+        "讲师": 2,
+        "manager": 3,
+        "学习负责人": 3,
+        "admin": 4,
+        "系统管理员": 4,
+    }
+    return mapping.get(role_str, 1)
 
 
 def _extract_user_id(data: Any) -> str | None:

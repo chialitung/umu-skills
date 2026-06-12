@@ -125,6 +125,7 @@ mcp = FastMCP(
 - skill_list：列出所有可用 Skill
 - skill_describe：查看指定 Skill 的输入参数说明
 - skill_run：执行指定 Skill
+- skill_call_atomic_tool：直接调用子 MCP 的任意原子工具（兜底/探索场景）
 
 内置示例 Skill：
 - create_course_with_scorm：创建空课程并添加 SCORM 小节
@@ -284,6 +285,59 @@ async def skill_run(name: str, arguments: dict[str, Any]) -> str:
         return result
 
     return _ok(data=result)
+
+
+@mcp.tool()
+async def skill_call_atomic_tool(
+    server: str,
+    tool: str,
+    arguments: dict[str, Any] | None = None,
+    read_timeout_seconds: float | None = None,
+) -> str:
+    """直接调用子 MCP 的任意原子工具（兜底/探索场景）。
+
+    仅用于尚未封装为 Skill 的低频工具或新增工具。AI 应优先使用 skill_run。
+
+    Args:
+        server: 子 MCP 名称（teacher/student/admin）。
+        tool: 原子工具名称（如 tch_get_categories）。
+        arguments: 透传给原子工具的参数字典。
+        read_timeout_seconds: 可选超时秒数。
+    """
+    if _mcp_client is None:
+        return _err("SERVER_NOT_READY", "Orchestrator 尚未完成初始化")
+
+    available = set(_mcp_client.list_servers())
+    if server not in available:
+        return _err(
+            "SERVER_UNAVAILABLE",
+            f"子 MCP [{server}] 未连接。可用服务器: {', '.join(sorted(available)) or '无'}",
+            suggested_action="请检查 orchestrator 配置或启动对应的子 MCP",
+        )
+
+    try:
+        result = await _mcp_client.call_tool(
+            server=server,
+            tool=tool,
+            arguments=arguments or {},
+            read_timeout_seconds=read_timeout_seconds,
+        )
+    except Exception as e:
+        logger.exception("透传调用原子工具 [%s/%s] 时出错", server, tool)
+        return _err(
+            "ATOMIC_TOOL_ERROR",
+            f"调用原子工具时发生异常: {e}",
+            suggested_action="请检查子 MCP 日志或工具参数",
+        )
+
+    if not result.success:
+        return _err(
+            error_code=result.error_code or "ATOMIC_TOOL_FAILED",
+            error_message=result.error_message or "原子工具调用失败",
+            data=result.data,
+        )
+
+    return _ok(data=result.data)
 
 
 # ---------------------------------------------------------------------------
