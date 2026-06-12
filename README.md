@@ -252,7 +252,7 @@ python -m umu_sdk.skills.server
 - 返回与 Skill 统一的标准信封格式
 - AI 应优先使用 `skill_run` 调用已封装 Skill，仅在工具未覆盖时使用透传
 
-内置 Skill 覆盖高频场景（共 40+）：
+内置 Skill 覆盖高频场景（共 41+）：
 
 | Skill | 涉及子 MCP | 说明 |
 |-------|-----------|------|
@@ -294,6 +294,7 @@ python -m umu_sdk.skills.server
 | `list_groups` | admin | 列出分组 |
 | `list_classes` | admin | 列出班级 |
 | `list_accounts` | admin | 查询账号列表 |
+| `list_courses` | admin | 查询企业课程清单 |
 | `disable_account` | admin | 禁用账号 |
 | `enable_account` | admin | 启用账号 |
 | `get_learning_records` | admin | 查询学习记录 |

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-12
+
+### Fixed
+- `README.md` 遗漏内置 Skill `list_courses`，现已补充到管理员 Skill 列表
+
 ## [0.7.0] - 2026-06-12
 
 ### Added
