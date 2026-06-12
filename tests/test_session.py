@@ -150,8 +150,8 @@ async def test_cleanup_expired(manager: SessionManager):
     """测试清理过期会话."""
     manager.session_ttl = 0
 
-    s1 = await manager.create_session()
-    s2 = await manager.create_session()
+    await manager.create_session()
+    await manager.create_session()
 
     count = await manager.cleanup_expired()
     assert count == 2

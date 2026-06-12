@@ -96,6 +96,81 @@ umu-skills-admin
 
 有关 Claude Desktop、VSCode Cline 等客户端的详细配置指南，请参见 [docs/README-MCP-SETUP.md](docs/README-MCP-SETUP.md)。
 
+### 使用 `/umu` Skill（推荐）
+
+除了直接配置单个 MCP server，你还可以安装 `/umu` Skill，通过自然语言让 AI 自动识别需要调用 Teacher、Student 还是 Admin 工具。
+
+#### 1. 安装 Skill
+
+```bash
+python -m umu_sdk.skills.install
+```
+
+这条命令会：
+- 安装/升级 `umu-skills` 包
+- 把 `.claude/skills/umu/` 复制到你的 Claude Code 全局 skills 目录
+- 在 `.claude/settings.json` 中配置好 `umu-teacher`、`umu-student`、`umu-admin` 三个 MCP server
+
+安装完成后重启 Claude Code。
+
+#### 2. 配置账号
+
+首次输入 `/umu` 时，如果缺少账号，Claude 会交互式询问并自动加密保存到：
+
+```text
+Windows: C:\Users\<用户名>\.claude\skills\umu\credentials.enc
+macOS/Linux: ~/.claude/skills/umu/credentials.enc
+```
+
+你可以配置以下角色的账号和密码：
+
+- **Teacher（讲师）**：创建课程、上传资源、管理小节
+- **Student（学员）**：报名课程、学习、查看进度
+- **Admin（管理员）**：账号管理、组织架构、数据查询
+
+只需要配置你实际会用到的角色即可。
+
+加密方式：
+- 凭证本身使用 **Fernet 对称加密**
+- Fernet 密钥由操作系统 keyring 保护（Windows DPAPI / macOS Keychain / Linux Secret Service）
+- keyring 不可用时自动回退到同目录的 `.fernet.key` 文件
+
+保存账号后，**必须重启 Claude Code**，MCP server 才能读取凭证并开始执行 UMU 操作。
+
+你也可以随时通过 `/umu` 以对话方式新增或修改账号信息，例如：
+
+```text
+/umu 添加管理员账号
+/umu 修改我的讲师账号
+/umu 更新管理员密码
+/umu 删除 student 的账号信息
+```
+
+修改后同样需要重启 Claude Code。
+
+#### 3. 使用示例
+
+```text
+/umu 帮我创建一个课程，名字叫《新员工入职培训》
+/umu 获取平台上的用户清单
+/umu 给学员张三报名课程 aet504
+/umu 批量创建 10 个学员账号并为他们报名《销售技巧》课程
+/umu 上传 SCORM 课件 /path/to/course.zip 并创建一个新课程绑定它
+```
+
+#### 4. 修改账号信息
+
+你可以通过自然语言指令让 AI 更新保存的账号：
+
+```text
+/umu 修改我的讲师账号
+/umu 更新管理员密码
+/umu 把学员账号改成 xxx
+/umu 删除 student 的账号信息
+```
+
+修改后需要重启 Claude Code，让 MCP server 重新读取凭证。
+
 ## 可用工具
 
 ### 管理员工具（15）
@@ -132,6 +207,51 @@ umu-skills-admin
 | 学习 | `stu_enroll_course`, `stu_browse_lesson`, `stu_submit_questionnaire`, `stu_check_in`, `stu_start_exam` |
 | 批量 | `stu_batch_import_accounts`, `stu_batch_complete_course` |
 
+### 技能编排层（Skills Orchestrator）
+
+当 Teacher / Student / Admin 三个 MCP 的原子工具数量增多后，直接让 AI 记住每个工具名和调用顺序会变得困难。
+`umu-skills-orchestrator` 是一个统一入口，它将高频、跨角色的多步流程封装为更高阶的 **Skill**：
+
+```bash
+# 启动统一编排 MCP（自动连接 teacher/student/admin 三个子 MCP）
+export UMU_BASE_URL=https://www.umu.cn
+umu-skills-orchestrator
+```
+
+暴露的核心工具：
+
+| 工具 | 说明 |
+|------|------|
+| `skill_list` | 列出所有可用 Skill |
+| `skill_describe` | 查看指定 Skill 的输入参数 |
+| `skill_run` | 执行指定 Skill |
+
+内置示例 Skill：
+
+| Skill | 涉及子 MCP | 说明 |
+|-------|-----------|------|
+| `create_course_with_scorm` | teacher | 创建空课程并添加 SCORM 小节 |
+| `enroll_course` | student | 学员报名课程 |
+| `get_course_progress` | student | 查询学员课程进度 |
+| `batch_onboard_users` | admin + student | 批量创建学员账号并报名课程 |
+
+自定义 Skill 示例（`src/umu_sdk/skills/builtin/`）：
+
+```python
+from umu_sdk.skills.decorators import skill, SkillContext
+
+@skill(
+    name="my_custom_flow",
+    description="我的自定义流程",
+    required_servers=["teacher"],
+)
+async def my_custom_flow(ctx: SkillContext, title: str) -> dict:
+    result = await ctx.call_tool("teacher", "tch_create_course", {"title": title})
+    return result
+```
+
+更多配置方式见 `src/umu_sdk/skills/config.py`。
+
 ## 开发
 
 ```bash
@@ -159,7 +279,7 @@ mypy src/
 | 第一阶段 | 核心 SDK + 学生/教师 MCP | ✅ 已完成 |
 | 第二阶段 | Admin MCP（账号管理、组织架构、批量操作） | ✅ 已完成 |
 | 第三阶段 | 企业域管理 MCP | 🚧 计划中 |
-| 第四阶段 | 技能编排层 | 🚧 计划中 |
+| 第四阶段 | 技能编排层 | ✅ 已完成 |
 | 第五阶段 | OpenAPI 适配器（GPTs / Gemini） | 🚧 计划中 |
 
 ## 许可证

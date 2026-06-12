@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- 统一技能编排 MCP Server：`umu-skills-orchestrator`
+- `src/umu_sdk/skills/` 完整框架：
+  - `config.py`：子 MCP 服务器配置与加载
+  - `mcp_client.py`：stdio 子进程连接与工具调用抽象
+  - `registry.py`：Skill 注册、发现、可用性校验
+  - `decorators.py`：`@skill()` 装饰器与 `SkillContext`
+  - `models.py`：Skill 元数据与执行结果 Pydantic 模型
+  - `builtin/`：内置示例 Skill（create_course_with_scorm、enroll_course、get_course_progress、batch_onboard_users）
+- `pyproject.toml` 新增 `umu-skills-orchestrator` console script
+- Skills 层单元测试（`tests/test_skills_*.py`）
+
+### Changed
+- `README.md` 增加 Skills 编排层说明，更新 roadmap 将 Phase 4 标记为已完成
+
 ## [0.3.2] - 2026-06-12
 
 ### Added

@@ -31,8 +31,8 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
+from ...core.credential_loader import load_credentials
 from ...core.admin_models import AdminAccount, AdminAccountRaw, format_timestamp_beijing
-from ...core.env_loader import load_env_credentials
 from .session import SessionManager
 from . import prompts
 
@@ -83,12 +83,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     global _umu_client, _session_manager
 
     base_url = os.getenv("UMU_BASE_URL", "https://www.umu.cn")
-    # 每次启动都重新读取 .env 中的管理员账号凭据
-    username, password = load_env_credentials("admin")
-    if not username:
-        username = os.getenv("UMU_ADMIN_USERNAME")
-    if not password:
-        password = os.getenv("UMU_ADMIN_PASSWORD")
+    # 每次启动都重新读取管理员账号凭据；优先 .env / 环境变量，其次加密凭证文件
+    username, password = load_credentials("admin")
 
     _session_manager = SessionManager(
         base_url=base_url,
