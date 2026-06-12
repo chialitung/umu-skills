@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -504,6 +504,294 @@ class AdminClassListResponse(BaseModel):
 
     success: bool
     data: AdminClassListData
+    error_code: str = ""
+    error_message: str = ""
+    suggested_action: str = ""
+    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = "proceed"
+
+
+# ---------------------------------------------------------------------------
+# 课程清单
+# ---------------------------------------------------------------------------
+
+
+class AdminCourseAuditStatus:
+    """课程审核状态码.
+
+    对应 getReportGroupList 响应中的 audit_status 字段。
+    """
+
+    UNSUBMITTED = -1
+    PENDING = 0
+    APPROVED = 1
+    REJECTED = 2
+    CANCELLED = 3
+
+
+class AdminCourseAccessPermission:
+    """课程权限（可见范围）码.
+
+    对应 getReportGroupList 请求/响应中的 access_permission 字段。
+    """
+
+    CLOSED = 0
+    PUBLIC = 1
+    ENTERPRISE_PUBLIC = 2
+    ASSIGNED_ACCOUNTS = 3
+
+
+class AdminCourseSource:
+    """课程来源."""
+
+    INNER = "inner"
+    OUTER = "outer"
+
+
+_AUDIT_STATUS_TEXT_MAP = {
+    AdminCourseAuditStatus.UNSUBMITTED: "未提交",
+    AdminCourseAuditStatus.PENDING: "待审核",
+    AdminCourseAuditStatus.APPROVED: "已通过",
+    AdminCourseAuditStatus.REJECTED: "已拒绝",
+    AdminCourseAuditStatus.CANCELLED: "已撤销",
+}
+
+
+_ACCESS_PERMISSION_TEXT_MAP = {
+    AdminCourseAccessPermission.CLOSED: "关闭",
+    AdminCourseAccessPermission.PUBLIC: "公开",
+    AdminCourseAccessPermission.ENTERPRISE_PUBLIC: "企业内公开",
+    AdminCourseAccessPermission.ASSIGNED_ACCOUNTS: "指定账户",
+}
+
+
+def get_course_audit_status_text(status_code: int) -> str:
+    """将课程审核状态码转换为人读文本."""
+    return _AUDIT_STATUS_TEXT_MAP.get(status_code, f"未知状态({status_code})")
+
+
+def get_course_access_permission_text(permission_code: int) -> str:
+    """将课程权限码转换为人读文本."""
+    return _ACCESS_PERMISSION_TEXT_MAP.get(permission_code, f"未知权限({permission_code})")
+
+
+class AdminCourseRaw(BaseModel):
+    """UMU 原始课程对象.
+
+    对应 /ajax/enterprise/getReportGroupList 响应中 `data.list[]` 的单个元素。
+    字段名和类型均保持原始接口返回形态。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = ""
+    teacher_id: str = ""
+    enterprise_id: int = 0
+    type: str = "1"
+    stime: str = "0"
+    etime: str = "0"
+    title: str = ""
+    remark: str = ""
+    province: str = ""
+    isimportant: str = "0"
+    eventType: str = "7"
+    courseType: str = "1"
+    customerName: str = ""
+    coursePerson: str = "0"
+    contactPhone: str = ""
+    city: str = ""
+    town: str = ""
+    address: str = ""
+    contact: str = ""
+    max_online_user: str = "0"
+    max_user_count: str = "0"
+    group_in_use: str = "0"
+    search_text: str = ""
+    creat_time: str = "0"
+    source: str = "inner"
+    desc: str = ""
+    setup: str = ""
+    permission: str = "0"
+    update_time: str = "0"
+    head_img: str = ""
+    bg_img: str = ""
+    im_rid: str = "0"
+    lesson_type: str = "0"
+    other_lesson_type: str = ""
+    content_type: str = "0"
+    other_content_type: str = ""
+    access_permission: str = "2"
+    multimedia_id: str = "0"
+    multimedia_type: str = "0"
+    is_lock: str = "0"
+    parent_obj_id: str = "0"
+    is_in_trust: str = "0"
+    is_repetitive_mode: str = "0"
+    repetitive_course_lock: str = "0"
+    audit_status: int = -1
+    is_course_in_lib: int = 0
+    group_time: list[Any] = Field(default_factory=list)
+    username: str = ""
+    avatar: str = ""
+    student_id: str = ""
+    umu_id: str = ""
+    partticipate_num: int = 0
+    weike_star_avg: int = 0
+    like_num: int = 0
+    finish_num: int = 0
+    session_count: int = 0
+    session_num: int = 0
+    weike_time: str = "0"
+    vlt: str = "0"
+    learning_time: str = "0"
+    lecturing_teacher: list[Any] = Field(default_factory=list)
+    assignment_count: int = 0
+    share_url: str = ""
+    tags: list[str] = Field(default_factory=list)
+    categoryArr: list[Any] = Field(default_factory=list)
+    enterprise_groups: list[Any] = Field(default_factory=list)
+    enterprise_departments: list[Any] = Field(default_factory=list)
+    access_code: str = ""
+    u_course_score: int = 0
+    has_group_report: int = 0
+    first_learning_ts: str = "0"
+    last_learning_ts: str = "0"
+    sum_learning_time: str = "0"
+    group_id: str = ""
+
+
+class AdminCourse(BaseModel):
+    """Admin MCP 标准化课程对象.
+
+    对应 adm_list_courses 返回的 `data.courses[]` 单个元素。
+    在原始字段基础上做了类型转换和补充计算字段。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    group_id: str = Field(default="", description="课程分组 ID（同 id / group_id）")
+    title: str = Field(default="", description="课程标题")
+    access_code: str = Field(default="", description="课程访问码")
+    share_url: str = Field(default="", description="课程分享链接")
+    teacher_id: str = Field(default="", description="创建者教师 ID")
+    creator_umu_id: str = Field(default="", description="创建者 UMU 用户 ID")
+    creator_username: str = Field(default="", description="创建者用户名")
+    head_img: str = Field(default="", description="课程封面图 URL")
+    bg_img: str = Field(default="", description="课程背景图 URL")
+    start_time: int = Field(default=0, description="课程开始时间，Unix 时间戳（秒）")
+    end_time: int = Field(default=0, description="课程结束时间，Unix 时间戳（秒）")
+    create_time: int = Field(default=0, description="课程创建时间，Unix 时间戳（秒）")
+    update_time: int = Field(default=0, description="课程最后更新时间，Unix 时间戳（秒）")
+    start_time_readable: str = Field(default="", description="课程开始时间，北京时间字符串")
+    end_time_readable: str = Field(default="", description="课程结束时间，北京时间字符串")
+    create_time_readable: str = Field(default="", description="课程创建时间，北京时间字符串")
+    update_time_readable: str = Field(default="", description="课程最后更新时间，北京时间字符串")
+    session_count: int = Field(default=0, description="小节数量")
+    participant_num: int = Field(default=0, description="参与人数")
+    finish_num: int = Field(default=0, description="完成人数")
+    learning_time: str = Field(default="", description="学习时长展示文本")
+    tags: list[str] = Field(default_factory=list, description="课程标签列表")
+    audit_status: int = Field(default=-1, description="审核状态码")
+    audit_status_text: str = Field(default="", description="审核状态人读文本")
+    is_course_in_lib: int = Field(default=0, description="是否在企业知识库/课程库中，0=否，1=是")
+    access_permission: int = Field(default=2, description="课程权限码")
+    access_permission_text: str = Field(default="", description="课程权限人读文本")
+    source: str = Field(default="inner", description="课程来源，inner=内部，outer=外部")
+    has_group_report: int = Field(default=0, description="是否有课程报告，0=否，1=是")
+    u_course_score: int = Field(default=0, description="课程学分/积分")
+    first_learning_time: int = Field(default=0, description="首次学习时间，Unix 时间戳（秒）")
+    last_learning_time: int = Field(default=0, description="最后学习时间，Unix 时间戳（秒）")
+    first_learning_time_readable: str = Field(default="", description="首次学习时间，北京时间字符串")
+    last_learning_time_readable: str = Field(default="", description="最后学习时间，北京时间字符串")
+
+    @classmethod
+    def from_raw(cls, raw: AdminCourseRaw) -> "AdminCourse":
+        """从原始 UMU 课程对象构造标准化对象."""
+        start_ts = int(raw.stime or 0)
+        end_ts = int(raw.etime or 0)
+        create_ts = int(raw.creat_time or 0)
+        update_ts = int(raw.update_time or 0)
+        first_ts = int(raw.first_learning_ts or 0)
+        last_ts = int(raw.last_learning_ts or 0)
+
+        audit_status = int(raw.audit_status if raw.audit_status is not None else -1)
+        access_permission = int(raw.access_permission or 2)
+
+        return cls(
+            group_id=raw.group_id or raw.id or "",
+            title=raw.title,
+            access_code=raw.access_code,
+            share_url=raw.share_url,
+            teacher_id=raw.teacher_id,
+            creator_umu_id=raw.umu_id,
+            creator_username=raw.username,
+            head_img=raw.head_img,
+            bg_img=raw.bg_img,
+            start_time=start_ts,
+            end_time=end_ts,
+            create_time=create_ts,
+            update_time=update_ts,
+            start_time_readable=format_timestamp_beijing(start_ts),
+            end_time_readable=format_timestamp_beijing(end_ts),
+            create_time_readable=format_timestamp_beijing(create_ts),
+            update_time_readable=format_timestamp_beijing(update_ts),
+            session_count=int(raw.session_count or 0),
+            participant_num=int(raw.partticipate_num or 0),
+            finish_num=int(raw.finish_num or 0),
+            learning_time=raw.learning_time or raw.vlt or raw.weike_time or "0",
+            tags=raw.tags or [],
+            audit_status=audit_status,
+            audit_status_text=get_course_audit_status_text(audit_status),
+            is_course_in_lib=int(raw.is_course_in_lib or 0),
+            access_permission=access_permission,
+            access_permission_text=get_course_access_permission_text(access_permission),
+            source=raw.source or "inner",
+            has_group_report=int(raw.has_group_report or 0),
+            u_course_score=int(raw.u_course_score or 0),
+            first_learning_time=first_ts,
+            last_learning_time=last_ts,
+            first_learning_time_readable=format_timestamp_beijing(first_ts),
+            last_learning_time_readable=format_timestamp_beijing(last_ts),
+        )
+
+
+class AdminCourseListPageInfo(BaseModel):
+    """UMU 原始课程列表分页信息."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    list_total_num: int = Field(..., description="符合条件的课程总数")
+    total_page_num: int = Field(..., description="总页数")
+    current_page: int = Field(..., description="当前页码")
+    size: int = Field(..., description="当前页大小")
+
+
+class AdminCourseListPagination(BaseModel):
+    """MCP 标准化课程列表分页信息."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_all: int = Field(..., description="符合条件的课程总数")
+    current_page: int = Field(..., description="当前页码")
+    page_size: int = Field(..., description="当前页大小")
+
+
+class AdminCourseListData(BaseModel):
+    """MCP 标准化课程列表数据."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    courses: list[AdminCourse] = Field(..., description="课程列表")
+    total: int = Field(..., description="本次返回课程数量")
+    pagination: AdminCourseListPagination = Field(..., description="分页信息")
+
+
+class AdminCourseListResponse(BaseModel):
+    """MCP 标准化课程列表响应."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    success: bool
+    data: AdminCourseListData
     error_code: str = ""
     error_message: str = ""
     suggested_action: str = ""
