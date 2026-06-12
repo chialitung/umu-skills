@@ -180,7 +180,7 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 
 ## 可用工具
 
-### 管理员工具（17）
+### 管理员工具（18）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -191,6 +191,7 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 | 账号状态 | `adm_enable_account`, `adm_disable_account`, `adm_batch_enable_accounts`, `adm_batch_disable_accounts`, `adm_get_scheduled_disables` |
 | 组织架构 | `adm_list_departments`, `adm_list_groups` |
 | 班级 | `adm_list_classes` |
+| 课程 | `adm_list_courses` |
 | 学习记录 | `adm_list_learning_records` |
 
 ### 教师工具（54）

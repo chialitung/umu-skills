@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-12
+
+### Added
+- Admin MCP 新增 `adm_list_courses` 原子工具，支持按多维度查询平台课程列表
+- 新增 `list_courses` 高阶 Skill（`skills/builtin/admin_courses.py`），封装管理员课程列表查询
+- `src/umu_sdk/core/admin_models.py` 新增 `AdminCourse` / `AdminCourseRaw` Pydantic 模型与字段标准化映射
+- 新增管理员课程列表数据字典
+
+### Changed
+- `workbench/` 加入 `.gitignore`
+- 更新 `README.md` 项目路线图阶段描述
+
 ## [0.6.0] - 2026-06-12
 
 ### Added
