@@ -190,3 +190,53 @@ def exam_workflow_guide() -> str:
 - 考试提交后无法修改答案
 - 空答案提交也能完成小节（只是得分可能为0）
 """
+
+
+def admin_account_management_guide() -> str:
+    """管理员账号管理操作指南，重点说明列表分页策略."""
+    return """UMU 管理员账号管理操作指南：
+
+【查询账号列表】
+调用 `adm_list_accounts` 查询企业账号。
+
+1. **何时使用 `fetch_all=True`**
+   - 用户说“获取所有账号”“列出全部成员”“导出账号”“不分页”
+   - 用户没有指定页码，但明显需要完整结果（例如“有多少人已禁用”）
+   - 需要基于全部账号做进一步操作（例如批量禁用、统计）
+   - 设置为 True 时会自动遍历分页，最多获取 50 页（约 25000 条）
+
+2. **何时使用 `page` / `page_size`**
+   - 用户明确要求分页，例如“第 2 页”“前 500 条”“每页 100 条”
+   - 结果集很大，用户只想先看一部分
+   - `page_size` 范围 1-500，默认 500
+
+3. **常用筛选条件组合**
+   - 按角色：role_type=1（学员）/ 2（讲师）/ 3（学习负责人）/ 4（系统管理员）/ 5（子管理员）
+   - 按状态：account_status=0（待加入）/ 1（已启用）/ 2（已禁用）/ 3（定时禁用）
+   - 按分组：group_ids="177124,177125"，配合 group_operator
+     - intersection：同时属于所有分组
+     - union：属于任意一个分组
+   - 按关键词：keywords 支持姓名、邮箱、手机号、用户名模糊匹配
+
+4. **处理大结果集**
+   - 如果 `fetch_all=True` 达到 50 页上限仍未获取完整数据，应在回复中告知用户“已获取前 25000 条，后续数据请使用 page/page_size 手动翻页”
+   - 响应中的 `pagination.total_all` 是服务端总数量，`total` 是当前返回数量
+
+【禁用/启用账号】
+- 单个操作：`adm_disable_account` / `adm_enable_account`
+  - 可通过 umu_id 或 email 定位用户
+  - 提供 email 时会自动查询对应 umu_id
+- 批量操作：`adm_batch_disable_accounts` / `adm_batch_enable_accounts`
+  - 传入 umu_id 列表，多个用逗号分隔
+  - 批量禁用可指定 effective_time 实现定时禁用（东八区时间）
+
+【创建账号】
+- `adm_create_account` 用于创建单个账号
+- accounts 参数可填多个邮箱，用逗号分隔，可一次性创建多个
+- role_type 必填：1=学员, 2=讲师, 3=学习负责人, 4=系统管理员, 5=子管理员
+
+【标准工作流示例】
+1. 查询目标账号：`adm_list_accounts(keywords="张三", fetch_all=True)`
+2. 根据返回的 umu_id 执行操作：`adm_disable_account(umu_id="12345")`
+3. 验证结果：再次调用 `adm_list_accounts` 检查账号状态
+"""

@@ -5,11 +5,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
+logger = logging.getLogger("umu.sdk.client")
 
 # 自动加载 .env 文件（如果存在 python-dotenv）
 _venv_loaded = False
@@ -121,8 +124,12 @@ class UMUClient:
         # 初始化认证管理器
         self.auth = AuthManager(self.http, auth, self.base_url)
 
-        print(f"[UMUClient] 初始化完成，目标: {self.base_url}")
-        print(f"[UMUClient] desktop_domain: {self.desktop_domain}, mobile_domain: {self.mobile_domain}")
+        logger.info("UMUClient 初始化完成，目标: %s", self.base_url)
+        logger.debug(
+            "desktop_domain: %s, mobile_domain: %s",
+            self.desktop_domain,
+            self.mobile_domain,
+        )
 
     def desktop_url(self, path: str) -> str:
         """构建桌面端完整 URL.
@@ -199,10 +206,10 @@ class UMUClient:
 
         for attempt in range(self.retries):
             try:
-                print(f"[HTTP] {method.upper()} {url}")
+                logger.debug("HTTP %s %s", method.upper(), url)
                 response = self.http.request(method, url, headers=headers, **kwargs)
                 response.raise_for_status()
-                print(f"[HTTP] {response.status_code} {url}")
+                logger.debug("HTTP %d %s", response.status_code, url)
                 return response
 
             except httpx.HTTPStatusError as e:
@@ -215,7 +222,12 @@ class UMUClient:
                     import time
 
                     wait_time = 2**attempt  # 指数退避
-                    print(f"[HTTP] 请求失败，{wait_time}s 后重试 ({attempt + 1}/{self.retries})")
+                    logger.warning(
+                        "HTTP 请求失败，%ds 后重试 (%d/%d)",
+                        wait_time,
+                        attempt + 1,
+                        self.retries,
+                    )
                     time.sleep(wait_time)
                     continue
 
@@ -226,6 +238,7 @@ class UMUClient:
                 if attempt < self.retries - 1:
                     import time
 
+                    logger.warning("HTTP 请求异常，1s 后重试: %s", e)
                     time.sleep(1)
                     continue
                 break
@@ -289,7 +302,7 @@ class UMUClient:
     def close(self) -> None:
         """关闭客户端，释放资源."""
         self.http.close()
-        print("[UMUClient] 已关闭")
+        logger.debug("UMUClient 已关闭")
 
     def __enter__(self) -> "UMUClient":
         """上下文管理器入口."""

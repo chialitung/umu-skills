@@ -47,6 +47,7 @@ dev = [
 umu-skills = "umu_sdk.adapters.mcp.student:main"
 umu-skills-student = "umu_sdk.adapters.mcp.student:main"
 umu-skills-teacher = "umu_sdk.adapters.mcp.teacher:main"
+umu-skills-admin = "umu_sdk.adapters.mcp.admin:main"
 
 [project.urls]
 Homepage = "https://github.com/your-org/umu-skills"
