@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-06-12
+
+### Fixed
+- 百度网盘同步偶尔导致 `.git/index` 写入失败，已重试恢复并继续发布流程
+
+### Changed
+- 优化 `install.py` 安装流程：新增 `--check` 状态检查、更简洁的输出、Windows UTF-8 输出修复
+- 简化 `.claude/skills/umu/SKILL.md` 前置条件说明，加入 `--check` 排查指引
+- README 安装章节增加 `--check` / `--upgrade` 示例，表述更简洁
+
 ## [0.4.2] - 2026-06-12
 
 ### Fixed
