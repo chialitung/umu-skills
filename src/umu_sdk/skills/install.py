@@ -5,7 +5,7 @@
 
 功能：
 1. 安装/升级 umu-skills PyPI 包（如果尚未安装）
-2. 把项目中的 skill 复制到用户的 Claude Code 全局 skills 目录
+2. 把 skill 文件复制到用户的 Claude Code 全局 skills 目录
 3. 创建/更新 .claude/settings.json 中的 MCP server 配置
 4. 初始化加密的凭证文件目录
 
@@ -16,11 +16,14 @@ macOS/Linux 全局目录：~/.claude/skills/umu
 from __future__ import annotations
 
 import argparse
+import contextlib
+import importlib.resources as resources
 import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Iterator
 
 
 def _get_claude_config_dir() -> Path:
@@ -34,26 +37,43 @@ def _get_global_skill_dir() -> Path:
 
 
 def _get_project_skill_dir() -> Path:
-    """返回项目中的 skill 源目录."""
+    """返回项目中的 skill 源目录（开发模式优先使用）."""
     return Path(__file__).resolve().parents[3] / ".claude" / "skills" / "umu"
+
+
+@contextlib.contextmanager
+def _get_bundled_skill_dir() -> Iterator[Path]:
+    """返回包内自带的 skill 源目录上下文.
+
+    当脚本从 PyPI 安装的包中运行时，项目目录下的 `.claude/skills/umu`
+    不存在，此时从 wheel 内嵌的 bundled 资源中提取。
+    """
+    ref = resources.files("umu_sdk.skills.bundled") / "umu"
+    with resources.as_file(ref) as path:
+        yield path
 
 
 def _ensure_package_installed(upgrade: bool = False) -> None:
     """确保 umu-skills 包已安装."""
+    is_installed = False
     try:
         import umu_sdk  # noqa: F401
 
+        is_installed = True
         if not upgrade:
             print("umu-skills 已安装")
             return
     except ImportError:
         pass
 
-    print("正在安装 umu-skills...")
-    cmd = [sys.executable, "-m", "pip", "install", "-e", ".[mcp]"]
-    project_root = Path(__file__).resolve().parents[3]
-    subprocess.run(cmd, cwd=project_root, check=True)
-    print("umu-skills 安装完成")
+    action = "升级" if is_installed else "安装"
+    print(f"正在{action} umu-skills...")
+    cmd = [sys.executable, "-m", "pip", "install"]
+    if upgrade:
+        cmd.append("--upgrade")
+    cmd.append("umu-skills[mcp]")
+    subprocess.run(cmd, check=True)
+    print(f"umu-skills {action}完成")
 
 
 def _copy_skill(source: Path, target: Path) -> None:
@@ -120,17 +140,8 @@ def _init_credentials(skill_dir: Path) -> None:
         print("已存在加密凭证文件，保留现有配置")
 
 
-def install(upgrade: bool = False) -> None:
-    """执行完整安装流程."""
-    print("=== UMU Skills 安装程序 ===\n")
-
-    _ensure_package_installed(upgrade=upgrade)
-
-    source = _get_project_skill_dir()
-    if not source.exists():
-        print(f"错误：找不到项目 skill 目录: {source}")
-        sys.exit(1)
-
+def _perform_install(source: Path) -> None:
+    """执行 skill 复制、settings 更新和凭证目录初始化."""
     target = _get_global_skill_dir()
     _copy_skill(source, target)
 
@@ -147,6 +158,22 @@ def install(upgrade: bool = False) -> None:
     print("1. 重启 Claude Code")
     print("2. 输入 /umu 触发 skill，按提示录入账号信息")
     print("3. 账号将加密保存在 skill 目录的 credentials.enc 中")
+
+
+def install(upgrade: bool = False) -> None:
+    """执行完整安装流程."""
+    print("=== UMU Skills 安装程序 ===\n")
+
+    _ensure_package_installed(upgrade=upgrade)
+
+    project_source = _get_project_skill_dir()
+    if project_source.exists():
+        print(f"使用项目 skill 源: {project_source}\n")
+        _perform_install(project_source)
+    else:
+        print("使用包内自带的 skill 文件\n")
+        with _get_bundled_skill_dir() as source:
+            _perform_install(source)
 
 
 def main() -> int:

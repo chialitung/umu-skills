@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-12
+
+### Fixed
+- `python -m umu_sdk.skills.install` 现在可以从 PyPI 安装的包中正常运行
+- install.py 优先使用项目目录下的 `.claude/skills/umu/`；不存在时自动回退到包内自带的 skill 资源
+- 安装脚本不再依赖项目根目录的可编辑安装
+
+### Changed
+- wheel 通过 `force-include` 内嵌 `.claude/skills/umu/` 到 `umu_sdk/skills/bundled/umu/`
+
 ## [0.4.0] - 2026-06-12
 
 ### Added
