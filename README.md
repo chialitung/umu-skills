@@ -99,20 +99,25 @@ python -m umu_sdk.adapters.mcp.admin
 
 ### 使用 `/umu` Skill（推荐）
 
-除了直接配置单个 MCP server，你还可以安装 `/umu` Skill，通过自然语言让 AI 自动识别需要调用 Teacher、Student 还是 Admin 工具。
-
-#### 1. 安装 Skill
+安装 `/umu` Skill，通过自然语言让 AI 自动识别并调用 Teacher、Student、Admin 工具：
 
 ```bash
+# 一键安装/更新 Skill 与 MCP 配置
 python -m umu_sdk.skills.install
+
+# 检查安装状态
+python -m umu_sdk.skills.install --check
+
+# 强制升级到最新版
+python -m umu_sdk.skills.install --upgrade
 ```
 
 这条命令会：
-- 安装/升级 `umu-skills` 包
-- 把 `.claude/skills/umu/` 复制到你的 Claude Code 全局 skills 目录
-- 在 `.claude/settings.json` 中配置好 `umu-teacher`、`umu-student`、`umu-admin` 三个 MCP server
+- 安装/升级 `umu-skills` PyPI 包
+- 把 Skill 文件复制到 Claude Code 全局 skills 目录
+- 在 `.claude/settings.json` 中配置好 `umu-teacher`、`umu-student`、`umu-admin` 三个 MCP server（使用 `python -m` 启动，无需配置 PATH）
 
-安装完成后重启 Claude Code。
+安装完成后**重启 Claude Code**。
 
 #### 2. 配置账号
 

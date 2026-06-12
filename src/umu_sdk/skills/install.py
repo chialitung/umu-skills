@@ -1,7 +1,9 @@
 """UMU Skills 自动化安装模块.
 
 用法：
-    python -m umu_sdk.skills.install
+    python -m umu_sdk.skills.install           # 安装/更新 Skill 与 MCP 配置
+    python -m umu_sdk.skills.install --check   # 仅检查安装状态
+    python -m umu_sdk.skills.install --upgrade # 强制升级 PyPI 包
 
 功能：
 1. 安装/升级 umu-skills PyPI 包（如果尚未安装）
@@ -24,6 +26,18 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Iterator
+
+# Windows 中文输出修复（必须在任何打印之前）
+if sys.platform == "win32":
+    try:
+        import io
+
+        if isinstance(sys.stdout, io.TextIOWrapper):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if isinstance(sys.stderr, io.TextIOWrapper):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 def _get_claude_config_dir() -> Path:
@@ -79,10 +93,7 @@ def _ensure_package_installed(upgrade: bool = False) -> None:
 def _copy_skill(source: Path, target: Path) -> None:
     """复制 skill 文件到全局目录."""
     if target.exists():
-        print(f"清理旧的 skill 目录: {target}")
         shutil.rmtree(target)
-
-    print(f"复制 skill 到: {target}")
     shutil.copytree(source, target)
 
 
@@ -113,7 +124,8 @@ def _configure_mcp_servers(settings: dict) -> dict:
         "MCP_LOG_LEVEL": "${MCP_LOG_LEVEL:-INFO}",
     }
 
-    # 使用 `python -m` 启动 MCP server，避免依赖 console scripts 所在目录在 PATH 中
+    # 使用当前 Python 解释器 + `python -m` 启动 MCP server，
+    # 避免依赖 console scripts 所在目录在 PATH 中
     python_cmd = sys.executable
     mcp_servers["umu-teacher"] = {
         "command": python_cmd,
@@ -139,10 +151,7 @@ def _init_credentials(skill_dir: Path) -> None:
     skill_dir.mkdir(parents=True, exist_ok=True)
     creds_path = skill_dir / "credentials.enc"
     if not creds_path.exists():
-        # 不创建空文件；credential_manager 会在首次保存时创建
         print("凭证目录已准备就绪，首次使用 /umu 时会引导你录入账号")
-    else:
-        print("已存在加密凭证文件，保留现有配置")
 
 
 def _perform_install(source: Path) -> None:
@@ -155,14 +164,6 @@ def _perform_install(source: Path) -> None:
     _save_settings(settings)
 
     _init_credentials(target)
-
-    print("\n=== 安装完成 ===")
-    print(f"Skill 目录: {target}")
-    print(f"配置文件: {_get_settings_path()}")
-    print("\n下一步：")
-    print("1. 重启 Claude Code")
-    print("2. 输入 /umu 触发 skill，按提示录入账号信息")
-    print("3. 账号将加密保存在 skill 目录的 credentials.enc 中")
 
 
 def install(upgrade: bool = False) -> None:
@@ -180,6 +181,79 @@ def install(upgrade: bool = False) -> None:
         with _get_bundled_skill_dir() as source:
             _perform_install(source)
 
+    print("\n=== 安装完成 ===")
+    print(f"Skill 目录: {_get_global_skill_dir()}")
+    print(f"配置文件: {_get_settings_path()}")
+    print("\n下一步：重启 Claude Code，然后输入 /umu 触发 skill")
+
+
+def _check_installation() -> int:
+    """检查当前安装状态并报告."""
+    print("=== UMU Skills 安装状态检查 ===\n")
+
+    ok = True
+
+    # 1. 包检查
+    try:
+        import umu_sdk
+
+        print(f"✓ umu-skills 包已安装 ({umu_sdk.__file__})")
+    except ImportError:
+        print("✗ umu-skills 包未安装")
+        ok = False
+
+    # 2. Skill 目录检查
+    skill_dir = _get_global_skill_dir()
+    if skill_dir.exists() and (skill_dir / "SKILL.md").exists():
+        print(f"✓ Skill 目录存在: {skill_dir}")
+    else:
+        print(f"✗ Skill 目录缺失: {skill_dir}")
+        ok = False
+
+    # 3. settings.json 检查
+    settings_path = _get_settings_path()
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            servers = settings.get("mcpServers", {})
+            required = {"umu-teacher", "umu-student", "umu-admin"}
+            missing = required - set(servers.keys())
+            if missing:
+                print(f"✗ settings.json 缺少 MCP server: {missing}")
+                ok = False
+            else:
+                print("✓ settings.json 已配置三个 MCP server")
+                for name in required:
+                    server = servers[name]
+                    cmd = server.get("command", "")
+                    args = server.get("args", [])
+                    if args == ["-m", f"umu_sdk.adapters.mcp.{name.split('-')[1]}"]:
+                        print(f"  ✓ {name} 使用 python -m 启动")
+                    elif cmd.startswith("umu-skills-"):
+                        print(f"  ⚠ {name} 仍使用 console script（可能受 PATH 影响）")
+                    else:
+                        print(f"  ? {name} 命令未知: {cmd} {args}")
+        except Exception as e:
+            print(f"✗ 读取 settings.json 失败: {e}")
+            ok = False
+    else:
+        print(f"✗ settings.json 不存在: {settings_path}")
+        ok = False
+
+    # 4. 凭证目录检查
+    creds_path = skill_dir / "credentials.enc"
+    if creds_path.exists():
+        print(f"✓ 已存在加密凭证文件: {creds_path}")
+    else:
+        print("○ 尚未保存加密凭证，首次 /umu 会引导录入")
+
+    print()
+    if ok:
+        print("状态正常，重启 Claude Code 后即可使用 /umu")
+        return 0
+    print("状态异常，请运行: python -m umu_sdk.skills.install")
+    return 1
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="安装 UMU Skills 到 Claude Code")
@@ -188,9 +262,16 @@ def main() -> int:
         action="store_true",
         help="强制升级 umu-skills 包",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="仅检查安装状态，不执行安装",
+    )
     args = parser.parse_args()
 
     try:
+        if args.check:
+            return _check_installation()
         install(upgrade=args.upgrade)
         return 0
     except subprocess.CalledProcessError as e:

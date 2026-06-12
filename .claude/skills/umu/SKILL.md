@@ -38,7 +38,19 @@ description: |
 - `umu-student` — 学员角色工具
 - `umu-admin` — 管理员角色工具
 
-如果这些 server 不可用，先提示用户检查 `.claude/settings.json` 配置。
+如果这些 server 不可用，提示用户运行：
+
+```bash
+python -m umu_sdk.skills.install --check
+```
+
+根据检查结果，必要时重新安装：
+
+```bash
+python -m umu_sdk.skills.install --upgrade
+```
+
+然后重启 Claude Code。
 
 ## 账号配置
 
