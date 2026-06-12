@@ -72,6 +72,49 @@ class TestSkillRegistry:
         assert "enroll_course" in names
         assert "batch_onboard_users" in names
 
+        # Teacher skills
+        assert "upload_scorm_resource" in names
+        assert "upload_document_resource" in names
+        assert "upload_video_resource" in names
+        assert "list_scorm_resources" in names
+        assert "list_document_resources" in names
+        assert "list_video_resources" in names
+        assert "add_video_section" in names
+        assert "add_article_section" in names
+        assert "add_infographic_section" in names
+        assert "add_document_section" in names
+        assert "add_survey_section" in names
+        assert "add_exam_section" in names
+        assert "add_signin_section" in names
+        assert "list_course_sections" in names
+        assert "get_course_categories" in names
+        assert "get_course_info" in names
+        assert "list_my_courses" in names
+
+        # Student skills
+        assert "resolve_course_identifier" in names
+        assert "list_my_courses_student" in names
+        assert "complete_browse_lesson" in names
+        assert "complete_checkin" in names
+        assert "complete_rating_checkin" in names
+        assert "check_lesson_completion" in names
+        assert "get_questionnaire" in names
+        assert "submit_questionnaire" in names
+        assert "submit_questionnaire_simple" in names
+        assert "start_exam" in names
+        assert "submit_exam" in names
+        assert "submit_exam_simple" in names
+        assert "complete_entire_course" in names
+
+        # Admin skills
+        assert "list_departments" in names
+        assert "list_groups" in names
+        assert "list_classes" in names
+        assert "list_accounts" in names
+        assert "disable_account" in names
+        assert "enable_account" in names
+        assert "get_learning_records" in names
+
 
 class TestSkillDecorator:
     def test_builds_parameters_from_signature(self) -> None:
