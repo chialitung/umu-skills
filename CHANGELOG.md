@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-12
+
+### Changed
+- 更新 `README.md`：补充 Admin MCP 学习记录与班级工具，调整管理员工具数量与功能描述
+
 ## [0.5.0] - 2026-06-12
 
 ### Added
