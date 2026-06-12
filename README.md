@@ -8,7 +8,7 @@ UMU Skills 是一个 AI 技能框架，它将 UMU 学习平台的管理操作封
 
 ## 功能特性
 
-- **三角色 MCP 服务器**：分别为教师（课程创建、资源管理）、学生（课程报名、学习进度）和管理员（账号管理、数据查询）提供独立的工具集
+- **三角色 MCP 服务器**：分别为教师（课程创建、资源管理）、学生（课程报名、学习进度）和管理员（账号管理、学习记录、数据查询）提供独立的工具集
 - **课程构建器**：支持创建包含多种环节类型的课程 —— SCORM、视频、文档、文章、信息图、问卷、考试、签到
 - **资源上传**：SCORM（腾讯云 COS 分片上传）、视频、文档、图片，并支持进度追踪
 - **批量操作**：多用户课程完成处理，支持并发控制
@@ -179,16 +179,18 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 
 ## 可用工具
 
-### 管理员工具（15）
+### 管理员工具（17）
 
 | 分类 | 工具 |
 |----------|-------|
 | 认证 | `adm_login`, `adm_check_auth` |
 | 会话 | `adm_create_session`, `adm_list_sessions`, `adm_destroy_session` |
+| 当前用户 | `adm_get_user_info` |
 | 账号 | `adm_create_account`, `adm_list_accounts` |
 | 账号状态 | `adm_enable_account`, `adm_disable_account`, `adm_batch_enable_accounts`, `adm_batch_disable_accounts`, `adm_get_scheduled_disables` |
 | 组织架构 | `adm_list_departments`, `adm_list_groups` |
-| 当前用户 | `adm_get_user_info` |
+| 班级 | `adm_list_classes` |
+| 学习记录 | `adm_list_learning_records` |
 
 ### 教师工具（54）
 
@@ -283,7 +285,7 @@ mypy src/
 | 阶段 | 功能 | 状态 |
 |-------|---------|--------|
 | 第一阶段 | 核心 SDK + 学生/教师 MCP | ✅ 已完成 |
-| 第二阶段 | Admin MCP（账号管理、组织架构、批量操作） | ✅ 已完成 |
+| 第二阶段 | Admin MCP（账号管理、组织架构、学习记录、批量操作） | ✅ 已完成 |
 | 第三阶段 | 企业域管理 MCP | 🚧 计划中 |
 | 第四阶段 | 技能编排层 | ✅ 已完成 |
 | 第五阶段 | OpenAPI 适配器（GPTs / Gemini） | 🚧 计划中 |
