@@ -137,6 +137,7 @@ mcp = FastMCP(
 
 提供平台管理相关的原子化操作，包括：
 - 账号管理：创建、查询、删除学员/讲师账号
+- 部门管理：查询部门树/子部门/详情/成员、创建/更新/排序/删除部门、添加/移动/移除部门成员
 - 课程管理：查询企业课程清单（支持按名称/标签/访问码/创建人/权限/审核状态等筛选）
 - 学习数据查询：学员学习进度、课程统计数据
 - 系统运营：批量操作、数据导出
@@ -1097,6 +1098,1256 @@ async def adm_list_departments(
             error_message=str(e),
             suggested_action="检查网络连接后重试",
         )
+
+
+# ---------------------------------------------------------------------------
+# Tools: 部门管理
+# ---------------------------------------------------------------------------
+
+
+def _normalize_department(dept: dict[str, Any]) -> dict[str, Any]:
+    """将 UMU 部门字典规整为统一输出格式."""
+    return {
+        "department_id": str(dept.get("department_id", "")),
+        "enterprise_id": str(dept.get("enterprise_id", "")),
+        "parent_department_id": str(dept.get("parent_department_id", "0")),
+        "department_name": dept.get("department_name", ""),
+        "level": int(dept.get("level", 1) or 1),
+        "show_index": int(dept.get("show_index", 0) or 0),
+        "member_count": int(dept.get("member_count", 0) or 0),
+        "managers": dept.get("managers", []) or [],
+        "manage_permission": int(dept.get("manage_permission", 0) or 0),
+        "parent_path": dept.get("parent_path", []) or [],
+        "child_path": dept.get("child_path", []) or [],
+    }
+
+
+def _build_department_tree(
+    client: UMUClient,
+    parent_id: str,
+    depth: int = 0,
+    max_depth: int = 20,
+) -> list[dict[str, Any]]:
+    """递归获取部门子树.
+
+    Args:
+        client: UMUClient 实例
+        parent_id: 父部门 ID
+        depth: 当前递归深度
+        max_depth: 最大递归深度，防止异常循环
+
+    Returns:
+        子部门列表，每个部门包含 children 字段。
+    """
+    if depth >= max_depth:
+        return []
+
+    try:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/department/get-childdepartments-byid"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "department_id": parent_id,
+                "type": "2",
+            },
+        )
+    except Exception:
+        return []
+
+    if resp.get("error_code") != 0:
+        return []
+
+    dept_list = resp.get("data", {}).get("department_list", [])
+    result: list[dict[str, Any]] = []
+    for dept in dept_list:
+        normalized = _normalize_department(dept)
+        children = _build_department_tree(
+            client,
+            normalized["department_id"],
+            depth + 1,
+            max_depth,
+        )
+        normalized["children"] = children
+        result.append(normalized)
+    return result
+
+
+@mcp.tool()
+async def adm_get_department_tree(
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=True,
+            description="是否递归获取完整子部门树。默认 True。",
+        ),
+    ] = True,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取企业部门树.
+
+    触发条件：需要查看完整组织架构、按层级浏览部门时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+
+    返回每个部门的 department_id、department_name、parent_department_id、
+    level、show_index、member_count、managers 及 children 子树。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/department/get-departments-by-managerid"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "type": "2",
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="GET_DEPARTMENT_TREE_FAILED",
+                error_message=resp.get("error_message", "获取部门树失败"),
+                suggested_action="检查管理员权限或稍后重试",
+            )
+
+        dept_list = resp.get("data", {}).get("department_list", [])
+        tree: list[dict[str, Any]] = []
+        for dept in dept_list:
+            normalized = _normalize_department(dept)
+            if fetch_all:
+                children = _build_department_tree(
+                    client,
+                    normalized["department_id"],
+                )
+                normalized["children"] = children
+            tree.append(normalized)
+
+        return _ok(
+            data={
+                "departments": tree,
+                "total": len(tree),
+            },
+            next_action="proceed",
+            suggested_action="使用 department_id 调用 adm_get_department 或 adm_list_department_members",
+        )
+    except Exception as e:
+        return _err(
+            error_code="GET_DEPARTMENT_TREE_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_get_department(
+    department_id: Annotated[str, Field(description="部门 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取部门详情.
+
+    触发条件：需要查看某个部门的基本信息、上级路径、负责人时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+
+    返回字段包括 parent_path（上级路径）、managers（负责人列表）等。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/department/get-by-departmentid"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "department_id": department_id,
+                "type": "2",
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="GET_DEPARTMENT_FAILED",
+                error_message=resp.get("error_message", "获取部门详情失败"),
+                suggested_action="检查 department_id 是否正确",
+            )
+
+        dept = resp.get("data", {})
+        return _ok(
+            data=_normalize_department(dept),
+            next_action="proceed",
+            suggested_action="使用 department_id 调用其他部门管理工具",
+        )
+    except Exception as e:
+        return _err(
+            error_code="GET_DEPARTMENT_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接或 department_id 后重试",
+        )
+
+
+@mcp.tool()
+async def adm_get_child_departments(
+    department_id: Annotated[
+        str,
+        Field(default="0", description="父部门 ID，默认 0 表示获取顶层部门"),
+    ] = "0",
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取子部门列表.
+
+    触发条件：需要查看某个部门下的直接子部门时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/department/get-childdepartments-byid"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "department_id": department_id,
+                "type": "2",
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="GET_CHILD_DEPARTMENTS_FAILED",
+                error_message=resp.get("error_message", "获取子部门失败"),
+                suggested_action="检查 department_id 是否正确",
+            )
+
+        dept_list = resp.get("data", {}).get("department_list", [])
+        return _ok(
+            data={
+                "departments": [_normalize_department(d) for d in dept_list],
+                "total": len(dept_list),
+                "parent_department_id": department_id,
+            },
+            next_action="proceed",
+            suggested_action="使用 department_id 调用 adm_get_department 查看详情",
+        )
+    except Exception as e:
+        return _err(
+            error_code="GET_CHILD_DEPARTMENTS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接或 department_id 后重试",
+        )
+
+
+@mcp.tool()
+async def adm_list_department_members(
+    department_id: Annotated[str, Field(description="部门 ID")],
+    keywords: Annotated[
+        str | None,
+        Field(default=None, description="按姓名模糊搜索成员（可选）"),
+    ] = None,
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=15, ge=1, le=100, description="每页数量（1-100），默认15"),
+    ] = 15,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取部门成员列表.
+
+    触发条件：需要查看某个部门下的成员时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+
+    返回字段包括 umu_id、user_name、email、role_type、number、member_id 等。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        params: dict[str, str] = {
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "department_id": department_id,
+            "umu_ids": "",
+            "page": str(p),
+            "size": str(sz),
+        }
+        resp = client.get(
+            client.desktop_url("/uapi/v1/department/member-list"),
+            params=params,
+        )
+
+        if resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error_message", "获取部门成员失败"))
+
+        member_list = resp.get("data", {}).get("list", [])
+        total_all = int(
+            resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0
+        )
+
+        members: list[dict[str, Any]] = []
+        for item in member_list:
+            user_info = item.get("user_info", {}) or {}
+            members.append(
+                {
+                    "umu_id": str(user_info.get("umu_id", "")),
+                    "user_name": user_info.get("user_name", ""),
+                    "email": user_info.get("email", ""),
+                    "phone": user_info.get("phone", ""),
+                    "number": item.get("number", "") or user_info.get("number", ""),
+                    "role_type": int(item.get("role_type", 0) or 0),
+                    "on_job_status": item.get("on_job_status", ""),
+                    "member_id": item.get("member_id", 0),
+                    "department_id": item.get("department_id", 0),
+                    "user_department_name": item.get("user_department_name", ""),
+                }
+            )
+
+        # 客户端关键词过滤（API 不支持服务端搜索时兜底）
+        if keywords:
+            kw = keywords.lower()
+            members = [
+                m
+                for m in members
+                if kw in (m.get("user_name", "") or "").lower()
+                or kw in (m.get("email", "") or "").lower()
+                or kw in (m.get("number", "") or "").lower()
+            ]
+
+        return members, total_all
+
+    try:
+        if fetch_all:
+            all_members: list[dict[str, Any]] = []
+            current_page = 1
+            batch_size = page_size
+            total_all = 0
+
+            while True:
+                members, total_all = _fetch_page(current_page, batch_size)
+                all_members.extend(members)
+
+                progress_pct = ""
+                if total_all > 0:
+                    pct = min(100, int(len(all_members) / total_all * 100))
+                    progress_pct = f" ({pct}%)"
+                if total_all > 0 and current_page == 1:
+                    print(
+                        f"[adm_list_department_members] 共 {total_all} 条，"
+                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
+                        file=sys.stderr,
+                    )
+                print(
+                    f"[adm_list_department_members] 已获取第 {current_page} 页，"
+                    f"累计 {len(all_members)} / {total_all} 条{progress_pct}",
+                    file=sys.stderr,
+                )
+
+                if len(all_members) >= total_all or not members:
+                    print(
+                        f"[adm_list_department_members] 获取完成，共 {len(all_members)} 条，"
+                        f"合计 {current_page} 页",
+                        file=sys.stderr,
+                    )
+                    break
+                current_page += 1
+                if current_page > 50:
+                    warning_msg = (
+                        f"[adm_list_department_members] 警告：达到 50 页安全上限，停止获取"
+                        f"（已获取 {len(all_members)} 条）"
+                    )
+                    print(warning_msg, file=sys.stderr)
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            return _ok(
+                data={
+                    "members": all_members,
+                    "total": len(all_members),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(all_members) if all_members else 0,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 umu_id 调用 adm_remove_department_members 或 adm_move_department_members",
+            )
+        else:
+            members, total_all = _fetch_page(page, page_size)
+            return _ok(
+                data={
+                    "members": members,
+                    "total": len(members),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": page,
+                        "page_size": page_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 umu_id 调用 adm_remove_department_members 或 adm_move_department_members",
+            )
+    except Exception as e:
+        return _err(
+            error_code="LIST_DEPARTMENT_MEMBERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接或 department_id 后重试",
+        )
+
+
+@mcp.tool()
+async def adm_search_department_members(
+    department_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="目标部门 ID。提供时搜索可加入该部门的成员；不提供时全企业搜索。",
+        ),
+    ] = None,
+    keywords: Annotated[
+        str | None,
+        Field(default=None, description="姓名/邮箱/手机号关键词"),
+    ] = None,
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量（1-100），默认20"),
+    ] = 20,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """搜索可加入部门的成员.
+
+    触发条件：需要为部门添加成员但不知道 umu_id 时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+
+    优先使用 /uapi/v1/department/sug-member 接口；如不可用则回退到
+    /uapi/v1/department/users-not-in-department。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    # 优先尝试 sug-member 接口
+    if keywords:
+        try:
+            resp = client.get(
+                client.desktop_url("/uapi/v1/department/sug-member"),
+                params={
+                    "t": str(int(datetime.now().timestamp() * 1000)),
+                    "keywords": keywords,
+                    "department_id": department_id or "0",
+                    "is_root": "0",
+                },
+            )
+            if resp.get("error_code") == 0:
+                sug_users = resp.get("data", []) or []
+                return _ok(
+                    data={
+                        "users": [
+                            {
+                                "umu_id": str(u.get("umu_id", "")),
+                                "user_name": u.get("user_name", ""),
+                                "email": u.get("email", ""),
+                                "phone": u.get("phone", ""),
+                                "number": u.get("number", ""),
+                                "role_type": int(u.get("role_type", 0) or 0),
+                            }
+                            for u in sug_users
+                        ],
+                        "total": len(sug_users),
+                    },
+                    next_action="proceed",
+                    suggested_action="使用 umu_id 调用 adm_add_department_members",
+                )
+        except Exception:
+            pass
+
+    # 回退到 users-not-in-department
+    try:
+        params: dict[str, str] = {
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "department": department_id or "0",
+            "page": str(page),
+            "size": str(page_size),
+        }
+        resp = client.get(
+            client.desktop_url("/uapi/v1/department/users-not-in-department"),
+            params=params,
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="SEARCH_DEPARTMENT_MEMBERS_FAILED",
+                error_message=resp.get("error_message", "搜索成员失败"),
+                suggested_action="检查 department_id 或稍后重试",
+            )
+
+        user_list = resp.get("data", {}).get("list", [])
+        page_info = resp.get("data", {}).get("page_info", {})
+
+        users: list[dict[str, Any]] = []
+        for item in user_list:
+            user_info = item.get("user_info", {}) or {}
+            users.append(
+                {
+                    "umu_id": str(user_info.get("umu_id", "")),
+                    "user_name": user_info.get("user_name", ""),
+                    "email": user_info.get("email", ""),
+                    "phone": user_info.get("phone", ""),
+                    "number": item.get("number", ""),
+                    "role_type": int(item.get("role_type", 0) or 0),
+                    "on_job_status": item.get("on_job_status", ""),
+                }
+            )
+
+        # 客户端关键词过滤
+        if keywords:
+            kw = keywords.lower()
+            users = [
+                u
+                for u in users
+                if kw in (u.get("user_name", "") or "").lower()
+                or kw in (u.get("email", "") or "").lower()
+                or kw in (u.get("number", "") or "").lower()
+            ]
+
+        return _ok(
+            data={
+                "users": users,
+                "total": len(users),
+                "pagination": {
+                    "total_all": int(page_info.get("list_total_num", 0) or 0),
+                    "current_page": int(page_info.get("current_page", page) or page),
+                    "page_size": int(page_info.get("size", page_size) or page_size),
+                },
+            },
+            next_action="proceed",
+            suggested_action="使用 umu_id 调用 adm_add_department_members",
+        )
+    except Exception as e:
+        return _err(
+            error_code="SEARCH_DEPARTMENT_MEMBERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_create_department(
+    department_name: Annotated[str, Field(description="部门名称")],
+    parent_department_id: Annotated[
+        str,
+        Field(default="0", description="父部门 ID，默认 0 表示顶层部门"),
+    ] = "0",
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """创建部门.
+
+    触发条件：需要新增企业部门时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：在 UMU 平台创建新部门。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    if not department_name.strip():
+        return _err(
+            error_code="INVALID_DEPARTMENT_NAME",
+            error_message="部门名称不能为空",
+            suggested_action="提供有效的部门名称",
+        )
+
+    try:
+        resp = client.post(
+            client.desktop_url("/uapi/v1/department/add"),
+            data={
+                "department_name": department_name.strip(),
+                "parent_department_id": parent_department_id,
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="CREATE_DEPARTMENT_FAILED",
+                error_message=resp.get("error_message", "创建部门失败"),
+                suggested_action="检查父部门 ID 或部门名称是否重复",
+            )
+
+        data = resp.get("data", {})
+        return _ok(
+            data={
+                "department_id": str(data.get("department_id", "")),
+                "status": data.get("status"),
+                "desc": data.get("desc"),
+            },
+            next_action="proceed",
+            suggested_action="使用 department_id 继续添加成员或创建子部门",
+        )
+    except Exception as e:
+        return _err(
+            error_code="CREATE_DEPARTMENT_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_update_department(
+    department_id: Annotated[str, Field(description="部门 ID")],
+    department_name: Annotated[
+        str | None,
+        Field(default=None, description="新的部门名称，不提供则不修改"),
+    ] = None,
+    parent_department_id: Annotated[
+        str | None,
+        Field(default=None, description="新的父部门 ID，不提供则不修改"),
+    ] = None,
+    manager_umu_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="负责人 umu_id 列表，多个用逗号分隔，如 '20458616'。不提供则不修改。",
+        ),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """更新部门信息.
+
+    触发条件：需要重命名部门、调整上级部门或设置部门负责人时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：修改 UMU 平台上的部门信息。
+
+    注意： department_name、parent_department_id、manager_umu_ids 至少提供一项。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    # 获取当前部门信息作为默认值
+    try:
+        current_resp = client.get(
+            client.desktop_url("/uapi/v1/department/get-by-departmentid"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "department_id": department_id,
+                "type": "2",
+            },
+        )
+        current = current_resp.get("data", {}) if current_resp.get("error_code") == 0 else {}
+    except Exception:
+        current = {}
+
+    if not department_name and not parent_department_id and not manager_umu_ids:
+        return _err(
+            error_code="NO_UPDATE_FIELDS",
+            error_message="至少提供一项要修改的字段",
+            suggested_action="提供 department_name、parent_department_id 或 manager_umu_ids",
+        )
+
+    update_data: dict[str, Any] = {
+        "department_id": department_id,
+        "department_name": department_name if department_name else current.get("department_name", ""),
+        "parent_department_id": (
+            parent_department_id
+            if parent_department_id is not None
+            else current.get("parent_department_id", "0")
+        ),
+    }
+    if manager_umu_ids is not None:
+        manager_list = [m.strip() for m in manager_umu_ids.split(",") if m.strip()]
+        update_data["manager_umu_ids"] = json.dumps(manager_list)
+    else:
+        managers = current.get("managers", []) or []
+        manager_list = [str(m.get("umu_id", "")) for m in managers if m.get("umu_id")]
+        update_data["manager_umu_ids"] = json.dumps(manager_list)
+
+    try:
+        resp = client.post(
+            client.desktop_url("/uapi/v1/department/edit"),
+            data=update_data,
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="UPDATE_DEPARTMENT_FAILED",
+                error_message=resp.get("error_message", "更新部门失败"),
+                suggested_action="检查 department_id 或父部门 ID 是否正确",
+            )
+
+        return _ok(
+            data={
+                "department_id": department_id,
+                "updated_fields": {
+                    "department_name": department_name,
+                    "parent_department_id": parent_department_id,
+                    "manager_umu_ids": manager_umu_ids,
+                },
+            },
+            next_action="proceed",
+            suggested_action="部门信息已更新",
+        )
+    except Exception as e:
+        return _err(
+            error_code="UPDATE_DEPARTMENT_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_sort_departments(
+    department_orders: Annotated[
+        str,
+        Field(
+            description="部门排序列表，JSON 数组格式，如 "
+                        "'[{\"department_id\":\"297494\",\"index\":1},{\"department_id\":\"297481\",\"index\":2}]'"
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """调整部门排序.
+
+    触发条件：需要调整同级部门的显示顺序时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：修改 UMU 平台上同级部门的 show_index。
+
+    department_orders 为 JSON 数组，每个元素包含 department_id 和 index（从 1 开始）。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        order_list = json.loads(department_orders)
+        if not isinstance(order_list, list) or not order_list:
+            raise ValueError("department_orders 必须是 JSON 数组")
+    except Exception as e:
+        return _err(
+            error_code="INVALID_SORT_FORMAT",
+            error_message=f"排序参数格式错误: {e}",
+            suggested_action="使用 JSON 数组格式，如 '[{\"department_id\":\"1\",\"index\":1}]'",
+        )
+
+    try:
+        resp = client.post(
+            client.desktop_url("/uapi/v1/department/sort"),
+            data={"department_list": json.dumps(order_list)},
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="SORT_DEPARTMENTS_FAILED",
+                error_message=resp.get("error_message", "排序调整失败"),
+                suggested_action="检查 department_id 列表是否正确",
+            )
+
+        return _ok(
+            data={"department_orders": order_list},
+            next_action="proceed",
+            suggested_action="部门排序已更新",
+        )
+    except Exception as e:
+        return _err(
+            error_code="SORT_DEPARTMENTS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_add_department_members(
+    department_id: Annotated[str, Field(description="目标部门 ID")],
+    umu_ids: Annotated[
+        str,
+        Field(description="要添加的成员 umu_id 列表，多个用逗号分隔，如 '20439812,20439813'"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """添加成员到部门.
+
+    触发条件：需要将现有用户加入部门时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：将指定用户添加到目标部门（保留原部门关系）。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    id_list = [uid.strip() for uid in umu_ids.split(",") if uid.strip()]
+    if not id_list:
+        return _err(
+            error_code="EMPTY_UMU_IDS",
+            error_message="umu_ids 不能为空",
+            suggested_action="提供至少一个 umu_id",
+        )
+
+    try:
+        resp = client.post(
+            client.desktop_url("/uapi/v1/department/add-member"),
+            data={
+                "umu_ids": json.dumps(id_list),
+                "add_department_ids": json.dumps([department_id]),
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="ADD_DEPARTMENT_MEMBERS_FAILED",
+                error_message=resp.get("error_message", "添加成员失败"),
+                suggested_action="检查 umu_id 是否已在部门中",
+            )
+
+        return _ok(
+            data={
+                "department_id": department_id,
+                "umu_ids": id_list,
+                "added_count": len(id_list),
+            },
+            next_action="proceed",
+            suggested_action="成员已添加，可调用 adm_list_department_members 查看",
+        )
+    except Exception as e:
+        return _err(
+            error_code="ADD_DEPARTMENT_MEMBERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_move_department_members(
+    umu_ids: Annotated[
+        str,
+        Field(description="要调整的成员 umu_id 列表，多个用逗号分隔"),
+    ],
+    department_ids: Annotated[
+        str,
+        Field(description="目标部门 ID 列表，多个用逗号分隔"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """调整成员所属部门.
+
+    触发条件：需要将成员从当前部门迁移到其他部门时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：修改成员的部门归属关系。
+
+    注意：该操作会覆盖成员原有的部门关系，请谨慎使用。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    uid_list = [uid.strip() for uid in umu_ids.split(",") if uid.strip()]
+    dept_list = [did.strip() for did in department_ids.split(",") if did.strip()]
+
+    if not uid_list:
+        return _err(
+            error_code="EMPTY_UMU_IDS",
+            error_message="umu_ids 不能为空",
+            suggested_action="提供至少一个 umu_id",
+        )
+    if not dept_list:
+        return _err(
+            error_code="EMPTY_DEPARTMENT_IDS",
+            error_message="department_ids 不能为空",
+            suggested_action="提供至少一个 department_id",
+        )
+
+    try:
+        resp = client.post(
+            client.desktop_url("/uapi/v1/department/change-member-department"),
+            data={
+                "umu_ids": json.dumps(uid_list),
+                "department_ids": json.dumps(dept_list),
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="MOVE_DEPARTMENT_MEMBERS_FAILED",
+                error_message=resp.get("error_message", "调整成员部门失败"),
+                suggested_action="检查 umu_id 和 department_id 是否正确",
+            )
+
+        return _ok(
+            data={
+                "umu_ids": uid_list,
+                "department_ids": dept_list,
+                "moved_count": len(uid_list),
+            },
+            next_action="proceed",
+            suggested_action="成员部门已调整",
+        )
+    except Exception as e:
+        return _err(
+            error_code="MOVE_DEPARTMENT_MEMBERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_remove_department_members(
+    member_ids: Annotated[
+        str,
+        Field(
+            description="要移除的成员 member_id 列表，多个用逗号分隔。"
+                        "member_id 可通过 adm_list_department_members 获取。",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """移除部门成员.
+
+    触发条件：需要将成员从部门中移除时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：将指定成员从部门中删除。
+
+    注意：需要提供 member_id（部门成员关系 ID），而非 umu_id。
+    member_id 可通过 adm_list_department_members 的返回字段获取。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    id_list = [mid.strip() for mid in member_ids.split(",") if mid.strip()]
+    if not id_list:
+        return _err(
+            error_code="EMPTY_MEMBER_IDS",
+            error_message="member_ids 不能为空",
+            suggested_action="提供至少一个 member_id",
+        )
+
+    try:
+        # member_ids 参数为 JSON 数组格式的整数
+        member_id_ints = [int(mid) for mid in id_list]
+        resp = client.get(
+            client.desktop_url("/uapi/v1/department/batch-delete-member"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "member_ids": json.dumps(member_id_ints),
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="REMOVE_DEPARTMENT_MEMBERS_FAILED",
+                error_message=resp.get("error_message", "移除成员失败"),
+                suggested_action="检查 member_id 是否正确",
+            )
+
+        return _ok(
+            data={
+                "member_ids": member_id_ints,
+                "removed_count": len(member_id_ints),
+            },
+            next_action="proceed",
+            suggested_action="成员已从部门移除",
+        )
+    except Exception as e:
+        return _err(
+            error_code="REMOVE_DEPARTMENT_MEMBERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接或 member_id 格式后重试",
+        )
+
+
+def _classify_delete_error(error_message: str) -> str:
+    """根据错误信息分类删除失败原因."""
+    msg = (error_message or "").lower()
+    if any(k in msg for k in ("不存在", "not found", "找不到", "无效")):
+        return "not_found"
+    if any(k in msg for k in ("成员", "子部门", "child", "sub", "包含", "下级")):
+        return "has_members_or_children"
+    return "api_error"
+
+
+@mcp.tool()
+async def adm_delete_departments(
+    department_ids: Annotated[
+        str,
+        Field(description="要删除的部门 ID 列表，多个用逗号分隔"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """删除部门.
+
+    触发条件：需要删除空部门或不再使用的部门时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：在 UMU 平台删除指定部门。
+
+    本工具会先查询每个部门的层级信息，按从深到浅的顺序逐个删除，
+    避免父部门先于子部门被删除导致失败。
+    调用前请确保目标部门下无成员，否则可能删除失败。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    dept_list = [did.strip() for did in department_ids.split(",") if did.strip()]
+    if not dept_list:
+        return _err(
+            error_code="EMPTY_DEPARTMENT_IDS",
+            error_message="department_ids 不能为空",
+            suggested_action="提供至少一个 department_id",
+        )
+
+    # -----------------------------------------------------------------------
+    # 步骤 1: 获取每个部门的层级，用于按从深到浅排序
+    # -----------------------------------------------------------------------
+    dept_levels: list[tuple[str, int]] = []
+    for dept_id in dept_list:
+        try:
+            resp = client.get(
+                client.desktop_url("/uapi/v1/department/get-by-departmentid"),
+                params={
+                    "t": str(int(datetime.now().timestamp() * 1000)),
+                    "department_id": dept_id,
+                    "type": "2",
+                },
+            )
+            if resp.get("error_code") == 0:
+                level = int(resp.get("data", {}).get("level", 1) or 1)
+            else:
+                # 查询失败时默认 level=1，让其在最后尝试删除
+                level = 1
+            dept_levels.append((dept_id, level))
+        except Exception:
+            dept_levels.append((dept_id, 1))
+
+    # 按层级降序排序：先删除深层子部门，再删除浅层父部门
+    dept_levels.sort(key=lambda x: x[1], reverse=True)
+
+    # -----------------------------------------------------------------------
+    # 步骤 2: 逐个删除部门
+    # -----------------------------------------------------------------------
+    successful: list[str] = []
+    failed: list[dict[str, Any]] = []
+
+    for dept_id, _ in dept_levels:
+        try:
+            resp = client.get(
+                client.desktop_url("/uapi/v1/department/delete"),
+                params={
+                    "t": str(int(datetime.now().timestamp() * 1000)),
+                    "department_id": dept_id,
+                },
+            )
+
+            if resp.get("error_code") == 0:
+                successful.append(dept_id)
+                continue
+
+            error_message = resp.get("error_message", "删除部门失败")
+            failed.append(
+                {
+                    "department_id": dept_id,
+                    "reason": _classify_delete_error(error_message),
+                    "error_message": error_message,
+                }
+            )
+        except Exception as e:
+            failed.append(
+                {
+                    "department_id": dept_id,
+                    "reason": "api_error",
+                    "error_message": str(e),
+                }
+            )
+
+    # -----------------------------------------------------------------------
+    # 步骤 3: 汇总结果
+    # -----------------------------------------------------------------------
+    result_data: dict[str, Any] = {
+        "deleted_count": len(successful),
+        "successful_department_ids": successful,
+        "failed_departments": failed,
+    }
+
+    if not successful:
+        return _err(
+            error_code="DELETE_DEPARTMENTS_FAILED",
+            error_message=f"全部 {len(failed)} 个部门删除失败",
+            suggested_action="检查部门下是否还有成员或子部门，或稍后重试",
+            data=result_data,
+        )
+
+    if failed:
+        return _ok(
+            data=result_data,
+            next_action="proceed",
+            suggested_action=f"已删除 {len(successful)} 个部门，{len(failed)} 个失败，请检查 failed_departments",
+        )
+
+    return _ok(
+        data=result_data,
+        next_action="proceed",
+        suggested_action="部门已删除",
+    )
 
 
 @mcp.tool()
@@ -2821,6 +4072,12 @@ def adm_account_management_guide() -> str:
 
 
 @mcp.prompt()
+def admin_department_management_guide() -> str:
+    """管理员部门管理操作指南."""
+    return prompts.admin_department_management_guide()
+
+
+@mcp.prompt()
 def adm_learning_records_guide() -> str:
     """管理员学习记录查询操作指南."""
     return prompts.admin_learning_records_guide()
@@ -2855,12 +4112,20 @@ def main() -> None:
     print("        adm_disable_account, adm_enable_account,")
     print("        adm_batch_disable_accounts, adm_batch_enable_accounts,")
     print("        adm_get_scheduled_disables,")
-    print("        adm_list_departments, adm_list_groups, adm_list_classes")
+    print("        adm_list_groups, adm_list_classes")
+    print("  部门: adm_get_department_tree, adm_get_department,")
+    print("        adm_get_child_departments, adm_list_departments,")
+    print("        adm_list_department_members, adm_search_department_members,")
+    print("        adm_create_department, adm_update_department,")
+    print("        adm_sort_departments, adm_add_department_members,")
+    print("        adm_move_department_members, adm_remove_department_members,")
+    print("        adm_delete_departments")
     print("  课程: adm_list_courses")
     print("  数据: adm_list_learning_records")
     print()
     print("可用 Prompts:")
     print("  - adm_account_management_guide")
+    print("  - admin_department_management_guide")
     print("  - adm_learning_records_guide")
     print()
 
