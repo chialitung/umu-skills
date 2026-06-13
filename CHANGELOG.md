@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-13
+
+### Fixed
+- 修正 `README.md` 中教师工具和学生工具列表与实际代码不一致的问题
+  - 教师工具：补充资源管理（列表/重命名/删除）、环节管理、课程批量更新、课程分类等约 21 个遗漏工具；删除不存在的 `tch_upload_image`
+  - 学生工具：数量从 23 修正为 24，补充 `stu_resolve_course_url`、`stu_get_questionnaire_questions`、`stu_submit_questionnaire_with_config`、`stu_check_in_with_rating`、`stu_submit_exam`、`stu_submit_exam_with_config`、`stu_get_lesson_status`、`stu_complete_course`
+  - 重新调整分类，使工具归属更清晰
+
 ## [0.8.0] - 2026-06-13
 
 ### Added

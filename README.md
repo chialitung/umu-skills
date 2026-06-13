@@ -200,22 +200,26 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 |----------|-------|
 | 认证 | `tch_login`, `tch_check_auth` |
 | 会话 | `tch_create_session`, `tch_list_sessions`, `tch_destroy_session` |
-| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course` |
+| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext` |
 | 课程列表 | `tch_list_created_courses`, `tch_list_cooperated_courses`, `tch_list_participated_courses` |
+| 课程分类 | `tch_get_categories` |
 | 环节 | `tch_create_scorm_section`, `tch_create_video_section`, `tch_create_article_section`, `tch_create_infographic_section`, `tch_create_document_section`, `tch_create_survey_section`, `tch_create_exam_section`, `tch_create_signin_section` |
 | 环节修改 | `tch_update_scorm_section`, `tch_update_video_section`, `tch_update_article_section`, `tch_update_infographic_section`, `tch_update_document_section`, `tch_update_survey_section`, `tch_update_exam_section`, `tch_update_signin_section` |
-| 资源 | `tch_upload_scorm`, `tch_upload_document`, `tch_upload_audio_video`, `tch_upload_image` |
-| 批量 | `tch_upload_documents_batch` |
+| 环节管理 | `tch_get_section`, `tch_list_sections`, `tch_delete_section`, `tch_toggle_section_visibility`, `tch_get_infographic_content` |
+| 资源（SCORM） | `tch_upload_scorm`, `tch_list_resources`, `tch_rename_resource`, `tch_delete_resource` |
+| 资源（文档） | `tch_upload_document`, `tch_list_documents`, `tch_rename_document`, `tch_delete_document`, `tch_upload_documents_batch`, `tch_delete_documents_batch` |
+| 资源（音视频） | `tch_upload_audio_video`, `tch_list_audio_videos`, `tch_rename_audio_video`, `tch_delete_audio_video` |
 
-### 学生工具（23）
+### 学生工具（24）
 
 | 分类 | 工具 |
 |----------|-------|
 | 认证 | `stu_login`, `stu_check_auth` |
 | 会话 | `stu_create_session`, `stu_list_sessions`, `stu_destroy_session` |
-| 课程 | `stu_get_my_courses`, `stu_list_participated_courses`, `stu_get_course_structure`, `stu_get_learning_progress` |
-| 学习 | `stu_enroll_course`, `stu_browse_lesson`, `stu_submit_questionnaire`, `stu_check_in`, `stu_start_exam` |
-| 批量 | `stu_batch_import_accounts`, `stu_batch_complete_course` |
+| 课程 | `stu_get_my_courses`, `stu_list_participated_courses`, `stu_get_course_structure`, `stu_get_learning_progress`, `stu_resolve_course_url` |
+| 学习 | `stu_enroll_course`, `stu_browse_lesson`, `stu_get_questionnaire_questions`, `stu_submit_questionnaire`, `stu_submit_questionnaire_with_config`, `stu_check_in`, `stu_check_in_with_rating`, `stu_start_exam`, `stu_submit_exam`, `stu_submit_exam_with_config`, `stu_get_lesson_status` |
+| 完成课程 | `stu_complete_course`, `stu_batch_complete_course` |
+| 批量 | `stu_batch_import_accounts` |
 
 ### 技能编排层（Skills Orchestrator）
 
