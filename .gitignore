@@ -51,6 +51,9 @@ mcp-config/
 # 百度网盘同步临时文件
 *.baiduyun.uploading.cfg
 
+# Claude Code 项目级指令（本地维护，不纳入版本控制）
+CLAUDE.md
+
 # Claude Code 运行时配置与 skill 定义（不属于 SDK 交付物）
 .claude/
 
