@@ -28,7 +28,8 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
-from ...core.credential_loader import load_credentials
+from ...core.credential_loader import CredentialSource, load_credentials_with_source
+from .utils import format_login_summary, get_login_identity
 from . import prompts
 from .batch import AccountImporter, AccountSource, BatchExecutor
 from .session import SessionManager
@@ -51,8 +52,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     global _umu_client, _session_manager
 
     base_url = os.getenv("UMU_BASE_URL", "https://www.umu.cn")
-    # 每次启动都重新读取学生账号凭据；优先 .env / 环境变量，其次加密凭证文件
-    username, password = load_credentials("student")
+    # 每次启动都重新读取学生账号凭据；优先级：显式参数/环境变量 > .env > 加密凭证
+    username, password, source = load_credentials_with_source("student")
 
     # 创建会话管理器
     _session_manager = SessionManager(
@@ -66,8 +67,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     # 如果有凭据，自动登录默认会话；否则正常启动
     if username and password:
         try:
-            await _session_manager.login_session(default_session.session_id, username, password)
-            print(f"[MCP Student] 默认会话已自动登录: {username}")
+            await _session_manager.login_session(
+                default_session.session_id, username, password, credential_source=source.value
+            )
+            default_session.credential_source = source.value
+            identity = get_login_identity(_umu_client)
+            summary = format_login_summary(username, source.value, identity)
+            print(f"[MCP Student] 默认会话已自动登录: {summary}")
         except Exception as e:
             print(f"[MCP Student] 默认会话自动登录失败: {e}")
     else:
@@ -407,21 +413,26 @@ async def stu_login(
     client = _get_client(session_id)
     try:
         token = client.login(username, password)
-        # 更新会话用户名
+        # 更新会话用户名与来源
         if session_id and _session_manager:
             s = _session_manager.get_session_sync(session_id)
             if s:
                 s.username = username
-        # 登录后获取 student_id
-        try:
-            r = client.get(client.desktop_url("/uapi/v1/user/get"))
-            student_id = r.get("data", {}).get("student_id", "")
-        except Exception:
-            student_id = ""
+                s.credential_source = CredentialSource.EXPLICIT.value
+        # 登录后获取用户/企业身份信息
+        identity = get_login_identity(client)
         return _ok(
-            data={"token": token, "student_id": student_id, "session_id": session_id},
+            data={
+                "token": token,
+                "session_id": session_id,
+                "credential_source": CredentialSource.EXPLICIT.value,
+                **identity,
+            },
             next_action="proceed",
-            suggested_action="现在可以调用其他学习相关 Tool",
+            suggested_action=(
+                f"已登录到企业「{identity.get('enterprise_name') or identity.get('enterprise_id', '')}」，"
+                "现在可以调用其他学习相关 Tool"
+            ),
         )
     except Exception as e:
         return _err(

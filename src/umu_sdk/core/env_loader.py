@@ -93,3 +93,29 @@ def load_env_credentials(
     此函数每次调用都会重新解析 .env 文件，确保获取到最新的账号信息。
     """
     return get_role_credentials(role, env_file=env_file)
+
+
+def has_env_credentials(
+    role: Literal["admin", "teacher", "student"],
+    env_file: str | Path | None = None,
+) -> bool:
+    """检查 .env 文件中是否存在指定角色的账号凭据.
+
+    Args:
+        role: 角色名。
+        env_file: 可选的 .env 文件路径。
+
+    Returns:
+        当 .env 中同时存在该角色的用户名和密码时返回 True。
+    """
+    username, password = get_role_credentials(role, env_file)
+    return bool(username and password)
+
+
+__all__ = [
+    "find_env_file",
+    "parse_env_file",
+    "get_role_credentials",
+    "load_env_credentials",
+    "has_env_credentials",
+]

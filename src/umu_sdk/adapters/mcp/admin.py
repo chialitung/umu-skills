@@ -31,7 +31,8 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
-from ...core.credential_loader import load_credentials
+from ...core.credential_loader import CredentialSource, load_credentials_with_source
+from .utils import format_login_summary, get_login_identity
 from ...core.admin_models import (
     AdminAccount,
     AdminAccountRaw,
@@ -39,6 +40,8 @@ from ...core.admin_models import (
     AdminClassRaw,
     AdminCourse,
     AdminCourseRaw,
+    AdminLearningProgram,
+    AdminLearningProgramRaw,
     format_timestamp_beijing,
     LearningRecord,
     LearningRecordRaw,
@@ -93,8 +96,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     global _umu_client, _session_manager
 
     base_url = os.getenv("UMU_BASE_URL", "https://www.umu.cn")
-    # 每次启动都重新读取管理员账号凭据；优先 .env / 环境变量，其次加密凭证文件
-    username, password = load_credentials("admin")
+    # 每次启动都重新读取管理员账号凭据；优先级：显式参数/环境变量 > .env > 加密凭证
+    username, password, source = load_credentials_with_source("admin")
 
     _session_manager = SessionManager(
         base_url=base_url,
@@ -106,9 +109,14 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     if username and password:
         try:
             await _session_manager.login_session(
-                default_session.session_id, username, password
+                default_session.session_id, username, password, credential_source=source.value
             )
-            logger.info("默认会话已自动登录: %s", username)
+            default_session.credential_source = source.value
+            identity = get_login_identity(_umu_client)
+            logger.info(
+                "默认会话已自动登录: %s",
+                format_login_summary(username, source.value, identity),
+            )
         except Exception as e:
             logger.error("默认会话自动登录失败: %s", e)
     else:
@@ -254,29 +262,26 @@ async def adm_login(
     client = _get_client(session_id)
     try:
         token = client.login(username, password)
-        # 更新会话用户名
+        # 更新会话用户名与来源
         if session_id and _session_manager:
             s = _session_manager.get_session_sync(session_id)
             if s:
                 s.username = username
-        # 登录后获取用户信息
-        try:
-            r = client.get(client.desktop_url("/uapi/v1/user/get"))
-            user_data = r.get("data", {})
-            user_id = user_data.get("user_id", "")
-            user_name = user_data.get("name", "")
-        except Exception:
-            user_id = ""
-            user_name = ""
+                s.credential_source = CredentialSource.EXPLICIT.value
+        # 登录后获取用户/企业身份信息
+        identity = get_login_identity(client)
         return _ok(
             data={
                 "token": token,
-                "user_id": user_id,
-                "user_name": user_name,
                 "session_id": session_id,
+                "credential_source": CredentialSource.EXPLICIT.value,
+                **identity,
             },
             next_action="proceed",
-            suggested_action="现在可以调用管理员端相关 Tool",
+            suggested_action=(
+                f"已登录到企业「{identity.get('enterprise_name') or identity.get('enterprise_id', '')}」，"
+                "现在可以调用管理员端相关 Tool"
+            ),
         )
     except Exception as e:
         return _err(
@@ -5474,6 +5479,300 @@ async def adm_list_courses(
         )
 
 
+@mcp.tool()
+async def adm_list_learning_programs(
+    keywords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="学习项目搜索关键词（模糊匹配项目名称、标签、访问码），"
+                        "如 '数据分析'、'新员工培训'、'crj556'。",
+        ),
+    ] = None,
+    owner_keywords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="项目创建人/拥有者搜索关键词（姓名、邮箱、手机号、用户名）。"
+                        "提供时工具内部会调用 user-list 接口解析为 uids。",
+        ),
+    ] = None,
+    owner_uids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="项目创建人/拥有者 UMU ID 列表，多个用逗号分隔。"
+                        "与 owner_keywords 二选一。",
+        ),
+    ] = None,
+    access_permission: Annotated[
+        int | None,
+        Field(
+            default=None,
+            description="项目权限筛选：0=关闭，1=公开，2=企业内公开，3=指定账户。"
+                        "不提供则不筛选。",
+        ),
+    ] = None,
+    is_in_program_lib: Annotated[
+        int | None,
+        Field(
+            default=None,
+            description="是否在企业知识库：0=未加入，1=已加入。不提供则不筛选。",
+        ),
+    ] = None,
+    category_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="课程分类 ID，从 adm_list_course_categories 获取。不提供则不筛选。",
+        ),
+    ] = None,
+    start_day: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="创建时间起始日期，格式 YYYY-MM-DD。与 end_day 配合使用。",
+        ),
+    ] = None,
+    end_day: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="创建时间结束日期，格式 YYYY-MM-DD。与 start_day 配合使用。",
+        ),
+    ] = None,
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量（1-100），默认20"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，"
+                        "自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；"
+                        "如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询企业学习项目清单（支持多条件组合搜索）.
+
+    触发条件：需要查看企业学习项目列表、按条件筛选学习项目、查找特定学习项目时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+
+    支持的筛选条件：
+    - 项目关键词：keywords（模糊匹配项目名称、标签、访问码）
+    - 创建人：owner_keywords（自动解析）或 owner_uids（直接传入 UID）
+    - 项目权限：access_permission（0=关闭，1=公开，2=企业内公开，3=指定账户）
+    - 企业知识库：is_in_program_lib（0/1）
+    - 课程分类：category_id
+    - 创建时间范围：start_day / end_day（YYYY-MM-DD）
+
+    返回字段说明：
+    - program_id: 学习项目 ID
+    - title: 学习项目标题
+    - access_code: 访问码
+    - share_url: 分享链接
+    - creator_umu_id: 创建者 UMU 用户 ID
+    - creator_username: 创建者用户名
+    - create_time / create_time_readable: Unix 时间戳及北京时间字符串
+    - group_num: 课程/分组数量
+    - participate_num: 参与人数
+    - assignment_count: 作业/任务数量
+    - module_num: 模块数量
+    - is_in_program_lib: 是否在企业知识库
+    - access_permission / access_permission_text: 权限码及人读文本
+    - category_name: 分类路径列表
+    - enterprise_groups / enterprise_departments: 可见范围分组/部门
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    # 如果提供了创建人关键词，先解析为 uids
+    resolved_owner_uids: list[str] | None = None
+    if owner_keywords:
+        try:
+            resolved_owner_uids = await _resolve_course_owner_keywords(
+                client, owner_keywords
+            )
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_OWNER_ERROR",
+                error_message=str(e),
+                suggested_action="检查创建人关键词或网络连接后重试",
+            )
+        if resolved_owner_uids is None:
+            return _err(
+                error_code="OWNER_NOT_FOUND",
+                error_message=f"找不到匹配的创建人: {owner_keywords}",
+                suggested_action="检查关键词拼写，或调用 adm_list_accounts 查询账号信息",
+            )
+
+    # 合并直接传入的 owner_uids 和从关键词解析的 uids
+    final_owner_uids: list[str] | None = None
+    if owner_uids:
+        final_owner_uids = [uid.strip() for uid in owner_uids.split(",") if uid.strip()]
+    if resolved_owner_uids:
+        if final_owner_uids:
+            final_owner_uids = list(set(final_owner_uids + resolved_owner_uids))
+        else:
+            final_owner_uids = resolved_owner_uids
+
+    def _parse_date_to_ms(date_str: str) -> int:
+        """将 YYYY-MM-DD 解析为东八区毫秒时间戳."""
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+        return int(dt.timestamp() * 1000)
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict], int]:
+        """获取单页数据，返回(项目列表, 总数量)."""
+        params: dict[str, str] = {
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "page": str(p),
+            "size": str(sz),
+        }
+        if keywords:
+            params["program_title"] = keywords
+        if final_owner_uids:
+            params["uids"] = ",".join(final_owner_uids)
+        if access_permission is not None:
+            params["access_permission"] = str(access_permission)
+        if is_in_program_lib is not None:
+            params["is_in_program_lib"] = str(is_in_program_lib)
+        if category_id:
+            params["category_id"] = category_id
+        if start_day:
+            params["start_day"] = start_day
+            params["startDay"] = str(_parse_date_to_ms(start_day))
+        if end_day:
+            params["end_day"] = end_day
+            params["endDay"] = str(_parse_date_to_ms(end_day))
+
+        resp = client.get(
+            client.desktop_url("/ajax/enterprise/getReportProgramList"),
+            params=params,
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
+
+        program_list = resp.get("data", {}).get("list", [])
+        programs = []
+        for item in program_list:
+            try:
+                raw = AdminLearningProgramRaw(**item)
+                programs.append(AdminLearningProgram.from_raw(raw).model_dump())
+            except Exception:
+                # 如果个别项目字段异常，回退到原始字典，保证列表不中断
+                programs.append(item)
+
+        total_all = int(
+            resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0
+        )
+        return programs, total_all
+
+    try:
+        if fetch_all:
+            # 自动获取全量数据
+            all_programs: list[dict] = []
+            current_page = 1
+            batch_size = 20
+            total_all = 0
+
+            while True:
+                programs, total_all = _fetch_page(current_page, batch_size)
+                all_programs.extend(programs)
+
+                progress_pct = ""
+                if total_all > 0:
+                    pct = min(100, int(len(all_programs) / total_all * 100))
+                    progress_pct = f" ({pct}%)"
+                if total_all > 0 and current_page == 1:
+                    print(
+                        f"[adm_list_learning_programs] 共 {total_all} 条，"
+                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
+                        file=sys.stderr,
+                    )
+                print(
+                    f"[adm_list_learning_programs] 已获取第 {current_page} 页，"
+                    f"累计 {len(all_programs)} / {total_all} 条{progress_pct}",
+                    file=sys.stderr,
+                )
+
+                if len(all_programs) >= total_all or not programs:
+                    print(
+                        f"[adm_list_learning_programs] 获取完成，共 {len(all_programs)} 条，"
+                        f"合计 {current_page} 页",
+                        file=sys.stderr,
+                    )
+                    break
+                current_page += 1
+                # 安全上限：最多 50 页
+                if current_page > 50:
+                    warning_msg = (
+                        f"[adm_list_learning_programs] 警告：达到 50 页安全上限，停止获取"
+                        f"（已获取 {len(all_programs)} 条）"
+                    )
+                    print(warning_msg, file=sys.stderr)
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            return _ok(
+                data={
+                    "programs": all_programs,
+                    "total": len(all_programs),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(all_programs) if all_programs else 0,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 program_id 或 access_code 进一步查询项目详情",
+            )
+        else:
+            # 单页模式
+            programs, total_all = _fetch_page(page, page_size)
+            return _ok(
+                data={
+                    "programs": programs,
+                    "total": len(programs),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": page,
+                        "page_size": page_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 program_id 或 access_code 进一步查询项目详情",
+            )
+    except Exception as e:
+        return _err(
+            error_code="LIST_LEARNING_PROGRAMS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
@@ -5540,6 +5839,7 @@ def main() -> None:
     print("        adm_remove_group_members, adm_add_group_managers,")
     print("        adm_remove_group_managers")
     print("  课程: adm_list_courses")
+    print("  学习项目: adm_list_learning_programs")
     print("  数据: adm_list_learning_records")
     print()
     print("可用 Prompts:")

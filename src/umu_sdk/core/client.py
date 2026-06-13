@@ -6,40 +6,12 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger("umu.sdk.client")
-
-# 自动加载 .env 文件（如果存在 python-dotenv）
-_venv_loaded = False
-
-def _load_dotenv() -> None:
-    """自动检测并加载 .env 文件."""
-    global _venv_loaded
-    if _venv_loaded:
-        return
-    try:
-        from dotenv import load_dotenv
-        # 尝试多个可能的 .env 位置
-        candidates = [
-            os.path.join(os.getcwd(), ".env"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"),
-        ]
-        for path in candidates:
-            if os.path.isfile(path):
-                load_dotenv(path)
-                break
-    except ImportError:
-        pass  # python-dotenv 未安装，跳过
-    finally:
-        _venv_loaded = True
-
-_load_dotenv()
 
 from .auth import AuthManager  # noqa: E402
 from .errors import (  # noqa: E402

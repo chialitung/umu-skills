@@ -28,6 +28,7 @@ class SessionInfo:
 
     session_id: str
     username: str | None
+    credential_source: str | None
     created_at: float
     last_used_at: float
     is_authenticated: bool
@@ -40,6 +41,7 @@ class UMUSession:
     session_id: str
     client: UMUClient
     username: str | None = None
+    credential_source: str | None = None
     created_at: float = field(default_factory=time.time)
     last_used_at: float = field(default_factory=time.time)
 
@@ -52,6 +54,7 @@ class UMUSession:
         return SessionInfo(
             session_id=self.session_id,
             username=self.username,
+            credential_source=self.credential_source,
             created_at=self.created_at,
             last_used_at=self.last_used_at,
             is_authenticated=self.client.auth.is_authenticated(),
@@ -244,6 +247,7 @@ class SessionManager:
         session_id: str,
         username: str,
         password: str,
+        credential_source: str | None = None,
     ) -> str:
         """对指定会话执行登录.
 
@@ -251,6 +255,7 @@ class SessionManager:
             session_id: 会话 ID
             username: 用户名
             password: 密码
+            credential_source: 可选的凭证来源标记，用于可观测性
 
         Returns:
             认证 Token
@@ -264,6 +269,7 @@ class SessionManager:
 
         token = session.client.login(username, password)
         session.username = username
+        session.credential_source = credential_source
         return token
 
     def close_all(self) -> None:

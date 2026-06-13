@@ -667,3 +667,58 @@ class TestAdminData:
         assert mock_mcp.calls == [
             ("admin", "adm_list_learning_records", {"page": 1, "page_size": 20, "fetch_all": False}),
         ]
+
+
+class TestAdminLearningPrograms:
+    async def test_list_learning_programs(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="list_learning_programs",
+            arguments={
+                "keywords": "数据分析",
+                "owner_keywords": "Charlie",
+                "access_permission": 2,
+                "is_in_program_lib": 1,
+                "category_id": "27730",
+                "start_day": "2026-06-01",
+                "end_day": "2026-06-12",
+                "fetch_all": True,
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_list_learning_programs",
+                {
+                    "keywords": "数据分析",
+                    "owner_keywords": "Charlie",
+                    "access_permission": 2,
+                    "is_in_program_lib": 1,
+                    "category_id": "27730",
+                    "start_day": "2026-06-01",
+                    "end_day": "2026-06-12",
+                    "page": 1,
+                    "page_size": 20,
+                    "fetch_all": True,
+                },
+            ),
+        ]
+
+    async def test_list_learning_programs_minimal(
+        self, registry_with_admin_skills: SkillRegistry
+    ) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(name="list_learning_programs", arguments={})
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("admin", "adm_list_learning_programs", {"page": 1, "page_size": 20, "fetch_all": False}),
+        ]

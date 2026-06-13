@@ -796,3 +796,120 @@ class AdminCourseListResponse(BaseModel):
     error_message: str = ""
     suggested_action: str = ""
     next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = "proceed"
+
+
+class AdminLearningProgramRaw(BaseModel):
+    """UMU 原始学习项目对象.
+
+    对应 /ajax/enterprise/getReportProgramList 响应中 `data.list[]` 的单个元素。
+    字段名和类型均保持原始接口返回形态。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = ""
+    creater_id: str = ""
+    program_title: str = ""
+    desc: str = ""
+    head_img: str = ""
+    ctime: str = "0"
+    access_permission: str = "2"
+    create_time: str = ""
+    username: str = ""
+    umu_id: str = ""
+    share_url: str = ""
+    access_code: str = ""
+    group_num: str = "0"
+    participate_num: int = 0
+    partticipate_num: int = 0
+    assignment_count: Any = "0"
+    module_num: str = "0"
+    enterprise_groups: list[str] = Field(default_factory=list)
+    enterprise_departments: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    is_in_program_lib: int = 0
+    category_name: list[str] = Field(default_factory=list)
+    enterprise_id: str = ""
+
+
+class AdminLearningProgram(BaseModel):
+    """Admin MCP 标准化学习项目对象.
+
+    对应 adm_list_learning_programs 返回的 `data.programs[]` 单个元素。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    program_id: str = Field(default="", description="学习项目 ID")
+    title: str = Field(default="", description="学习项目标题")
+    desc: str = Field(default="", description="学习项目介绍")
+    head_img: str = Field(default="", description="封面图 URL")
+    create_time: int = Field(default=0, description="创建时间，Unix 时间戳（秒）")
+    create_time_readable: str = Field(default="", description="创建时间，北京时间字符串")
+    creator_umu_id: str = Field(default="", description="创建者 UMU 用户 ID")
+    creator_username: str = Field(default="", description="创建者用户名")
+    share_url: str = Field(default="", description="分享链接")
+    access_code: str = Field(default="", description="访问码")
+    group_num: int = Field(default=0, description="课程/分组数量")
+    participate_num: int = Field(default=0, description="参与人数")
+    assignment_count: int = Field(default=0, description="作业/任务数量")
+    module_num: int = Field(default=0, description="模块数量")
+    enterprise_groups: list[str] = Field(default_factory=list, description="企业分组列表")
+    enterprise_departments: list[str] = Field(default_factory=list, description="企业部门列表")
+    tags: list[str] = Field(default_factory=list, description="标签列表")
+    is_in_program_lib: int = Field(default=0, description="是否在企业知识库，0=否，1=是")
+    category_name: list[str] = Field(default_factory=list, description="分类路径名称列表")
+    enterprise_id: str = Field(default="", description="企业 ID")
+    access_permission: int = Field(default=2, description="权限码")
+    access_permission_text: str = Field(default="", description="权限码人读文本")
+
+    @classmethod
+    def from_raw(cls, raw: AdminLearningProgramRaw) -> "AdminLearningProgram":
+        """从原始 UMU 学习项目对象构造标准化对象."""
+        create_ts = int(raw.ctime or 0)
+        access_permission = int(raw.access_permission or 2)
+
+        return cls(
+            program_id=raw.id,
+            title=raw.program_title,
+            desc=raw.desc,
+            head_img=raw.head_img,
+            create_time=create_ts,
+            create_time_readable=format_timestamp_beijing(create_ts),
+            creator_umu_id=raw.creater_id or raw.umu_id,
+            creator_username=raw.username,
+            share_url=raw.share_url,
+            access_code=raw.access_code,
+            group_num=int(raw.group_num or 0),
+            participate_num=int(raw.participate_num or raw.partticipate_num or 0),
+            assignment_count=int(raw.assignment_count or 0),
+            module_num=int(raw.module_num or 0),
+            enterprise_groups=raw.enterprise_groups,
+            enterprise_departments=raw.enterprise_departments,
+            tags=raw.tags,
+            is_in_program_lib=raw.is_in_program_lib,
+            category_name=raw.category_name,
+            enterprise_id=raw.enterprise_id,
+            access_permission=access_permission,
+            access_permission_text=get_course_access_permission_text(access_permission),
+        )
+
+
+class AdminLearningProgramListPagination(BaseModel):
+    """MCP 标准化学习项目列表分页信息."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_all: int = Field(default=0, description="符合条件的总数量")
+    current_page: int = Field(default=1, description="当前页码")
+    page_size: int = Field(default=20, description="每页数量")
+
+
+class AdminLearningProgramListData(BaseModel):
+    """MCP 标准化学习项目列表数据."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    programs: list[AdminLearningProgram] = Field(..., description="学习项目列表")
+    total: int = Field(..., description="本次返回数量")
+    pagination: AdminLearningProgramListPagination = Field(..., description="分页信息")

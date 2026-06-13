@@ -202,3 +202,151 @@ class TestCredentialLoader:
         username, password = cl.load_credentials("teacher")
         assert username == "encrypted_user"
         assert password == "encrypted_pass"
+
+
+class TestCredentialLoaderSourceAndPriority:
+    """测试 credential_loader 的凭证来源追踪与优先级."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_skill_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> Path:
+        """通过环境变量隔离 credential_loader 使用的 skill 目录."""
+        skill_dir = tmp_path / "umu"
+        monkeypatch.setenv("UMU_SKILL_DIR", str(skill_dir))
+        return skill_dir
+
+    @pytest.fixture
+    def dotenv_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """返回一个临时 .env 文件，并让 env_loader 指向它."""
+        env_file = tmp_path / ".env"
+        from umu_sdk.core import env_loader
+
+        monkeypatch.setattr(env_loader, "find_env_file", lambda _path=None: env_file)
+        return env_file
+
+    def _write_dotenv(
+        self, env_file: Path, role: str, username: str, password: str
+    ) -> None:
+        prefix = f"UMU_{role.upper()}"
+        env_file.write_text(
+            f'{prefix}_USERNAME="{username}"\n{prefix}_PASSWORD="{password}"\n',
+            encoding="utf-8",
+        )
+
+    def test_explicit_param_beats_dotenv(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_keyring: _MemoryKeyring,
+        dotenv_file: Path,
+    ) -> None:
+        """显式传入参数应优先于 .env."""
+        from umu_sdk.core import credential_loader as cl
+
+        self._write_dotenv(dotenv_file, "teacher", "dotenv_user", "dotenv_pass")
+        username, password, source = cl.load_credentials_with_source(
+            "teacher",
+            explicit_username="explicit_user",
+            explicit_password="explicit_pass",
+        )
+        assert username == "explicit_user"
+        assert password == "explicit_pass"
+        assert source == cl.CredentialSource.EXPLICIT
+
+    def test_env_var_beats_dotenv(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_keyring: _MemoryKeyring,
+        dotenv_file: Path,
+    ) -> None:
+        """环境变量应优先于 .env."""
+        from umu_sdk.core import credential_loader as cl
+
+        self._write_dotenv(dotenv_file, "teacher", "dotenv_user", "dotenv_pass")
+        monkeypatch.setenv("UMU_TEACHER_USERNAME", "env_user")
+        monkeypatch.setenv("UMU_TEACHER_PASSWORD", "env_pass")
+
+        username, password, source = cl.load_credentials_with_source("teacher")
+        assert username == "env_user"
+        assert password == "env_pass"
+        assert source == cl.CredentialSource.EXPLICIT
+
+    def test_dotenv_beats_encrypted(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_keyring: _MemoryKeyring,
+        dotenv_file: Path,
+    ) -> None:
+        """.env 应优先于加密凭证."""
+        from umu_sdk.core import credential_loader as cl
+
+        self._write_dotenv(dotenv_file, "teacher", "dotenv_user", "dotenv_pass")
+        monkeypatch.delenv("UMU_TEACHER_USERNAME", raising=False)
+        monkeypatch.delenv("UMU_TEACHER_PASSWORD", raising=False)
+        cm.set_role_credentials("teacher", "encrypted_user", "encrypted_pass")
+
+        username, password, source = cl.load_credentials_with_source("teacher")
+        assert username == "dotenv_user"
+        assert password == "dotenv_pass"
+        assert source == cl.CredentialSource.DOTENV
+
+    def test_encrypted_fallback(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_keyring: _MemoryKeyring,
+        dotenv_file: Path,
+    ) -> None:
+        """无显式参数/环境变量/.env 时回退到加密凭证."""
+        from umu_sdk.core import credential_loader as cl
+
+        dotenv_file.write_text("# no credentials\n", encoding="utf-8")
+        monkeypatch.delenv("UMU_TEACHER_USERNAME", raising=False)
+        monkeypatch.delenv("UMU_TEACHER_PASSWORD", raising=False)
+        cm.set_role_credentials("teacher", "encrypted_user", "encrypted_pass")
+
+        username, password, source = cl.load_credentials_with_source("teacher")
+        assert username == "encrypted_user"
+        assert password == "encrypted_pass"
+        assert source == cl.CredentialSource.ENCRYPTED
+
+    def test_no_credentials(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_keyring: _MemoryKeyring,
+        dotenv_file: Path,
+    ) -> None:
+        """没有任何凭证时返回 NONE."""
+        from umu_sdk.core import credential_loader as cl
+
+        dotenv_file.write_text("# no credentials\n", encoding="utf-8")
+        monkeypatch.delenv("UMU_TEACHER_USERNAME", raising=False)
+        monkeypatch.delenv("UMU_TEACHER_PASSWORD", raising=False)
+
+        username, password, source = cl.load_credentials_with_source("teacher")
+        assert username is None
+        assert password is None
+        assert source == cl.CredentialSource.NONE
+
+    def test_load_credentials_backwards_compatible(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_keyring: _MemoryKeyring,
+        dotenv_file: Path,
+    ) -> None:
+        """旧签名仍返回二元组."""
+        from umu_sdk.core import credential_loader as cl
+
+        self._write_dotenv(dotenv_file, "teacher", "dotenv_user", "dotenv_pass")
+        result = cl.load_credentials("teacher")
+        assert result == ("dotenv_user", "dotenv_pass")
+
+    def test_has_env_credentials(
+        self,
+        dotenv_file: Path,
+    ) -> None:
+        """has_env_credentials 正确判断 .env 中是否存在角色凭据."""
+        from umu_sdk.core import env_loader
+
+        assert not env_loader.has_env_credentials("teacher")
+        self._write_dotenv(dotenv_file, "teacher", "u", "p")
+        assert env_loader.has_env_credentials("teacher")
