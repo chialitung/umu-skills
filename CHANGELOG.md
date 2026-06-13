@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-13
+
+### Changed
+- 修复 `README.md` 中指向不存在的 `docs/README-MCP-SETUP.md` 的死链
+- 更新 `CLAUDE.md` 以反映 Admin MCP 已实现的现状：补充 `admin.py` / `utils.py`、更新工具数量、增加 admin 启动命令与环境变量
+
+### Removed
+- 移除过时的 `mcp-config/` 客户端配置示例目录（现由 `python -m umu_sdk.skills.install` 自动配置），并在 `.gitignore` 中忽略
+
 ## [0.9.0] - 2026-06-13
 
 ### Added
