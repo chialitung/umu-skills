@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-13
+
+### Added
+- Admin MCP 新增完整的部门管理能力：部门树查询、部门详情、子部门、部门成员增删改查、部门创建/更新/排序/删除
+- 新增 12 个 Admin 原子工具：`adm_get_department_tree`、`adm_get_department`、`adm_get_child_departments`、`adm_list_department_members`、`adm_search_department_members`、`adm_create_department`、`adm_update_department`、`adm_sort_departments`、`adm_add_department_members`、`adm_move_department_members`、`adm_remove_department_members`、`adm_delete_departments`
+- Skill 层新增 12 个部门管理 Skill：`get_department_tree`、`get_department`、`get_child_departments`、`list_department_members`、`search_department_members`、`create_department`、`update_department`、`sort_departments`、`add_department_members`、`move_department_members`、`remove_department_members`、`delete_departments`
+- `prompts.py` 新增 `admin_department_management_guide` 管理员部门管理操作指南
+- 新增 `tests/test_admin_department_tools.py` 覆盖 Admin 部门管理原子工具
+
+### Fixed
+- 修复 `tests/test_session.py` 中会话 TTL 测试在 Windows 低精度计时器下偶发失败的问题
+
 ## [0.7.2] - 2026-06-12
 
 ### Fixed

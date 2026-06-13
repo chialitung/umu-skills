@@ -180,7 +180,7 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 
 ## 可用工具
 
-### 管理员工具（18）
+### 管理员工具（30）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -189,7 +189,7 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 | 当前用户 | `adm_get_user_info` |
 | 账号 | `adm_create_account`, `adm_list_accounts` |
 | 账号状态 | `adm_enable_account`, `adm_disable_account`, `adm_batch_enable_accounts`, `adm_batch_disable_accounts`, `adm_get_scheduled_disables` |
-| 组织架构 | `adm_list_departments`, `adm_list_groups` |
+| 组织架构 | `adm_list_departments`, `adm_get_department_tree`, `adm_get_department`, `adm_get_child_departments`, `adm_list_department_members`, `adm_search_department_members`, `adm_create_department`, `adm_update_department`, `adm_sort_departments`, `adm_add_department_members`, `adm_move_department_members`, `adm_remove_department_members`, `adm_delete_departments`, `adm_list_groups` |
 | 班级 | `adm_list_classes` |
 | 课程 | `adm_list_courses` |
 | 学习记录 | `adm_list_learning_records` |
@@ -252,7 +252,7 @@ python -m umu_sdk.skills.server
 - 返回与 Skill 统一的标准信封格式
 - AI 应优先使用 `skill_run` 调用已封装 Skill，仅在工具未覆盖时使用透传
 
-内置 Skill 覆盖高频场景（共 41+）：
+内置 Skill 覆盖高频场景（共 54）：
 
 | Skill | 涉及子 MCP | 说明 |
 |-------|-----------|------|
@@ -291,6 +291,18 @@ python -m umu_sdk.skills.server
 | `complete_entire_course` | student | 自动完成整门课程 |
 | `batch_onboard_users` | admin + student | 批量创建学员账号并报名课程 |
 | `list_departments` | admin | 列出部门 |
+| `get_department_tree` | admin | 获取完整部门树 |
+| `get_department` | admin | 获取部门详情 |
+| `get_child_departments` | admin | 获取子部门 |
+| `list_department_members` | admin | 列出部门成员 |
+| `search_department_members` | admin | 搜索可加入部门的成员 |
+| `create_department` | admin | 创建部门 |
+| `update_department` | admin | 更新部门信息 |
+| `sort_departments` | admin | 调整部门排序 |
+| `add_department_members` | admin | 添加成员到部门 |
+| `move_department_members` | admin | 调整成员所属部门 |
+| `remove_department_members` | admin | 从部门移除成员 |
+| `delete_departments` | admin | 删除部门 |
 | `list_groups` | admin | 列出分组 |
 | `list_classes` | admin | 列出班级 |
 | `list_accounts` | admin | 查询账号列表 |
