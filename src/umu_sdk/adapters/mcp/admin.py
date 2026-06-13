@@ -138,6 +138,7 @@ mcp = FastMCP(
 提供平台管理相关的原子化操作，包括：
 - 账号管理：创建、查询、删除学员/讲师账号
 - 部门管理：查询部门树/子部门/详情/成员、创建/更新/排序/删除部门、添加/移动/移除部门成员
+- 分组管理：创建/重命名/删除分组、查询分组成员/管理员、添加/移除成员与管理员
 - 课程管理：查询企业课程清单（支持按名称/标签/访问码/创建人/权限/审核状态等筛选）
 - 学习数据查询：学员学习进度、课程统计数据
 - 系统运营：批量操作、数据导出
@@ -1030,6 +1031,428 @@ async def adm_create_account(
         data=result_data,
         next_action="proceed",
         suggested_action="账号创建成功，可以继续创建其他账号或进行其他管理操作",
+    )
+
+
+@mcp.tool()
+async def adm_update_account(
+    umu_id: Annotated[
+        str | None,
+        Field(default=None, description="用户 umu_id，与 email 二选一"),
+    ] = None,
+    email: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="用户当前邮箱，与 umu_id 二选一。用于定位账号",
+        ),
+    ] = None,
+    user_name: Annotated[
+        str | None,
+        Field(default=None, description="新姓名"),
+    ] = None,
+    new_email: Annotated[
+        str | None,
+        Field(default=None, description="新邮箱地址"),
+    ] = None,
+    login_name: Annotated[
+        str | None,
+        Field(default=None, description="新用户名（登录名）"),
+    ] = None,
+    phone: Annotated[
+        str | None,
+        Field(default=None, description="新手机号"),
+    ] = None,
+    number: Annotated[
+        str | None,
+        Field(default=None, description="新员工编号"),
+    ] = None,
+    role_type: Annotated[
+        int | None,
+        Field(
+            default=None,
+            description="角色类型：1=学员, 2=讲师, 3=学习负责人, 4=系统管理员, 5=子管理员",
+            ge=1,
+            le=5,
+        ),
+    ] = None,
+    platform_permission: Annotated[
+        int | None,
+        Field(default=None, description="平台权限，不提供则保持原值"),
+    ] = None,
+    department_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="部门ID列表，多个用逗号分隔，如 '251103,251104'。覆盖写入",
+        ),
+    ] = None,
+    group_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分组ID列表（普通成员），多个用逗号分隔，如 '177124,177125'。覆盖写入",
+        ),
+    ] = None,
+    manager_group_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="管理分组ID列表，多个用逗号分隔，如 '177124,177125'。覆盖写入。仅角色为 3/4/5 时允许",
+        ),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID"),
+    ] = None,
+) -> str:
+    """编辑企业账号信息.
+
+    触发条件：需要修改已有账号的姓名、邮箱、用户名、手机号、工号、
+    角色权限、平台权限、所属部门或所属分组时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：修改 UMU 平台上的账号信息。
+
+    注意：
+    - department_ids / group_ids / manager_group_ids 均为覆盖写入。
+    - manager_group_ids 仅在角色为学习负责人(3)、系统管理员(4)或子管理员(5)时允许设置。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    if not umu_id and not email:
+        return _err(
+            error_code="MISSING_IDENTIFIER",
+            error_message="必须提供 umu_id 或 email 之一",
+            suggested_action="调用 adm_list_accounts 查询账号信息",
+        )
+
+    # -----------------------------------------------------------------------
+    # 定位 umu_id
+    # -----------------------------------------------------------------------
+    if not umu_id and email:
+        user = _find_user_by_email(client, email)
+        if user is None:
+            return _err(
+                error_code="USER_NOT_FOUND",
+                error_message=f"找不到邮箱为 {email} 的用户",
+                suggested_action="检查邮箱是否正确，或调用 adm_list_accounts 查询",
+            )
+        umu_id = str(user.get("umu_id", ""))
+
+    # -----------------------------------------------------------------------
+    # 获取当前信息作为默认值与旧值
+    # -----------------------------------------------------------------------
+    try:
+        current_resp = client.get(
+            client.desktop_url("/ajax/enterprise/getUserInfo"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "umu_id": umu_id,
+            },
+        )
+        current = (
+            current_resp.get("data", {})
+            if current_resp.get("status") is True or current_resp.get("error_code") == 0
+            else {}
+        )
+    except Exception:
+        current = {}
+
+    user_info = current.get("user_info", {}) or {}
+
+    def _get_current(field: str, default: Any = "") -> Any:
+        return user_info.get(field, default) if user_info else default
+
+    # -----------------------------------------------------------------------
+    # manager_group_ids 角色校验
+    # -----------------------------------------------------------------------
+    if manager_group_ids is not None:
+        effective_role = role_type if role_type is not None else int(_get_current("role_type", 0) or 0)
+        if effective_role not in (3, 4, 5):
+            return _err(
+                error_code="INVALID_MANAGER_ROLE",
+                error_message="只有学习负责人、系统管理员或子管理员才能被设置为分组管理员",
+                suggested_action="移除 manager_group_ids，或先将 role_type 改为 3/4/5",
+            )
+
+    # -----------------------------------------------------------------------
+    # 解析列表字段
+    # -----------------------------------------------------------------------
+    dept_id_list: list[str] = []
+    group_id_list: list[str] = []
+    manager_group_id_list: list[str] = []
+    if department_ids:
+        dept_id_list = [d.strip() for d in department_ids.split(",") if d.strip()]
+    if group_ids:
+        group_id_list = [g.strip() for g in group_ids.split(",") if g.strip()]
+    if manager_group_ids:
+        manager_group_id_list = [g.strip() for g in manager_group_ids.split(",") if g.strip()]
+
+    # -----------------------------------------------------------------------
+    # 构造 profile 旧值对象
+    # -----------------------------------------------------------------------
+    old_info = {
+        "user_name": _get_current("user_name", ""),
+        "email": _get_current("email", ""),
+        "login_name": _get_current("login_name", ""),
+        "phone": _get_current("phone", ""),
+        "number": _get_current("number", ""),
+        "role_type": int(_get_current("role_type", 0) or 0),
+        "platform_permission": int(_get_current("platform_permission", 1) or 1),
+        "departments": [
+            {"id": str(d.get("department_id", "")), "name": d.get("department_name", "")}
+            for d in current.get("departments", [])
+        ]
+        if current.get("departments")
+        else [],
+        "groups": [{"id": str(g.get("id", "")), "name": g.get("group_name", "")} for g in current.get("members", [])]
+        if current.get("members")
+        else [],
+        "manager_groups": [
+            {"id": str(g.get("id", "")), "name": g.get("group_name", "")}
+            for g in current.get("managers", [])
+        ]
+        if current.get("managers")
+        else [],
+    }
+
+    # -----------------------------------------------------------------------
+    # 更新 profile 字段
+    # -----------------------------------------------------------------------
+    warnings: list[dict[str, Any]] = []
+    profile_changed = any(
+        f is not None
+        for f in (
+            user_name,
+            new_email,
+            login_name,
+            phone,
+            number,
+            role_type,
+            platform_permission,
+        )
+    )
+
+    if profile_changed:
+        profile_data: dict[str, Any] = {
+            "umu_id": umu_id,
+            "user_name": user_name if user_name is not None else old_info["user_name"],
+            "email": new_email if new_email is not None else old_info["email"],
+            "login_name": login_name if login_name is not None else old_info["login_name"],
+            "phone": phone if phone is not None else old_info["phone"],
+            "number": number if number is not None else old_info["number"],
+            "role_type": str(role_type if role_type is not None else old_info["role_type"]),
+            "platform_permission": str(
+                platform_permission
+                if platform_permission is not None
+                else old_info["platform_permission"]
+            ),
+        }
+
+        # 预检
+        try:
+            precheck_params: dict[str, Any] = {
+                "user_name": profile_data["user_name"],
+                "email": profile_data["email"],
+                "login_name": profile_data["login_name"],
+                "phone": profile_data["phone"],
+                "number": profile_data["number"],
+                "role_type": profile_data["role_type"],
+                "platform_permission": profile_data["platform_permission"],
+                "umu_id": umu_id,
+            }
+            if dept_id_list:
+                precheck_params["add_department_ids"] = dept_id_list[0]
+            if group_id_list:
+                precheck_params["add_enterprise_group_ids"] = group_id_list[0]
+
+            precheck_resp = client.get(
+                client.desktop_url("/uapi/v1/enterprise/add-user-check"),
+                params=precheck_params,
+            )
+            if precheck_resp.get("error_code") != 0 or precheck_resp.get("data") is not True:
+                return _err(
+                    error_code="PRECHECK_FAILED",
+                    error_message=precheck_resp.get(
+                        "error_message", "预检未通过，参数可能不合法或邮箱已被占用"
+                    ),
+                    suggested_action="检查邮箱、用户名、工号是否重复，或角色权限是否足够",
+                )
+        except Exception as e:
+            logger.warning("预检请求异常: %s", e)
+
+        # 提交 profile 更新
+        try:
+            resp = client.post(
+                client.desktop_url("/ajax/enterprise/updateUser"),
+                data=profile_data,
+            )
+            if resp.get("status") is not True and resp.get("error_code") != 0:
+                return _err(
+                    error_code="UPDATE_USER_FAILED",
+                    error_message=resp.get("error", "更新用户信息失败"),
+                    suggested_action="检查参数格式或管理员权限",
+                )
+        except Exception as e:
+            return _err(
+                error_code="UPDATE_USER_ERROR",
+                error_message=str(e),
+                suggested_action="检查网络连接或管理员权限后重试",
+            )
+
+    # -----------------------------------------------------------------------
+    # 更新分组（覆盖写入）
+    # -----------------------------------------------------------------------
+    if group_ids is not None or manager_group_ids is not None:
+        final_member_groups = group_id_list if group_ids is not None else old_info["groups"]
+        final_manager_groups = (
+            manager_group_id_list if manager_group_ids is not None else old_info["manager_groups"]
+        )
+
+        group_data: dict[str, Any] = {"umu_id": umu_id}
+        if final_member_groups:
+            group_data["member_group_id[]"] = [
+                g["id"] if isinstance(g, dict) else g for g in final_member_groups
+            ]
+        if final_manager_groups:
+            group_data["manager_group_id[]"] = [
+                g["id"] if isinstance(g, dict) else g for g in final_manager_groups
+            ]
+
+        try:
+            group_resp = client.post(
+                client.desktop_url("/ajax/enterprise/updateUserGroup"),
+                data=group_data,
+            )
+            if not (group_resp.get("status") is True or group_resp.get("error_code") == 0):
+                warnings.append(
+                    {
+                        "type": "update_group_failed",
+                        "message": group_resp.get("error", "更新分组失败"),
+                    }
+                )
+        except Exception as e:
+            warnings.append(
+                {
+                    "type": "update_group_error",
+                    "message": str(e),
+                }
+            )
+            logger.warning("更新分组失败: umu_id=%s, error=%s", umu_id, e)
+
+    # -----------------------------------------------------------------------
+    # 更新部门（覆盖写入）
+    # -----------------------------------------------------------------------
+    if department_ids is not None:
+        try:
+            dept_resp = client.post(
+                client.desktop_url("/uapi/v1/department/change-member-department"),
+                data={
+                    "umu_ids": json.dumps([umu_id]),
+                    "department_ids": json.dumps(dept_id_list),
+                },
+            )
+            if dept_resp.get("error_code") != 0:
+                warnings.append(
+                    {
+                        "type": "update_department_failed",
+                        "message": dept_resp.get("error_message", "更新部门失败"),
+                    }
+                )
+        except Exception as e:
+            warnings.append(
+                {
+                    "type": "update_department_error",
+                    "message": str(e),
+                }
+            )
+            logger.warning("更新部门失败: umu_id=%s, error=%s", umu_id, e)
+
+    # -----------------------------------------------------------------------
+    # 重新获取最新信息
+    # -----------------------------------------------------------------------
+    try:
+        new_resp = client.get(
+            client.desktop_url("/ajax/enterprise/getUserInfo"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "umu_id": umu_id,
+            },
+        )
+        new_data = (
+            new_resp.get("data", {})
+            if new_resp.get("status") is True or new_resp.get("error_code") == 0
+            else {}
+        )
+    except Exception:
+        new_data = {}
+
+    new_user_info = new_data.get("user_info", {}) or {}
+
+    def _get_new(field: str, default: Any = "") -> Any:
+        return new_user_info.get(field, default) if new_user_info else default
+
+    new_info = {
+        "user_name": _get_new("user_name", old_info["user_name"]),
+        "email": _get_new("email", old_info["email"]),
+        "login_name": _get_new("login_name", old_info["login_name"]),
+        "phone": _get_new("phone", old_info["phone"]),
+        "number": _get_new("number", old_info["number"]),
+        "role_type": int(_get_new("role_type", old_info["role_type"]) or old_info["role_type"]),
+        "platform_permission": int(
+            _get_new("platform_permission", old_info["platform_permission"])
+            or old_info["platform_permission"]
+        ),
+        "departments": [
+            {"id": str(d.get("department_id", "")), "name": d.get("department_name", "")}
+            for d in new_data.get("departments", [])
+        ]
+        if new_data.get("departments")
+        else old_info["departments"],
+        "groups": [{"id": str(g.get("id", "")), "name": g.get("group_name", "")} for g in new_data.get("members", [])]
+        if new_data.get("members")
+        else old_info["groups"],
+        "manager_groups": [
+            {"id": str(g.get("id", "")), "name": g.get("group_name", "")}
+            for g in new_data.get("managers", [])
+        ]
+        if new_data.get("managers")
+        else old_info["manager_groups"],
+    }
+
+    updated_fields = [
+        field
+        for field in ("user_name", "email", "login_name", "phone", "number", "role_type", "platform_permission")
+        if new_info[field] != old_info[field]
+    ]
+    if department_ids is not None:
+        updated_fields.append("departments")
+    if group_ids is not None:
+        updated_fields.append("groups")
+    if manager_group_ids is not None:
+        updated_fields.append("manager_groups")
+
+    result_data: dict[str, Any] = {
+        "umu_id": umu_id,
+        "old": old_info,
+        "new": new_info,
+        "updated_fields": updated_fields,
+    }
+    if warnings:
+        result_data["warnings"] = warnings
+
+    return _ok(
+        data=result_data,
+        next_action="proceed",
+        suggested_action="账号信息已更新，可通过 adm_list_accounts 查看最新状态",
     )
 
 
@@ -2430,6 +2853,990 @@ async def adm_list_groups(
             error_code="LIST_GROUPS_ERROR",
             error_message=str(e),
             suggested_action="检查网络连接后重试",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Helpers: 分组管理
+# ---------------------------------------------------------------------------
+
+
+def _normalize_group(group: dict[str, Any]) -> dict[str, Any]:
+    """将 UMU 分组字典规整为统一输出格式."""
+    creator = group.get("creator", {}) or {}
+    managers = group.get("managers", []) or []
+    return {
+        "id": str(group.get("id", "")),
+        "group_name": group.get("group_name", ""),
+        "group_name_letter": group.get("group_name_letter", ""),
+        "member_count": int(group.get("member_count", 0) or 0),
+        "creator_umu_id": str(group.get("umu_id", "")),
+        "create_time": int(group.get("create_time", 0) or 0),
+        "creator": {
+            "umu_id": str(creator.get("umu_id", "")),
+            "user_name": creator.get("user_name", ""),
+            "manage_permission": int(creator.get("manage_permission", 0) or 0),
+        },
+        "managers": [
+            {
+                "user_name": m.get("user_name", ""),
+                "email": m.get("email", ""),
+            }
+            for m in managers
+        ],
+    }
+
+
+def _normalize_group_user(user: dict[str, Any]) -> dict[str, Any]:
+    """将 UMU 分组用户字典规整为统一输出格式."""
+    return {
+        "umu_id": str(user.get("umu_id", "")),
+        "user_name": user.get("user_name", ""),
+        "user_name_letter": user.get("user_name_letter", ""),
+        "email": user.get("email", ""),
+        "phone": user.get("phone", ""),
+        "area_code": user.get("area_code", ""),
+        "login_name": user.get("login_name", ""),
+        "role_type": int(user.get("role_type", 0) or 0),
+        "role_name": _ROLE_TYPE_MAP.get(
+            int(user.get("role_type", 0) or 0), "未知"
+        ),
+        "manage_permission": int(user.get("manage_permission", 0) or 0),
+    }
+
+
+def _fetch_group_users(
+    client: UMUClient,
+    group_id: str,
+    is_manager: int,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """获取分组成员或管理员单页数据.
+
+    Args:
+        client: UMUClient 实例
+        group_id: 分组 ID
+        is_manager: 0=成员, 1=管理员
+        page: 页码
+        page_size: 每页数量
+
+    Returns:
+        (用户列表, 总数量)
+    """
+    # 成员默认按姓名升序，管理员默认按加入时间/权限排序
+    sort = "0" if is_manager else "1"
+    resp = client.get(
+        client.desktop_url("/uapi/v1/enterprise/enterprise-group-user-list"),
+        params={
+            "t": str(int(datetime.now(timezone.utc).timestamp() * 1000)),
+            "enterprise_group_id": group_id,
+            "is_manager": str(is_manager),
+            "type": "user_list",
+            "sort": sort,
+            "page": str(page),
+            "size": str(page_size),
+        },
+    )
+
+    if resp.get("error_code") != 0:
+        raise RuntimeError(resp.get("error_message", "获取分组成员失败"))
+
+    data = resp.get("data", {})
+    users = [_normalize_group_user(u) for u in data.get("list", [])]
+    total_all = int(data.get("page_info", {}).get("list_total_num", 0) or 0)
+    return users, total_all
+
+
+def _get_all_group_users(
+    client: UMUClient,
+    group_id: str,
+    is_manager: int,
+) -> list[dict[str, Any]]:
+    """获取分组全部成员或管理员."""
+    all_users: list[dict[str, Any]] = []
+    current_page = 1
+    page_size = 1000
+    total_all = 0
+
+    while True:
+        users, total_all = _fetch_group_users(
+            client, group_id, is_manager, current_page, page_size
+        )
+        all_users.extend(users)
+
+        if len(all_users) >= total_all or not users:
+            break
+        current_page += 1
+        if current_page > 50:
+            logger.warning("获取分组成员达到 50 页安全上限")
+            break
+
+    return all_users
+
+
+def _update_group_membership(
+    client: UMUClient,
+    group_id: str,
+    member_ids: list[str],
+    manager_ids: list[str],
+) -> None:
+    """调用 updateGroupUser 覆盖设置分组成员与管理员.
+
+    使用 is_delete=2 表示将成员/管理员设置为传入列表的精确值（幂等的覆盖模式）。
+    """
+    resp = client.post(
+        client.desktop_url("/ajax/enterprise/updateGroupUser"),
+        data={
+            "enterprise_group_id[]": group_id,
+            "member_id": json.dumps(member_ids),
+            "manager_id": json.dumps(manager_ids),
+            "is_delete": "2",
+        },
+    )
+
+    if not (resp.get("status") is True or resp.get("error_code") == 0):
+        raise RuntimeError(resp.get("error", "更新分组成员失败"))
+
+
+# ---------------------------------------------------------------------------
+# Tools: 分组管理
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def adm_create_group(
+    group_name: Annotated[str, Field(description="分组名称")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """创建企业分组.
+
+    触发条件：需要新增分组时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：在 UMU 平台创建新分组。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    if not group_name.strip():
+        return _err(
+            error_code="INVALID_GROUP_NAME",
+            error_message="分组名称不能为空",
+            suggested_action="提供有效的分组名称",
+        )
+
+    try:
+        resp = client.post(
+            client.desktop_url("/ajax/enterprise/updateGroup"),
+            data={"group_name": group_name.strip()},
+        )
+
+        if not (resp.get("status") is True or resp.get("error_code") == 0):
+            return _err(
+                error_code="CREATE_GROUP_FAILED",
+                error_message=resp.get("error", "创建分组失败"),
+                suggested_action="检查分组名称是否重复或管理员权限",
+            )
+
+        group_id = str(resp.get("data", {}).get("enterprise_group_id", ""))
+        return _ok(
+            data={"group_id": group_id, "group_name": group_name.strip()},
+            next_action="proceed",
+            suggested_action="使用 group_id 添加成员或管理员",
+        )
+    except Exception as e:
+        return _err(
+            error_code="CREATE_GROUP_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_update_group(
+    group_id: Annotated[str, Field(description="分组 ID")],
+    group_name: Annotated[str, Field(description="新的分组名称")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """修改分组名称.
+
+    触发条件：需要重命名分组时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：修改 UMU 平台上的分组名称。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    if not group_name.strip():
+        return _err(
+            error_code="INVALID_GROUP_NAME",
+            error_message="分组名称不能为空",
+            suggested_action="提供有效的分组名称",
+        )
+
+    try:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/enterprise/update-group-name"),
+            params={
+                "t": str(int(datetime.now(timezone.utc).timestamp() * 1000)),
+                "group_id": group_id,
+                "new_group_name": group_name.strip(),
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            return _err(
+                error_code="UPDATE_GROUP_FAILED",
+                error_message=resp.get("error_message", "修改分组名称失败"),
+                suggested_action="检查 group_id 是否正确或名称是否重复",
+            )
+
+        status = resp.get("data", {}).get("status")
+        if status != 1:
+            return _err(
+                error_code="UPDATE_GROUP_FAILED",
+                error_message="修改分组名称未生效",
+                suggested_action="检查 group_id 是否正确或名称是否重复",
+            )
+
+        return _ok(
+            data={"group_id": group_id, "group_name": group_name.strip()},
+            next_action="proceed",
+            suggested_action="分组名称已更新",
+        )
+    except Exception as e:
+        return _err(
+            error_code="UPDATE_GROUP_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_delete_groups(
+    group_ids: Annotated[
+        str,
+        Field(description="要删除的分组 ID 列表，多个用逗号分隔，如 '177155,177156'"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """删除企业分组.
+
+    触发条件：需要删除不再使用的分组时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：在 UMU 平台删除指定分组。
+
+    注意：删除前请确保分组下已无成员，否则可能删除失败。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    id_list = [gid.strip() for gid in group_ids.split(",") if gid.strip()]
+    if not id_list:
+        return _err(
+            error_code="EMPTY_GROUP_IDS",
+            error_message="group_ids 不能为空",
+            suggested_action="提供至少一个 group_id",
+        )
+
+    successful: list[str] = []
+    failed: list[dict[str, Any]] = []
+
+    for gid in id_list:
+        try:
+            resp = client.post(
+                client.desktop_url("/ajax/enterprise/deleteGroup"),
+                data={"enterprise_group_id[]": gid},
+            )
+
+            if resp.get("status") is True or resp.get("error_code") == 0:
+                successful.append(gid)
+                continue
+
+            failed.append(
+                {
+                    "group_id": gid,
+                    "error_message": resp.get("error", "删除分组失败"),
+                }
+            )
+        except Exception as e:
+            failed.append({"group_id": gid, "error_message": str(e)})
+
+    result_data: dict[str, Any] = {
+        "deleted_count": len(successful),
+        "successful_group_ids": successful,
+        "failed_groups": failed,
+    }
+
+    if not successful:
+        return _err(
+            error_code="DELETE_GROUPS_FAILED",
+            error_message=f"全部 {len(failed)} 个分组删除失败",
+            suggested_action="检查分组下是否还有成员或管理员，或稍后重试",
+            data=result_data,
+        )
+
+    if failed:
+        return _ok(
+            data=result_data,
+            next_action="proceed",
+            suggested_action=f"已删除 {len(successful)} 个分组，{len(failed)} 个失败，请检查 failed_groups",
+        )
+
+    return _ok(
+        data=result_data,
+        next_action="proceed",
+        suggested_action="分组已删除",
+    )
+
+
+@mcp.tool()
+async def adm_get_group(
+    group_id: Annotated[str, Field(description="分组 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取分组详情.
+
+    触发条件：需要查看分组基本信息、成员数、创建者、管理员时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        resp = client.get(
+            client.desktop_url("/ajax/enterprise/getGroupList"),
+            params={
+                "t": str(int(datetime.now(timezone.utc).timestamp() * 1000)),
+                "enterprise_group_id": group_id,
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            return _err(
+                error_code="GET_GROUP_FAILED",
+                error_message=resp.get("error", "获取分组详情失败"),
+                suggested_action="检查 group_id 是否正确",
+            )
+
+        group_list = resp.get("data", {}).get("list", [])
+        if not group_list:
+            return _err(
+                error_code="GROUP_NOT_FOUND",
+                error_message="找不到指定分组",
+                suggested_action="检查 group_id 是否正确",
+            )
+
+        return _ok(
+            data=_normalize_group(group_list[0]),
+            next_action="proceed",
+            suggested_action="使用 group_id 调用成员/管理员管理工具",
+        )
+    except Exception as e:
+        return _err(
+            error_code="GET_GROUP_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接或 group_id 后重试",
+        )
+
+
+@mcp.tool()
+async def adm_list_group_members(
+    group_id: Annotated[str, Field(description="分组 ID")],
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=1000, description="每页数量（1-1000），默认20"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取分组成员列表.
+
+    触发条件：需要查看某个分组下的普通成员时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        if fetch_all:
+            members = _get_all_group_users(client, group_id, is_manager=0)
+            return _ok(
+                data={
+                    "members": members,
+                    "total": len(members),
+                    "pagination": {
+                        "total_all": len(members),
+                        "current_page": 1,
+                        "page_size": len(members),
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 umu_id 调用 adm_remove_group_members 或 adm_add_group_managers",
+            )
+
+        members, total_all = _fetch_group_users(client, group_id, 0, page, page_size)
+        return _ok(
+            data={
+                "members": members,
+                "total": len(members),
+                "pagination": {
+                    "total_all": total_all,
+                    "current_page": page,
+                    "page_size": page_size,
+                },
+            },
+            next_action="proceed",
+            suggested_action="使用 umu_id 调用 adm_remove_group_members 或 adm_add_group_managers",
+        )
+    except Exception as e:
+        return _err(
+            error_code="LIST_GROUP_MEMBERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接或 group_id 后重试",
+        )
+
+
+@mcp.tool()
+async def adm_list_group_managers(
+    group_id: Annotated[str, Field(description="分组 ID")],
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=1000, description="每页数量（1-1000），默认20"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取分组管理员列表.
+
+    触发条件：需要查看某个分组的管理员时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        if fetch_all:
+            managers = _get_all_group_users(client, group_id, is_manager=1)
+            return _ok(
+                data={
+                    "managers": managers,
+                    "total": len(managers),
+                    "pagination": {
+                        "total_all": len(managers),
+                        "current_page": 1,
+                        "page_size": len(managers),
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 umu_id 调用 adm_remove_group_managers",
+            )
+
+        managers, total_all = _fetch_group_users(client, group_id, 1, page, page_size)
+        return _ok(
+            data={
+                "managers": managers,
+                "total": len(managers),
+                "pagination": {
+                    "total_all": total_all,
+                    "current_page": page,
+                    "page_size": page_size,
+                },
+            },
+            next_action="proceed",
+            suggested_action="使用 umu_id 调用 adm_remove_group_managers",
+        )
+    except Exception as e:
+        return _err(
+            error_code="LIST_GROUP_MANAGERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接或 group_id 后重试",
+        )
+
+
+@mcp.tool()
+async def adm_add_group_members(
+    group_id: Annotated[str, Field(description="分组 ID")],
+    umu_ids: Annotated[
+        str,
+        Field(description="要添加的成员 umu_id 列表，多个用逗号分隔，如 '20439812,20439813'"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """添加成员到分组.
+
+    触发条件：需要将现有用户加入分组时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：将指定用户添加到目标分组。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    add_ids = [uid.strip() for uid in umu_ids.split(",") if uid.strip()]
+    if not add_ids:
+        return _err(
+            error_code="EMPTY_UMU_IDS",
+            error_message="umu_ids 不能为空",
+            suggested_action="提供至少一个 umu_id",
+        )
+
+    try:
+        current_members = _get_all_group_users(client, group_id, is_manager=0)
+        current_managers = _get_all_group_users(client, group_id, is_manager=1)
+
+        member_ids = [m["umu_id"] for m in current_members]
+        manager_ids = [m["umu_id"] for m in current_managers]
+
+        # 合并新成员，保持原有管理员不变
+        new_member_ids = list(dict.fromkeys(member_ids + add_ids))
+
+        _update_group_membership(client, group_id, new_member_ids, manager_ids)
+
+        # 校验后端是否按预期生效（updateGroupUser 遇到不合法角色时会静默忽略）
+        updated_members = _get_all_group_users(client, group_id, is_manager=0)
+        updated_managers = _get_all_group_users(client, group_id, is_manager=1)
+        actual_member_ids = {m["umu_id"] for m in updated_members}
+        actual_manager_ids = {m["umu_id"] for m in updated_managers}
+
+        failed_adds = [uid for uid in add_ids if uid not in actual_member_ids]
+        dropped_managers = [uid for uid in manager_ids if uid not in actual_manager_ids]
+
+        data: dict[str, Any] = {
+            "group_id": group_id,
+            "added_member_ids": [uid for uid in add_ids if uid in actual_member_ids],
+            "member_count": len(actual_member_ids),
+            "manager_count": len(actual_manager_ids),
+        }
+        if failed_adds:
+            data["failed_member_ids"] = failed_adds
+        if dropped_managers:
+            data["dropped_manager_ids"] = dropped_managers
+
+        if failed_adds or dropped_managers:
+            return _err(
+                error_code="PARTIAL_UPDATE",
+                error_message=(
+                    f"部分操作未生效：未成功添加成员 {failed_adds}；"
+                    f"原有管理员被移除 {dropped_managers}"
+                ).strip("；"),
+                data=data,
+                suggested_action="检查账号角色权限或 umu_id 是否正确，"
+                                "必要时单独修复被误移除的管理员",
+            )
+
+        return _ok(
+            data=data,
+            next_action="proceed",
+            suggested_action="成员已添加，可调用 adm_list_group_members 查看",
+        )
+    except Exception as e:
+        return _err(
+            error_code="ADD_GROUP_MEMBERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查 umu_id 或 group_id 是否正确",
+        )
+
+
+@mcp.tool()
+async def adm_remove_group_members(
+    group_id: Annotated[str, Field(description="分组 ID")],
+    umu_ids: Annotated[
+        str,
+        Field(description="要移除的成员 umu_id 列表，多个用逗号分隔，如 '20439812,20439813'"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """从分组移除成员.
+
+    触发条件：需要将用户从分组中移除时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：将指定用户从分组成员列表中移除。
+
+    注意：如果用户同时是分组管理员，移除后仍保留管理员身份；如需完全移除，
+    请同时调用 adm_remove_group_managers。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    remove_ids = {uid.strip() for uid in umu_ids.split(",") if uid.strip()}
+    if not remove_ids:
+        return _err(
+            error_code="EMPTY_UMU_IDS",
+            error_message="umu_ids 不能为空",
+            suggested_action="提供至少一个 umu_id",
+        )
+
+    try:
+        current_members = _get_all_group_users(client, group_id, is_manager=0)
+        current_managers = _get_all_group_users(client, group_id, is_manager=1)
+
+        member_ids = [m["umu_id"] for m in current_members if m["umu_id"] not in remove_ids]
+        manager_ids = [m["umu_id"] for m in current_managers]
+
+        _update_group_membership(client, group_id, member_ids, manager_ids)
+
+        # 校验后端是否按预期生效
+        updated_members = _get_all_group_users(client, group_id, is_manager=0)
+        updated_managers = _get_all_group_users(client, group_id, is_manager=1)
+        actual_member_ids = {m["umu_id"] for m in updated_members}
+        actual_manager_ids = {m["umu_id"] for m in updated_managers}
+
+        still_present = remove_ids & actual_member_ids
+        dropped_managers = [uid for uid in manager_ids if uid not in actual_manager_ids]
+
+        data: dict[str, Any] = {
+            "group_id": group_id,
+            "removed_member_ids": sorted(remove_ids - still_present),
+            "member_count": len(actual_member_ids),
+            "manager_count": len(actual_manager_ids),
+        }
+        if still_present:
+            data["not_removed_member_ids"] = sorted(still_present)
+        if dropped_managers:
+            data["dropped_manager_ids"] = dropped_managers
+
+        if still_present or dropped_managers:
+            return _err(
+                error_code="PARTIAL_UPDATE",
+                error_message=(
+                    f"部分操作未生效：未能移除成员 {sorted(still_present)}；"
+                    f"原有管理员被移除 {dropped_managers}"
+                ).strip("；"),
+                data=data,
+                suggested_action="检查账号是否仍在分组中，必要时单独修复被误移除的管理员",
+            )
+
+        return _ok(
+            data=data,
+            next_action="proceed",
+            suggested_action="成员已移除，可调用 adm_list_group_members 查看",
+        )
+    except Exception as e:
+        return _err(
+            error_code="REMOVE_GROUP_MEMBERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查 umu_id 或 group_id 是否正确",
+        )
+
+
+@mcp.tool()
+async def adm_add_group_managers(
+    group_id: Annotated[str, Field(description="分组 ID")],
+    umu_ids: Annotated[
+        str,
+        Field(description="要添加的管理员 umu_id 列表，多个用逗号分隔，如 '20458620,17580402'"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """添加管理员到分组.
+
+    触发条件：需要为分组设置管理员时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：将指定用户添加到目标分组的管理员列表。
+
+    注意：若用户还不是分组成员，调用后同时会成为成员（因为成员列表保持不变）。
+    若希望仅设为管理员而不保留成员身份，请先调用 adm_remove_group_members。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    add_ids = [uid.strip() for uid in umu_ids.split(",") if uid.strip()]
+    if not add_ids:
+        return _err(
+            error_code="EMPTY_UMU_IDS",
+            error_message="umu_ids 不能为空",
+            suggested_action="提供至少一个 umu_id",
+        )
+
+    try:
+        current_members = _get_all_group_users(client, group_id, is_manager=0)
+        current_managers = _get_all_group_users(client, group_id, is_manager=1)
+
+        member_ids = [m["umu_id"] for m in current_members]
+        manager_ids = [m["umu_id"] for m in current_managers]
+
+        # 合并新管理员，保持原有成员不变
+        new_manager_ids = list(dict.fromkeys(manager_ids + add_ids))
+
+        _update_group_membership(client, group_id, member_ids, new_manager_ids)
+
+        # 校验后端是否按预期生效（updateGroupUser 遇到不合法角色时会静默忽略）
+        updated_members = _get_all_group_users(client, group_id, is_manager=0)
+        updated_managers = _get_all_group_users(client, group_id, is_manager=1)
+        actual_member_ids = {m["umu_id"] for m in updated_members}
+        actual_manager_ids = {m["umu_id"] for m in updated_managers}
+
+        failed_adds = [uid for uid in add_ids if uid not in actual_manager_ids]
+        dropped_members = [uid for uid in member_ids if uid not in actual_member_ids]
+
+        data: dict[str, Any] = {
+            "group_id": group_id,
+            "added_manager_ids": [uid for uid in add_ids if uid in actual_manager_ids],
+            "manager_count": len(actual_manager_ids),
+            "member_count": len(actual_member_ids),
+        }
+        if failed_adds:
+            data["failed_manager_ids"] = failed_adds
+        if dropped_members:
+            data["dropped_member_ids"] = dropped_members
+
+        if failed_adds or dropped_members:
+            return _err(
+                error_code="PARTIAL_UPDATE",
+                error_message=(
+                    f"部分操作未生效：未成功添加管理员 {failed_adds}；"
+                    f"原有成员被移除 {dropped_members}"
+                ).strip("；"),
+                data=data,
+                suggested_action="检查账号角色权限或 umu_id 是否正确，"
+                                "必要时单独修复被误移除的成员",
+            )
+
+        return _ok(
+            data=data,
+            next_action="proceed",
+            suggested_action="管理员已添加，可调用 adm_list_group_managers 查看",
+        )
+    except Exception as e:
+        return _err(
+            error_code="ADD_GROUP_MANAGERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查 umu_id 或 group_id 是否正确",
+        )
+
+
+@mcp.tool()
+async def adm_remove_group_managers(
+    group_id: Annotated[str, Field(description="分组 ID")],
+    umu_ids: Annotated[
+        str,
+        Field(description="要移除的管理员 umu_id 列表，多个用逗号分隔，如 '20458620,17580402'"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """从分组移除管理员.
+
+    触发条件：需要取消分组管理员权限时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：将指定用户从分组管理员列表中移除。
+
+    注意：移除管理员后，该用户仍保留分组成员身份；如需完全移除，
+    请同时调用 adm_remove_group_members。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    remove_ids = {uid.strip() for uid in umu_ids.split(",") if uid.strip()}
+    if not remove_ids:
+        return _err(
+            error_code="EMPTY_UMU_IDS",
+            error_message="umu_ids 不能为空",
+            suggested_action="提供至少一个 umu_id",
+        )
+
+    try:
+        current_members = _get_all_group_users(client, group_id, is_manager=0)
+        current_managers = _get_all_group_users(client, group_id, is_manager=1)
+
+        member_ids = [m["umu_id"] for m in current_members]
+        manager_ids = [m["umu_id"] for m in current_managers if m["umu_id"] not in remove_ids]
+
+        _update_group_membership(client, group_id, member_ids, manager_ids)
+
+        # 校验后端是否按预期生效
+        updated_members = _get_all_group_users(client, group_id, is_manager=0)
+        updated_managers = _get_all_group_users(client, group_id, is_manager=1)
+        actual_member_ids = {m["umu_id"] for m in updated_members}
+        actual_manager_ids = {m["umu_id"] for m in updated_managers}
+
+        still_present = remove_ids & actual_manager_ids
+        dropped_members = [uid for uid in member_ids if uid not in actual_member_ids]
+
+        data: dict[str, Any] = {
+            "group_id": group_id,
+            "removed_manager_ids": sorted(remove_ids - still_present),
+            "manager_count": len(actual_manager_ids),
+            "member_count": len(actual_member_ids),
+        }
+        if still_present:
+            data["not_removed_manager_ids"] = sorted(still_present)
+        if dropped_members:
+            data["dropped_member_ids"] = dropped_members
+
+        if still_present or dropped_members:
+            return _err(
+                error_code="PARTIAL_UPDATE",
+                error_message=(
+                    f"部分操作未生效：未能移除管理员 {sorted(still_present)}；"
+                    f"原有成员被移除 {dropped_members}"
+                ).strip("；"),
+                data=data,
+                suggested_action="检查账号是否仍在管理员列表中，必要时单独修复被误移除的成员",
+            )
+
+        return _ok(
+            data=data,
+            next_action="proceed",
+            suggested_action="管理员已移除，可调用 adm_list_group_managers 查看",
+        )
+    except Exception as e:
+        return _err(
+            error_code="REMOVE_GROUP_MANAGERS_ERROR",
+            error_message=str(e),
+            suggested_action="检查 umu_id 或 group_id 是否正确",
         )
 
 
@@ -4109,6 +5516,7 @@ def main() -> None:
     print("  认证: adm_login, adm_check_auth, adm_get_user_info")
     print("  会话: adm_create_session, adm_list_sessions, adm_destroy_session")
     print("  账号: adm_create_account, adm_list_accounts,")
+    print("        adm_update_account,")
     print("        adm_disable_account, adm_enable_account,")
     print("        adm_batch_disable_accounts, adm_batch_enable_accounts,")
     print("        adm_get_scheduled_disables,")
@@ -4120,6 +5528,11 @@ def main() -> None:
     print("        adm_sort_departments, adm_add_department_members,")
     print("        adm_move_department_members, adm_remove_department_members,")
     print("        adm_delete_departments")
+    print("  分组: adm_create_group, adm_update_group, adm_delete_groups,")
+    print("        adm_get_group, adm_list_group_members,")
+    print("        adm_list_group_managers, adm_add_group_members,")
+    print("        adm_remove_group_members, adm_add_group_managers,")
+    print("        adm_remove_group_managers")
     print("  课程: adm_list_courses")
     print("  数据: adm_list_learning_records")
     print()
