@@ -284,3 +284,39 @@ def admin_learning_records_guide() -> str:
 3. 查询某课程学习情况：`adm_list_learning_records(course_title="高效沟通", fetch_all=True)`
 4. 查询某班级某时间段学习情况：`adm_list_learning_records(class_names="复仇者联盟", start_day="2026-06-01", end_day="2026-06-30", fetch_all=True)`
 """
+
+
+def admin_department_management_guide() -> str:
+    """管理员部门管理操作指南."""
+    return """UMU 管理员部门管理操作指南：
+
+【查询组织架构】
+- `adm_get_department_tree(fetch_all=True)`：获取完整部门树（含子部门）
+- `adm_get_child_departments(department_id="251103")`：获取某部门的直接子部门
+- `adm_get_department(department_id="251103")`：获取单个部门详情（含上级路径、负责人）
+- `adm_list_departments`：获取当前管理员有权限管理的部门扁平列表
+
+【管理部门成员】
+- `adm_list_department_members(department_id="251103")`：列出部门成员
+- `adm_search_department_members(department_id="251103", keywords="张三")`：搜索可加入该部门的成员
+- `adm_add_department_members(department_id="251103", umu_ids="20439812,20439813")`：添加成员到部门
+- `adm_move_department_members(umu_ids="20439812", department_ids="251104")`：调整成员所属部门（覆盖原有部门关系）
+- `adm_remove_department_members(member_ids="327926038")`：从部门移除成员（需 member_id，非 umu_id）
+
+【维护部门结构】
+- `adm_create_department(department_name="新产品线", parent_department_id="251103")`：创建子部门
+- `adm_update_department(department_id="251103", department_name="新名称", manager_umu_ids="20458616")`：
+  更新部门名称、上级部门或负责人
+- `adm_sort_departments(department_orders='[{"department_id":"251103","index":1},{"department_id":"251104","index":2}]')`：
+  调整同级部门排序，index 从 1 开始
+- `adm_delete_departments(department_ids="251105")`：删除部门（要求部门下无成员和子部门）
+  注意：该端点基于前端行为推断，调用前建议先用 `adm_get_department` 确认部门为空。
+
+【标准工作流示例】
+1. 查看完整架构：`adm_get_department_tree(fetch_all=True)`
+2. 创建子部门：`adm_create_department(department_name="华东区", parent_department_id="251103")`
+3. 搜索并添加成员：`adm_search_department_members(department_id="251103", keywords="张三")`
+   → `adm_add_department_members(department_id="251103", umu_ids="20439812")`
+4. 设置负责人：`adm_update_department(department_id="251103", manager_umu_ids="20439812")`
+5. 调整排序：`adm_sort_departments(department_orders='[{"department_id":"251103","index":1},{"department_id":"251104","index":2}]')`
+"""

@@ -108,6 +108,9 @@ async def test_session_ttl_expiration(manager: SessionManager):
     session = await manager.create_session()
     sid = session.session_id
 
+    # 将最后使用时间回拨，避免在同一时刻创建和获取导致时间差为 0
+    session.last_used_at -= 1
+
     # 立即获取应返回 None（已过期）
     retrieved = await manager.get_session(sid)
     assert retrieved is None
@@ -150,8 +153,11 @@ async def test_cleanup_expired(manager: SessionManager):
     """测试清理过期会话."""
     manager.session_ttl = 0
 
-    await manager.create_session()
-    await manager.create_session()
+    s1 = await manager.create_session()
+    s2 = await manager.create_session()
+    # 将最后使用时间回拨，确保在 Windows 低精度计时下也视为过期
+    s1.last_used_at -= 1
+    s2.last_used_at -= 1
 
     count = await manager.cleanup_expired()
     assert count == 2

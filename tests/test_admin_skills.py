@@ -70,6 +70,227 @@ class TestAdminOrganization:
         assert parsed["success"] is True
         assert mock_mcp.calls == [("admin", "adm_list_departments", {})]
 
+    async def test_get_department_tree(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="get_department_tree",
+            arguments={"fetch_all": True},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [("admin", "adm_get_department_tree", {"fetch_all": True})]
+
+    async def test_get_department(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="get_department",
+            arguments={"department_id": "251103"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [("admin", "adm_get_department", {"department_id": "251103"})]
+
+    async def test_get_child_departments(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="get_child_departments",
+            arguments={"department_id": "251103"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("admin", "adm_get_child_departments", {"department_id": "251103"}),
+        ]
+
+    async def test_list_department_members(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="list_department_members",
+            arguments={"department_id": "251103", "fetch_all": True},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_list_department_members",
+                {
+                    "department_id": "251103",
+                    "page": 1,
+                    "page_size": 15,
+                    "fetch_all": True,
+                },
+            ),
+        ]
+
+    async def test_search_department_members(
+        self, registry_with_admin_skills: SkillRegistry
+    ) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="search_department_members",
+            arguments={"department_id": "251103", "keywords": "张三"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_search_department_members",
+                {
+                    "department_id": "251103",
+                    "keywords": "张三",
+                    "page": 1,
+                    "page_size": 20,
+                },
+            ),
+        ]
+
+    async def test_create_department(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="create_department",
+            arguments={"department_name": "华东区", "parent_department_id": "251103"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_create_department",
+                {"department_name": "华东区", "parent_department_id": "251103"},
+            ),
+        ]
+
+    async def test_update_department(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="update_department",
+            arguments={
+                "department_id": "251103",
+                "department_name": "新名称",
+                "manager_umu_ids": "20458616",
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_update_department",
+                {
+                    "department_id": "251103",
+                    "department_name": "新名称",
+                    "manager_umu_ids": "20458616",
+                },
+            ),
+        ]
+
+    async def test_sort_departments(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        order = '[{"department_id":"251103","index":1},{"department_id":"251104","index":2}]'
+        result = await skills_server.skill_run(
+            name="sort_departments",
+            arguments={"department_orders": order},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [("admin", "adm_sort_departments", {"department_orders": order})]
+
+    async def test_add_department_members(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="add_department_members",
+            arguments={"department_id": "251103", "umu_ids": "20439812,20439813"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_add_department_members",
+                {"department_id": "251103", "umu_ids": "20439812,20439813"},
+            ),
+        ]
+
+    async def test_move_department_members(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="move_department_members",
+            arguments={"umu_ids": "20439812", "department_ids": "251104"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_move_department_members",
+                {"umu_ids": "20439812", "department_ids": "251104"},
+            ),
+        ]
+
+    async def test_remove_department_members(
+        self, registry_with_admin_skills: SkillRegistry
+    ) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="remove_department_members",
+            arguments={"member_ids": "327926038"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("admin", "adm_remove_department_members", {"member_ids": "327926038"}),
+        ]
+
+    async def test_delete_departments(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="delete_departments",
+            arguments={"department_ids": "251105"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("admin", "adm_delete_departments", {"department_ids": "251105"}),
+        ]
+
     async def test_list_groups(self, registry_with_admin_skills: SkillRegistry) -> None:
         mock_mcp = MockMCPClientManager()
         skills_server._skill_registry = registry_with_admin_skills
