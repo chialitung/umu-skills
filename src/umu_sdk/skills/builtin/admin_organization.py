@@ -625,6 +625,402 @@ async def delete_departments(
     }
 
 
+# ---------------------------------------------------------------------------
+# 分组管理 Skill
+# ---------------------------------------------------------------------------
+
+
+@skill(
+    name="create_group",
+    description="创建企业分组",
+    required_servers=["admin"],
+    return_description="新创建分组的 ID 与名称",
+)
+async def create_group(
+    ctx: SkillContext,
+    group_name: str,
+) -> dict[str, Any]:
+    """创建分组."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_create_group",
+        arguments={"group_name": group_name},
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "CREATE_GROUP_FAILED",
+            "error_message": result.get("error_message") or "分组创建失败",
+            "suggested_action": "请确认分组名称不重复",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="update_group",
+    description="重命名企业分组",
+    required_servers=["admin"],
+    return_description="更新结果",
+)
+async def update_group(
+    ctx: SkillContext,
+    group_id: str,
+    group_name: str,
+) -> dict[str, Any]:
+    """更新分组名称."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_update_group",
+        arguments={"group_id": group_id, "group_name": group_name},
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "UPDATE_GROUP_FAILED",
+            "error_message": result.get("error_message") or "分组更新失败",
+            "suggested_action": "请确认 group_id 正确且名称不重复",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="delete_groups",
+    description="删除企业分组",
+    required_servers=["admin"],
+    return_description="删除结果",
+)
+async def delete_groups(
+    ctx: SkillContext,
+    group_ids: str,
+) -> dict[str, Any]:
+    """删除分组."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_delete_groups",
+        arguments={"group_ids": group_ids},
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "DELETE_GROUPS_FAILED",
+            "error_message": result.get("error_message") or "分组删除失败",
+            "suggested_action": "请确认分组下无成员和管理员",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="get_group",
+    description="获取分组详情",
+    required_servers=["admin"],
+    return_description="分组详情，包括创建者和管理员",
+)
+async def get_group(
+    ctx: SkillContext,
+    group_id: str,
+) -> dict[str, Any]:
+    """获取分组详情."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_get_group",
+        arguments={"group_id": group_id},
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "GET_GROUP_FAILED",
+            "error_message": result.get("error_message") or "分组详情获取失败",
+            "suggested_action": "请确认 group_id 正确",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="list_group_members",
+    description="列出分组成员",
+    required_servers=["admin"],
+    return_description="分组成员列表及分页信息",
+)
+async def list_group_members(
+    ctx: SkillContext,
+    group_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    fetch_all: bool = False,
+) -> dict[str, Any]:
+    """列出分组成员."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_list_group_members",
+        arguments={
+            "group_id": group_id,
+            "page": page,
+            "page_size": page_size,
+            "fetch_all": fetch_all,
+        },
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "LIST_GROUP_MEMBERS_FAILED",
+            "error_message": result.get("error_message") or "分组成员获取失败",
+            "suggested_action": "请确认管理员已登录且 group_id 正确",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="list_group_managers",
+    description="列出分组管理员",
+    required_servers=["admin"],
+    return_description="分组管理员列表及分页信息",
+)
+async def list_group_managers(
+    ctx: SkillContext,
+    group_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    fetch_all: bool = False,
+) -> dict[str, Any]:
+    """列出分组管理员."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_list_group_managers",
+        arguments={
+            "group_id": group_id,
+            "page": page,
+            "page_size": page_size,
+            "fetch_all": fetch_all,
+        },
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "LIST_GROUP_MANAGERS_FAILED",
+            "error_message": result.get("error_message") or "分组管理员获取失败",
+            "suggested_action": "请确认管理员已登录且 group_id 正确",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="add_group_members",
+    description="添加成员到分组",
+    required_servers=["admin"],
+    return_description="添加结果",
+)
+async def add_group_members(
+    ctx: SkillContext,
+    group_id: str,
+    umu_ids: str,
+) -> dict[str, Any]:
+    """添加成员到分组."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_add_group_members",
+        arguments={"group_id": group_id, "umu_ids": umu_ids},
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "ADD_GROUP_MEMBERS_FAILED",
+            "error_message": result.get("error_message") or "添加分组成员失败",
+            "suggested_action": "请确认 umu_id 正确",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="remove_group_members",
+    description="从分组移除成员",
+    required_servers=["admin"],
+    return_description="移除结果",
+)
+async def remove_group_members(
+    ctx: SkillContext,
+    group_id: str,
+    umu_ids: str,
+) -> dict[str, Any]:
+    """从分组移除成员."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_remove_group_members",
+        arguments={"group_id": group_id, "umu_ids": umu_ids},
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "REMOVE_GROUP_MEMBERS_FAILED",
+            "error_message": result.get("error_message") or "移除分组成员失败",
+            "suggested_action": "请确认 umu_id 正确",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="add_group_managers",
+    description="添加管理员到分组",
+    required_servers=["admin"],
+    return_description="添加结果",
+)
+async def add_group_managers(
+    ctx: SkillContext,
+    group_id: str,
+    umu_ids: str,
+) -> dict[str, Any]:
+    """添加管理员到分组."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_add_group_managers",
+        arguments={"group_id": group_id, "umu_ids": umu_ids},
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "ADD_GROUP_MANAGERS_FAILED",
+            "error_message": result.get("error_message") or "添加分组管理员失败",
+            "suggested_action": "请确认 umu_id 正确",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="remove_group_managers",
+    description="从分组移除管理员",
+    required_servers=["admin"],
+    return_description="移除结果",
+)
+async def remove_group_managers(
+    ctx: SkillContext,
+    group_id: str,
+    umu_ids: str,
+) -> dict[str, Any]:
+    """从分组移除管理员."""
+    result = await ctx.call_tool(
+        server="admin",
+        tool="adm_remove_group_managers",
+        arguments={"group_id": group_id, "umu_ids": umu_ids},
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "REMOVE_GROUP_MANAGERS_FAILED",
+            "error_message": result.get("error_message") or "移除分组管理员失败",
+            "suggested_action": "请确认 umu_id 正确",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
 __all__ = [
     "list_departments",
     "get_department_tree",
@@ -641,4 +1037,14 @@ __all__ = [
     "delete_departments",
     "list_groups",
     "list_classes",
+    "create_group",
+    "update_group",
+    "delete_groups",
+    "get_group",
+    "list_group_members",
+    "list_group_managers",
+    "add_group_members",
+    "remove_group_members",
+    "add_group_managers",
+    "remove_group_managers",
 ]

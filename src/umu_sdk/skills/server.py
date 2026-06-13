@@ -133,6 +133,8 @@ mcp = FastMCP(
 - get_course_progress：查询学员课程进度
 - batch_onboard_users：批量创建学员账号并报名课程
 - get_department_tree / manage_department_members：部门结构查询与成员管理
+- create_group / update_group / delete_groups / get_group：分组 CRUD
+- add_group_members / remove_group_members / add_group_managers / remove_group_managers：分组成员与管理员管理
 
 AI 使用本服务时，可直接描述目标流程，由 orchestrator 自动选择并执行 Skill。
 """,
