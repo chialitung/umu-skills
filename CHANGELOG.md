@@ -27,9 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `.gitignore` 明确追加 `.mypy_cache/` 与 `.ruff_cache/`
 
-### Security
-- 将测试夹具中的 AIA 域名邮箱替换为 `example.com`，避免在仓库中保留企业相关邮箱示例
-
 ## [0.8.2] - 2026-06-13
 
 ### Added
