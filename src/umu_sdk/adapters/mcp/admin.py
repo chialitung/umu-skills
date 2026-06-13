@@ -1278,7 +1278,13 @@ async def adm_update_account(
                 client.desktop_url("/uapi/v1/enterprise/add-user-check"),
                 params=precheck_params,
             )
-            if precheck_resp.get("error_code") != 0 or precheck_resp.get("data") is not True:
+            precheck_data = precheck_resp.get("data")
+            precheck_failed = (
+                precheck_resp.get("error_code") != 0
+                or precheck_data is None
+                or (isinstance(precheck_data, dict) and precheck_data.get("res_code") not in (0, None))
+            )
+            if precheck_failed:
                 return _err(
                     error_code="PRECHECK_FAILED",
                     error_message=precheck_resp.get(
