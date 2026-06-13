@@ -319,6 +319,180 @@ class TestAdminOrganization:
             ("admin", "adm_list_classes", {"page": 1, "page_size": 20, "fetch_all": True}),
         ]
 
+    async def test_create_group(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="create_group",
+            arguments={"group_name": "新产品组"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("admin", "adm_create_group", {"group_name": "新产品组"}),
+        ]
+
+    async def test_update_group(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="update_group",
+            arguments={"group_id": "177155", "group_name": "重命名组"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("admin", "adm_update_group", {"group_id": "177155", "group_name": "重命名组"}),
+        ]
+
+    async def test_delete_groups(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="delete_groups",
+            arguments={"group_ids": "177155,177156"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("admin", "adm_delete_groups", {"group_ids": "177155,177156"}),
+        ]
+
+    async def test_get_group(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="get_group",
+            arguments={"group_id": "177155"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("admin", "adm_get_group", {"group_id": "177155"}),
+        ]
+
+    async def test_list_group_members(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="list_group_members",
+            arguments={"group_id": "177155", "fetch_all": True},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_list_group_members",
+                {"group_id": "177155", "page": 1, "page_size": 20, "fetch_all": True},
+            ),
+        ]
+
+    async def test_list_group_managers(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="list_group_managers",
+            arguments={"group_id": "177155"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_list_group_managers",
+                {"group_id": "177155", "page": 1, "page_size": 20, "fetch_all": False},
+            ),
+        ]
+
+    async def test_add_group_members(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="add_group_members",
+            arguments={"group_id": "177155", "umu_ids": "20439812,20439813"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_add_group_members",
+                {"group_id": "177155", "umu_ids": "20439812,20439813"},
+            ),
+        ]
+
+    async def test_remove_group_members(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="remove_group_members",
+            arguments={"group_id": "177155", "umu_ids": "20439812"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_remove_group_members",
+                {"group_id": "177155", "umu_ids": "20439812"},
+            ),
+        ]
+
+    async def test_add_group_managers(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="add_group_managers",
+            arguments={"group_id": "177155", "umu_ids": "20458620"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_add_group_managers",
+                {"group_id": "177155", "umu_ids": "20458620"},
+            ),
+        ]
+
+    async def test_remove_group_managers(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="remove_group_managers",
+            arguments={"group_id": "177155", "umu_ids": "20458620"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_remove_group_managers",
+                {"group_id": "177155", "umu_ids": "20458620"},
+            ),
+        ]
+
 
 class TestAdminAccounts:
     async def test_list_accounts(self, registry_with_admin_skills: SkillRegistry) -> None:
@@ -389,6 +563,55 @@ class TestAdminAccounts:
         skills_server._mcp_client = mock_mcp
 
         result = await skills_server.skill_run(name="enable_account", arguments={})
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "MISSING_IDENTIFIER"
+        assert mock_mcp.calls == []
+
+    async def test_update_account_by_umu_id(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager(
+            responses={
+                ("admin", "adm_update_account"): {
+                    "success": True,
+                    "data": {"umu_id": "20458616", "updated_fields": ["login_name"]},
+                }
+            }
+        )
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="update_account",
+            arguments={
+                "umu_id": "20458616",
+                "login_name": "lisi2026",
+                "email_new": "lisi@umu_aia.com",
+                "group_ids": "177124,177156",
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_update_account",
+                {
+                    "umu_id": "20458616",
+                    "login_name": "lisi2026",
+                    "new_email": "lisi@umu_aia.com",
+                    "group_ids": "177124,177156",
+                },
+            ),
+        ]
+
+    async def test_update_account_missing_identifier(
+        self, registry_with_admin_skills: SkillRegistry
+    ) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(name="update_account", arguments={})
         parsed = json.loads(result)
         assert parsed["success"] is False
         assert parsed["error_code"] == "MISSING_IDENTIFIER"
