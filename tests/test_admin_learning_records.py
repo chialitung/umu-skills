@@ -53,7 +53,7 @@ def sample_learning_record():
         "user_type": "3",
         "register_from": "1",
         "user_name": "Shook-JB.Yuan",
-        "email": "shook-jb.yuan@aia.com",
+        "email": "shook-jb.yuan@example.com",
         "number": "",
         "on_job_status": 1,
         "phone": "",

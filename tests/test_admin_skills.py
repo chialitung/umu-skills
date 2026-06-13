@@ -585,7 +585,7 @@ class TestAdminAccounts:
             arguments={
                 "umu_id": "20458616",
                 "login_name": "lisi2026",
-                "email_new": "lisi@umu_aia.com",
+                "email_new": "lisi@example.com",
                 "group_ids": "177124,177156",
             },
         )
@@ -598,7 +598,7 @@ class TestAdminAccounts:
                 {
                     "umu_id": "20458616",
                     "login_name": "lisi2026",
-                    "new_email": "lisi@umu_aia.com",
+                    "new_email": "lisi@example.com",
                     "group_ids": "177124,177156",
                 },
             ),
