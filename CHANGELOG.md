@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-13
+
+### Added
+- Admin MCP 新增学习项目清单查询原子工具 `adm_list_learning_programs`，支持按名称、创建人、权限、知识库状态、课程分类、创建时间筛选，并支持分页与 `fetch_all` 全量获取
+- Skill 层新增 `list_learning_programs` 封装，与学习项目原子工具参数一一对应
+- 优化 MCP/Skill 凭证管理：显式参数与环境变量优先于 `.env`，登录时记录凭证来源， lifespan 与登录工具返回企业/用户信息，避免静默使用错误账号
+- 新增 Admin 数据字典：`docs/admin/program-data-dictionary.md`、`docs/admin/account-data-dictionary.md`、`docs/admin/learning-record-data-dictionary.md`
+
+### Changed
+- `.gitignore` 明确追加 `.mypy_cache/` 与 `.ruff_cache/`
+
+### Security
+- 将测试夹具中的 AIA 域名邮箱替换为 `example.com`，避免在仓库中保留企业相关邮箱示例
+
 ## [0.8.2] - 2026-06-13
 
 ### Added
