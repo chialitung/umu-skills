@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-06-13
+
+### Changed
+- 将 `CLAUDE.md` 加入 `.gitignore`，使其不再纳入版本控制；本地文件保留，新克隆仓库不再包含
+
 ## [0.9.1] - 2026-06-13
 
 ### Changed
