@@ -19,7 +19,7 @@ This is not a general-purpose SDK. It is a **role-based Skill framework** where 
 |------------|----------|---------|
 | **Teacher MCP** | Lecturer | Create courses, manage content, upload resources (SCORM, documents, videos, images), add/modify sections, configure course settings |
 | **Student MCP** | Learner | Enroll in courses, browse lessons, complete sections (videos, articles, questionnaires, exams, check-ins), track learning progress |
-| **Admin MCP** *(planned)* | Administrator | Manage accounts, learning data, course data, and other backend operations |
+| **Admin MCP** | Administrator | Manage accounts, org structure (departments/groups/classes), learning records, learning programs, courses, and other backend operations |
 
 ### Development Roadmap
 
@@ -27,9 +27,9 @@ New features and tools should be added under the corresponding role:
 
 - **Teacher domain**: Course creation, resource management, section editing, batch operations → `adapters/mcp/teacher.py` and supporting modules
 - **Student domain**: Learning flow, progress tracking, enrollment, completion → `adapters/mcp/student.py`
-- **Admin domain** *(future)*: Account management, data analytics, platform administration → `adapters/mcp/admin.py` (to be created)
+- **Admin domain**: Account management, org structure, learning records, learning programs, course data → `adapters/mcp/admin.py` and supporting modules
 
-When implementing Admin MCP, reuse existing `core/` infrastructure (client, auth, encrypt, session manager) and follow the same pattern as Teacher/Student MCP servers.
+Admin MCP follows the same pattern as Teacher/Student MCP servers and reuses the existing `core/` infrastructure (client, auth, encrypt, session manager).
 
 ## Branch Workflow
 
@@ -118,6 +118,12 @@ python -m build
 # Start MCP servers (requires env vars)
 umu-skills-teacher  # UMU_TEACHER_USERNAME, UMU_TEACHER_PASSWORD
 umu-skills-student  # UMU_STUDENT_USERNAME, UMU_STUDENT_PASSWORD
+umu-skills-admin    # UMU_ADMIN_USERNAME, UMU_ADMIN_PASSWORD
+
+# Or use the module entry point (does not require PATH setup)
+python -m umu_sdk.adapters.mcp.teacher
+python -m umu_sdk.adapters.mcp.student
+python -m umu_sdk.adapters.mcp.admin
 ```
 
 ## Architecture
@@ -135,9 +141,11 @@ src/umu_sdk/
 │   ├── student/   # Placeholder package for student domain logic
 │   └── domain/    # Placeholder for enterprise domain
 ├── adapters/mcp/  # MCP protocol adapters (FastMCP servers)
-│   ├── teacher.py # Teacher MCP server (~40 tools)
-│   ├── student.py # Student MCP server (~20 tools)
+│   ├── admin.py   # Admin MCP server (~41 tools)
+│   ├── teacher.py # Teacher MCP server (~54 tools)
+│   ├── student.py # Student MCP server (~24 tools)
 │   ├── session.py # Multi-user session manager
+│   ├── utils.py   # Shared MCP helpers (login identity, formatting)
 │   ├── course_builder.py  # Course/section creation API orchestration
 │   ├── cos_upload.py      # Tencent COS SCORM upload with multipart/concurrency
 │   ├── document_upload.py # Document upload (small file direct + large file multipart)
@@ -157,8 +165,10 @@ src/umu_sdk/
     │   ├── student_assessment.py    # 问卷与考试
     │   ├── student_course_completion.py  # 自动完成课程
     │   ├── admin_organization.py    # 部门/分组/班级查询
-    │   ├── admin_accounts.py        # 账号查询、禁用/启用
-    │   └── admin_data.py            # 学习记录查询
+    │   ├── admin_accounts.py        # 账号查询、禁用/启用、编辑
+    │   ├── admin_courses.py         # 企业课程查询
+    │   ├── admin_data.py            # 学习记录查询
+    │   └── admin_learning_programs.py  # 学习项目查询
     ├── decorators.py    # @skill 装饰器与 SkillContext
     ├── registry.py      # SkillRegistry 自动加载
     ├── mcp_client.py    # 子 MCP 客户端管理
@@ -284,6 +294,7 @@ if username and password:
 | `UMU_BASE_URL` | UMU platform URL (default: `https://www.umu.cn`) |
 | `UMU_TEACHER_USERNAME` / `UMU_TEACHER_PASSWORD` | Auto-login for teacher MCP |
 | `UMU_STUDENT_USERNAME` / `UMU_STUDENT_PASSWORD` | Auto-login for student MCP |
+| `UMU_ADMIN_USERNAME` / `UMU_ADMIN_PASSWORD` | Auto-login for admin MCP |
 | `MCP_LOG_LEVEL` | Teacher MCP log level (default: INFO) |
 | `MCP_LOG_FORMAT` | Teacher MCP log format |
 

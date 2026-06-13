@@ -45,6 +45,9 @@ scripts/
 # 本地临时工作区（非 SDK 交付物，用户手动管理，禁止自动清理）
 workbench/
 
+# 旧版客户端 MCP 配置示例（现已由 python -m umu_sdk.skills.install 自动配置）
+mcp-config/
+
 # 百度网盘同步临时文件
 *.baiduyun.uploading.cfg
 

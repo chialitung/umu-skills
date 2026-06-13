@@ -96,7 +96,7 @@ python -m umu_sdk.adapters.mcp.admin
 }
 ```
 
-有关 Claude Desktop、VSCode Cline 等客户端的详细配置指南，请参见 [docs/README-MCP-SETUP.md](docs/README-MCP-SETUP.md)。
+有关 Claude Desktop、VSCode Cline 等客户端的详细配置，可通过后文的 `/umu` Skill 安装命令自动完成。
 
 ### 使用 `/umu` Skill（推荐）
 
