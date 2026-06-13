@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-06-13
+
+### Added
+- Admin MCP 新增账号编辑原子工具 `adm_update_account`，支持修改姓名、邮箱、用户名、手机号、工号、角色、平台权限、所属部门、所属分组及管理分组
+- Skill 层新增 `update_account` 封装，统一返回旧值、新值与 warnings
+- Admin MCP 新增 10 个分组管理原子工具：`adm_create_group`、`adm_update_group`、`adm_delete_groups`、`adm_get_group`、`adm_list_group_members`、`adm_list_group_managers`、`adm_add_group_members`、`adm_remove_group_members`、`adm_add_group_managers`、`adm_remove_group_managers`
+- Skill 层新增 10 个分组管理 Skill：`create_group`、`update_group`、`delete_groups`、`get_group`、`list_group_members`、`list_group_managers`、`add_group_members`、`remove_group_members`、`add_group_managers`、`remove_group_managers`
+
+### Fixed
+- 修复 `adm_update_account` 调用 `add-user-check` 预检接口时误将返回对象当作布尔值判断的问题
+
 ## [0.8.1] - 2026-06-13
 
 ### Fixed
