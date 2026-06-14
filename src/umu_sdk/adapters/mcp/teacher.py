@@ -43,7 +43,7 @@ from pydantic import Field
 
 from ...core.client import UMUClient
 from ...core.credential_loader import CredentialSource, load_credentials_with_source
-from .utils import format_login_summary, get_login_identity
+from .utils import format_login_summary, get_login_identity, report_pagination_progress
 from .cos_upload import (
     ScormUploader,
     UploadResult,
@@ -1164,6 +1164,10 @@ async def tch_list_resources(
         str | None,
         Field(default=None, description="扩展类型筛选，如 'scorm' 只显示 SCORM 资源"),
     ] = None,
+    fetch_all: Annotated[
+        bool,
+        Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
+    ] = False,
     session_id: Annotated[
         str | None,
         Field(
@@ -1175,12 +1179,12 @@ async def tch_list_resources(
     """查询讲师的音视频/SCORM 资源列表."""
     client = _get_client(session_id)
 
-    try:
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         params = {
-            "page": str(page),
+            "page": str(p),
             "is_recycle": "0",
             "search_keyword": search_keyword or "",
-            "page_rows": str(page_size),
+            "page_rows": str(sz),
             "order_by": "create_time",
             "is_desc": "1",
             "media_type": media_type,
@@ -1196,11 +1200,7 @@ async def tch_list_resources(
         )
 
         if resp.get("status") is not True and resp.get("error_code") != 0:
-            return _err(
-                error_code="LIST_RESOURCES_FAILED",
-                error_message=resp.get("error", "获取资源列表失败"),
-                suggested_action="请检查登录状态是否正确",
-            )
+            raise RuntimeError(resp.get("error", "获取资源列表失败"))
 
         data = resp.get("data", {})
         page_info = data.get("page_info", {})
@@ -1221,14 +1221,77 @@ async def tch_list_resources(
                 "status": item.get("status", ""),
             })
 
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return formatted_list, total_all
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+
+            while True:
+                page_items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(page_items)
+
+                report_pagination_progress(
+                    "tch_list_resources",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_items) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_resources",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_resources",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            return _ok(
+                data={
+                    "resources": all_items,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="如需上传新资源，调用 tch_upload_scorm；如需重命名，调用 tch_rename_resource",
+            )
+
+        # Single-page mode (original behavior)
+        formatted_list, _ = _fetch_page(page, page_size)
+
         return _ok(
             data={
                 "resources": formatted_list,
                 "pagination": {
-                    "total": int(page_info.get("list_total_num", 0) or 0),
-                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
-                    "current_page": int(page_info.get("current_page", 1) or 1),
-                    "page_size": int(page_info.get("size", page_size) or page_size),
+                    "total": 0,
+                    "total_pages": 0,
+                    "current_page": page,
+                    "page_size": page_size,
                 },
             },
             next_action="proceed",
@@ -1519,6 +1582,10 @@ async def tch_list_documents(
         str | None,
         Field(default=None, description="搜索关键词，按文件名模糊匹配"),
     ] = None,
+    fetch_all: Annotated[
+        bool,
+        Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
+    ] = False,
     session_id: Annotated[
         str | None,
         Field(
@@ -1545,12 +1612,12 @@ async def tch_list_documents(
     """
     client = _get_client(session_id)
 
-    try:
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         params = {
-            "page": str(page),
+            "page": str(p),
             "is_recycle": "0",
             "search_keyword": search_keyword or "",
-            "page_rows": str(page_size),
+            "page_rows": str(sz),
             "order_by": "create_time",
             "is_desc": "1",
             "media_type": "docweike",
@@ -1563,11 +1630,7 @@ async def tch_list_documents(
         )
 
         if resp.get("status") is not True and resp.get("error_code") != 0:
-            return _err(
-                error_code="LIST_DOCUMENTS_FAILED",
-                error_message=resp.get("error", "获取文档列表失败"),
-                suggested_action="请检查登录状态是否正确",
-            )
+            raise RuntimeError(resp.get("error", "获取文档列表失败"))
 
         data = resp.get("data", {})
         page_info = data.get("page_info", {})
@@ -1596,7 +1659,77 @@ async def tch_list_documents(
                 "status": status,
             })
 
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return formatted_list, total_all
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+
+            while True:
+                page_items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(page_items)
+
+                report_pagination_progress(
+                    "tch_list_documents",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_items) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_documents",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_documents",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            # P3-9: size=0 提示
+            zero_size_count = sum(1 for item in all_items if item.get("size_note") == "size_unknown")
+            size_hint = ""
+            if zero_size_count > 0:
+                size_hint = f" 注意：有 {zero_size_count} 个文档大小为 0（可能是 UMU 后端数据未同步），不影响使用。"
+
+            return _ok(
+                data={
+                    "documents": all_items,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action=f"如需上传新文档，调用 tch_upload_document；如需批量上传，调用 tch_upload_documents_batch；如需重命名，调用 tch_rename_document；如需删除，调用 tch_delete_document 或 tch_delete_documents_batch。{size_hint}",
+            )
+
+        # Single-page mode (original behavior)
+        formatted_list, _ = _fetch_page(page, page_size)
+
         # P3-9: size=0 提示
+        zero_size_count = sum(1 for item in formatted_list if item.get("size_note") == "size_unknown")
         size_hint = ""
         if zero_size_count > 0:
             size_hint = f" 注意：有 {zero_size_count} 个文档大小为 0（可能是 UMU 后端数据未同步），不影响使用。"
@@ -1605,10 +1738,10 @@ async def tch_list_documents(
             data={
                 "documents": formatted_list,
                 "pagination": {
-                    "total": int(page_info.get("list_total_num", 0) or 0),
-                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
-                    "current_page": int(page_info.get("current_page", 1) or 1),
-                    "page_size": int(page_info.get("size", page_size) or page_size),
+                    "total": 0,
+                    "total_pages": 0,
+                    "current_page": page,
+                    "page_size": page_size,
                 },
             },
             next_action="proceed",
@@ -2122,6 +2255,10 @@ async def tch_list_audio_videos(
         str | None,
         Field(default=None, description="搜索关键词，按文件名模糊匹配"),
     ] = None,
+    fetch_all: Annotated[
+        bool,
+        Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
+    ] = False,
     session_id: Annotated[
         str | None,
         Field(
@@ -2148,12 +2285,12 @@ async def tch_list_audio_videos(
     """
     client = _get_client(session_id)
 
-    try:
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         params = {
-            "page": str(page),
+            "page": str(p),
             "is_recycle": "0",
             "search_keyword": search_keyword or "",
-            "page_rows": str(page_size),
+            "page_rows": str(sz),
             "order_by": "create_time",
             "is_desc": "1",
             "media_type": VIDEO_MEDIA_TYPE,
@@ -2166,11 +2303,7 @@ async def tch_list_audio_videos(
         )
 
         if resp.get("status") is not True and resp.get("error_code") != 0:
-            return _err(
-                error_code="LIST_VIDEOS_FAILED",
-                error_message=resp.get("error", "获取音视频列表失败"),
-                suggested_action="请检查登录状态是否正确",
-            )
+            raise RuntimeError(resp.get("error", "获取音视频列表失败"))
 
         data = resp.get("data", {})
         page_info = data.get("page_info", {})
@@ -2191,14 +2324,77 @@ async def tch_list_audio_videos(
                 "status": item.get("status", ""),
             })
 
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return formatted_list, total_all
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+
+            while True:
+                page_items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(page_items)
+
+                report_pagination_progress(
+                    "tch_list_audio_videos",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_items) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_audio_videos",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_audio_videos",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            return _ok(
+                data={
+                    "videos": all_items,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="如需上传新音视频，调用 tch_upload_audio_video；如需重命名，调用 tch_rename_audio_video；如需删除，调用 tch_delete_audio_video。",
+            )
+
+        # Single-page mode (original behavior)
+        formatted_list, _ = _fetch_page(page, page_size)
+
         return _ok(
             data={
                 "videos": formatted_list,
                 "pagination": {
-                    "total": int(page_info.get("list_total_num", 0) or 0),
-                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
-                    "current_page": int(page_info.get("current_page", 1) or 1),
-                    "page_size": int(page_info.get("size", page_size) or page_size),
+                    "total": 0,
+                    "total_pages": 0,
+                    "current_page": page,
+                    "page_size": page_size,
                 },
             },
             next_action="proceed",
@@ -6455,6 +6651,10 @@ async def tch_list_created_courses(
         str,
         Field(default="update_time", description="排序方式：update_time=按更新时间, create_time=按创建时间"),
     ] = "update_time",
+    fetch_all: Annotated[
+        bool,
+        Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
+    ] = False,
     session_id: Annotated[
         str | None,
         Field(default=None, description="可选的会话 ID"),
@@ -6479,24 +6679,20 @@ async def tch_list_created_courses(
             suggested_action="调用 tch_login 完成登录后再重试",
         )
 
-    try:
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         resp = client.get(
             client.desktop_url("/api/group/getgrouplist"),
             params={
                 "t": str(int(time.time() * 1000)),
                 "from_type": "web",
                 "order": order,
-                "page": str(page),
-                "size": str(page_size),
+                "page": str(p),
+                "size": str(sz),
             },
         )
 
         if resp.get("status") is not True and resp.get("error_code") != 0:
-            return _err(
-                error_code="LIST_CREATED_COURSES_FAILED",
-                error_message=resp.get("error", "获取已创建课程列表失败"),
-                suggested_action="请检查登录状态是否正确",
-            )
+            raise RuntimeError(resp.get("error", "获取已创建课程列表失败"))
 
         data = resp.get("data", {})
         page_info = data.get("page_info", {})
@@ -6522,14 +6718,77 @@ async def tch_list_created_courses(
                 "etime": info.get("etime", ""),
             })
 
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return formatted_list, total_all
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+
+            while True:
+                page_items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(page_items)
+
+                report_pagination_progress(
+                    "tch_list_created_courses",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_items) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_created_courses",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_created_courses",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            return _ok(
+                data={
+                    "courses": all_items,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="可调用 tch_get_course(group_id) 获取课程详情，或翻页查看更多课程",
+            )
+
+        # Single-page mode (original behavior)
+        formatted_list, _ = _fetch_page(page, page_size)
+
         return _ok(
             data={
                 "courses": formatted_list,
                 "pagination": {
-                    "total": int(page_info.get("list_total_num", 0) or 0),
-                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
-                    "current_page": int(page_info.get("current_page", 1) or 1),
-                    "page_size": int(page_info.get("size", page_size) or page_size),
+                    "total": 0,
+                    "total_pages": 0,
+                    "current_page": page,
+                    "page_size": page_size,
                 },
             },
             next_action="proceed",
@@ -6553,6 +6812,10 @@ async def tch_list_cooperated_courses(
         str,
         Field(default="update_time", description="排序方式：update_time=按更新时间, create_time=按创建时间"),
     ] = "update_time",
+    fetch_all: Annotated[
+        bool,
+        Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
+    ] = False,
     session_id: Annotated[
         str | None,
         Field(default=None, description="可选的会话 ID"),
@@ -6577,24 +6840,20 @@ async def tch_list_cooperated_courses(
             suggested_action="调用 tch_login 完成登录后再重试",
         )
 
-    try:
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         resp = client.get(
             client.desktop_url("/api/group/getcooperategrouplist"),
             params={
                 "t": str(int(time.time() * 1000)),
                 "from_type": "web",
                 "order": order,
-                "page": str(page),
-                "size": str(page_size),
+                "page": str(p),
+                "size": str(sz),
             },
         )
 
         if resp.get("status") is not True and resp.get("error_code") != 0:
-            return _err(
-                error_code="LIST_COOPERATED_COURSES_FAILED",
-                error_message=resp.get("error", "获取协同课程列表失败"),
-                suggested_action="请检查登录状态是否正确",
-            )
+            raise RuntimeError(resp.get("error", "获取协同课程列表失败"))
 
         data = resp.get("data", {})
         page_info = data.get("page_info", {})
@@ -6620,14 +6879,77 @@ async def tch_list_cooperated_courses(
                 "etime": info.get("etime", ""),
             })
 
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return formatted_list, total_all
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+
+            while True:
+                page_items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(page_items)
+
+                report_pagination_progress(
+                    "tch_list_cooperated_courses",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_items) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_cooperated_courses",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_cooperated_courses",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            return _ok(
+                data={
+                    "courses": all_items,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="可调用 tch_get_course(group_id) 获取课程详情，或翻页查看更多课程",
+            )
+
+        # Single-page mode (original behavior)
+        formatted_list, _ = _fetch_page(page, page_size)
+
         return _ok(
             data={
                 "courses": formatted_list,
                 "pagination": {
-                    "total": int(page_info.get("list_total_num", 0) or 0),
-                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
-                    "current_page": int(page_info.get("current_page", 1) or 1),
-                    "page_size": int(page_info.get("size", page_size) or page_size),
+                    "total": 0,
+                    "total_pages": 0,
+                    "current_page": page,
+                    "page_size": page_size,
                 },
             },
             next_action="proceed",
@@ -6651,6 +6973,10 @@ async def tch_list_participated_courses(
         int,
         Field(default=0, ge=0, le=3, description="学习状态筛选：0=所有, 1=已学习, 2=学习中, 3=待学习"),
     ] = 0,
+    fetch_all: Annotated[
+        bool,
+        Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
+    ] = False,
     session_id: Annotated[
         str | None,
         Field(default=None, description="可选的会话 ID"),
@@ -6675,23 +7001,19 @@ async def tch_list_participated_courses(
             suggested_action="调用 tch_login 完成登录后再重试",
         )
 
-    try:
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         resp = client.get(
             client.desktop_url("/api/group/getmyparticipatedgrouplist"),
             params={
                 "t": str(int(time.time() * 1000)),
                 "learn_status": str(learn_status),
-                "page": str(page),
-                "size": str(page_size),
+                "page": str(p),
+                "size": str(sz),
             },
         )
 
         if resp.get("status") is not True and resp.get("error_code") != 0:
-            return _err(
-                error_code="LIST_PARTICIPATED_COURSES_FAILED",
-                error_message=resp.get("error", "获取已参与课程列表失败"),
-                suggested_action="请检查登录状态是否正确",
-            )
+            raise RuntimeError(resp.get("error", "获取已参与课程列表失败"))
 
         data = resp.get("data", {})
         page_info = data.get("page_info", {})
@@ -6715,6 +7037,75 @@ async def tch_list_participated_courses(
                 "participant_time": item.get("participant_time", ""),
             })
 
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return formatted_list, total_all
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+
+            while True:
+                page_items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(page_items)
+
+                report_pagination_progress(
+                    "tch_list_participated_courses",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_items) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_participated_courses",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_participated_courses",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            status_map = {0: "all", 1: "pending", 2: "learning", 3: "completed"}
+            return _ok(
+                data={
+                    "courses": all_items,
+                    "filter": {
+                        "learn_status": learn_status,
+                        "learn_status_label": status_map.get(learn_status, "unknown"),
+                    },
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="可调用 tch_get_course(group_id) 获取课程详情，或切换 learn_status 筛选不同状态的课程",
+            )
+
+        # Single-page mode (original behavior)
+        formatted_list, _ = _fetch_page(page, page_size)
+
+        status_map = {0: "all", 1: "pending", 2: "learning", 3: "completed"}
         return _ok(
             data={
                 "courses": formatted_list,
@@ -6723,10 +7114,10 @@ async def tch_list_participated_courses(
                     "learn_status_label": status_map.get(learn_status, "unknown"),
                 },
                 "pagination": {
-                    "total": int(page_info.get("list_total_num", 0) or 0),
-                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
-                    "current_page": int(page_info.get("current_page", 1) or 1),
-                    "page_size": int(page_info.get("size", page_size) or page_size),
+                    "total": 0,
+                    "total_pages": 0,
+                    "current_page": page,
+                    "page_size": page_size,
                 },
             },
             next_action="proceed",
