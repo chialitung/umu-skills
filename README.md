@@ -180,7 +180,7 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 
 ## 可用工具
 
-### 管理员工具（41）
+### 管理员工具（45）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -194,6 +194,9 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 | 班级 | `adm_list_classes` |
 | 课程/学习项目 | `adm_list_courses`, `adm_list_learning_programs` |
 | 学习记录 | `adm_list_learning_records` |
+| 用户任务 | `adm_list_user_tasks` |
+| 讲师 | `adm_list_instructors` |
+| 授课记录 | `adm_list_teaching_records` |
 
 ### 教师工具（54）
 
@@ -257,7 +260,7 @@ python -m umu_sdk.skills.server
 - 返回与 Skill 统一的标准信封格式
 - AI 应优先使用 `skill_run` 调用已封装 Skill，仅在工具未覆盖时使用透传
 
-内置 Skill 覆盖高频场景（共 66）：
+内置 Skill 覆盖高频场景（共 69）：
 
 | Skill | 涉及子 MCP | 说明 |
 |-------|-----------|------|
@@ -327,6 +330,9 @@ python -m umu_sdk.skills.server
 | `enable_account` | admin | 启用账号 |
 | `update_account` | admin | 编辑账号信息（姓名、邮箱、角色、分组、工号等） |
 | `get_learning_records` | admin | 查询学习记录 |
+| `get_user_tasks` | admin | 查询用户任务 |
+| `get_instructors` | admin | 查询讲师列表 |
+| `get_teaching_records` | admin | 查询授课记录 |
 
 自定义 Skill 示例（`src/umu_sdk/skills/builtin/`）：
 
