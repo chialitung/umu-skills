@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import json
+from contextlib import ExitStack
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from umu_sdk.adapters.mcp.admin import (
+    adm_list_user_tasks,
+    _build_user_task_search_condition,
+    _day_to_timestamp,
     _resolve_department_names,
     _resolve_group_names,
     _resolve_class_names_all,
@@ -77,6 +82,32 @@ def sample_raw_task():
         },
         "task_obj_id": "9532",
     }
+
+
+@pytest.fixture
+def single_page_response(sample_raw_task):
+    """单页响应样本."""
+    return {
+        "error_code": 0,
+        "error_message": "",
+        "data": {
+            "page_info": {
+                "list_total_num": 1,
+                "total_page_num": 1,
+                "current_page": 1,
+                "size": 500,
+            },
+            "list": [sample_raw_task],
+        },
+    }
+
+
+def _auth_patch(mock_client):
+    """Patch _get_client and _require_auth for adm_list_user_tasks."""
+    stack = ExitStack()
+    stack.enter_context(patch("umu_sdk.adapters.mcp.admin._get_client", return_value=mock_client))
+    stack.enter_context(patch("umu_sdk.adapters.mcp.admin._require_auth", return_value=None))
+    return stack
 
 
 class TestUserTaskRaw:
@@ -328,6 +359,131 @@ class TestUserTaskListResponse:
         assert response.success is False
         assert response.error_code == "LIST_USER_TASKS_ERROR"
         assert response.next_action == "needs_user_input"
+
+
+class TestDayToTimestamp:
+    """测试 _day_to_timestamp 辅助函数."""
+
+    def test_start_of_day(self):
+        """默认返回当天 00:00:00 的时间戳."""
+        ts = _day_to_timestamp("2026-06-14")
+        from datetime import datetime, timezone, timedelta
+
+        dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=8)))
+        assert dt.strftime("%Y-%m-%d %H:%M:%S") == "2026-06-14 00:00:00"
+
+    def test_end_of_day(self):
+        """end_of_day=True 返回当天 23:59:59 的时间戳."""
+        ts = _day_to_timestamp("2026-06-14", end_of_day=True)
+        from datetime import datetime, timezone, timedelta
+
+        dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=8)))
+        assert dt.strftime("%Y-%m-%d %H:%M:%S") == "2026-06-14 23:59:59"
+
+
+class TestBuildUserTaskSearchCondition:
+    """测试 _build_user_task_search_condition 辅助函数."""
+
+    def test_empty_returns_empty_dict(self):
+        """无参数时返回空字典."""
+        condition = _build_user_task_search_condition()
+        assert condition == {}
+
+    def test_task_types(self):
+        """任务类型应逗号连接."""
+        condition = _build_user_task_search_condition(task_types=["1", "2", "3"])
+        assert condition["obj_type"] == "1,2,3"
+
+    def test_learn_status(self):
+        """完成状态应逗号连接."""
+        condition = _build_user_task_search_condition(learn_status=["0", "2"])
+        assert condition["learn_status"] == "0,2"
+
+    def test_due_status(self):
+        """到期状态应逗号连接."""
+        condition = _build_user_task_search_condition(due_status=["1"])
+        assert condition["due_status"] == "1"
+
+    def test_department_ids(self):
+        """部门 ID 应逗号连接."""
+        condition = _build_user_task_search_condition(department_ids=["82064", "82065"])
+        assert condition["department_ids"] == "82064,82065"
+
+    def test_group_ids(self):
+        """分组 ID 应使用 enterprise_group_ids 键."""
+        condition = _build_user_task_search_condition(group_ids=["1001", "1002"])
+        assert condition["enterprise_group_ids"] == "1001,1002"
+
+    def test_class_ids(self):
+        """班级 ID 应逗号连接."""
+        condition = _build_user_task_search_condition(class_ids=["3001", "3002"])
+        assert condition["class_ids"] == "3001,3002"
+
+    def test_from_umu_ids(self):
+        """分配者 ID 应使用 from_umu_ids 键."""
+        condition = _build_user_task_search_condition(from_umu_ids=["20439812"])
+        assert condition["from_umu_ids"] == "20439812"
+
+    def test_assign_umu_ids(self):
+        """学员 ID 应使用 assign_umu_ids 键."""
+        condition = _build_user_task_search_condition(assign_umu_ids=["20439812", "20439813"])
+        assert condition["assign_umu_ids"] == "20439812,20439813"
+
+    def test_task_name(self):
+        """任务名称应直接传入."""
+        condition = _build_user_task_search_condition(task_name="Onboarding")
+        assert condition["task_name"] == "Onboarding"
+
+    def test_course_keywords(self):
+        """课程关键词应使用 keywords 键."""
+        condition = _build_user_task_search_condition(course_keywords="Python")
+        assert condition["keywords"] == "Python"
+
+    def test_time_range(self):
+        """时间范围应正确设置时间戳."""
+        condition = _build_user_task_search_condition(
+            assign_start_ts=1773676800,
+            assign_stop_ts=1781452799,
+            due_start_ts=1780000000,
+            due_stop_ts=1789000000,
+        )
+        assert condition["assign_start_ts"] == 1773676800
+        assert condition["assign_stop_ts"] == 1781452799
+        assert condition["due_start_ts"] == 1780000000
+        assert condition["due_stop_ts"] == 1789000000
+
+    def test_full_condition(self):
+        """完整条件应包含所有字段."""
+        condition = _build_user_task_search_condition(
+            task_types=["1", "2"],
+            learn_status=["0", "3"],
+            due_status=["1"],
+            department_ids=["82064"],
+            group_ids=["1001"],
+            class_ids=["3001"],
+            from_umu_ids=["20439812"],
+            assign_umu_ids=["20439813"],
+            task_name="test",
+            course_keywords="course",
+            assign_start_ts=1773676800,
+            assign_stop_ts=1781452799,
+            due_start_ts=1780000000,
+            due_stop_ts=1789000000,
+        )
+        assert condition["obj_type"] == "1,2"
+        assert condition["learn_status"] == "0,3"
+        assert condition["due_status"] == "1"
+        assert condition["department_ids"] == "82064"
+        assert condition["enterprise_group_ids"] == "1001"
+        assert condition["class_ids"] == "3001"
+        assert condition["from_umu_ids"] == "20439812"
+        assert condition["assign_umu_ids"] == "20439813"
+        assert condition["task_name"] == "test"
+        assert condition["keywords"] == "course"
+        assert condition["assign_start_ts"] == 1773676800
+        assert condition["assign_stop_ts"] == 1781452799
+        assert condition["due_start_ts"] == 1780000000
+        assert condition["due_stop_ts"] == 1789000000
 
 
 class TestResolveDepartmentNames:
@@ -626,3 +782,257 @@ class TestResolveUserKeywords:
         }
         with pytest.raises(RuntimeError, match="搜索用户失败"):
             await _resolve_user_keywords(mock_client, "张三")
+
+
+class TestAdmListUserTasks:
+    """测试 adm_list_user_tasks 工具."""
+
+    @pytest.mark.asyncio
+    async def test_defaults_to_90_days(self, mock_client, single_page_response):
+        """未提供时间范围时默认查询最近 90 天."""
+        mock_client.get.return_value = single_page_response
+        with _auth_patch(mock_client):
+            result = await adm_list_user_tasks()
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["total"] == 1
+        # 验证 search_condition 包含默认 90 天范围
+        call_args = mock_client.get.call_args
+        params = call_args.kwargs.get("params", call_args[1].get("params", {}))
+        condition = json.loads(params["search_condition"])
+        assert "assign_start_ts" in condition
+        assert "assign_stop_ts" in condition
+
+    @pytest.mark.asyncio
+    async def test_single_page_query(self, mock_client, single_page_response):
+        """单页查询返回正确结果."""
+        mock_client.get.return_value = single_page_response
+        with _auth_patch(mock_client):
+            result = await adm_list_user_tasks(page=1, page_size=10)
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["total"] == 1
+        assert parsed["data"]["pagination"]["current_page"] == 1
+        assert parsed["data"]["pagination"]["page_size"] == 10
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_pagination(self, mock_client, sample_raw_task):
+        """fetch_all=True 时自动翻页."""
+        mock_client.get.side_effect = [
+            {
+                "error_code": 0,
+                "data": {
+                    "page_info": {
+                        "list_total_num": 2,
+                        "total_page_num": 2,
+                        "current_page": 1,
+                        "size": 500,
+                    },
+                    "list": [sample_raw_task],
+                },
+            },
+            {
+                "error_code": 0,
+                "data": {
+                    "page_info": {
+                        "list_total_num": 2,
+                        "total_page_num": 2,
+                        "current_page": 2,
+                        "size": 500,
+                    },
+                    "list": [{**sample_raw_task, "task_obj_id": "9533"}],
+                },
+            },
+        ]
+        with _auth_patch(mock_client):
+            result = await adm_list_user_tasks(fetch_all=True)
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["total"] == 2
+        assert parsed["data"]["pagination"]["total_all"] == 2
+        assert mock_client.get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_size_fallback(self, mock_client, sample_raw_task):
+        """page_size=500 失败时自动回退到 100."""
+        # 第一页：size=500 失败，size=100 成功
+        mock_client.get.side_effect = [
+            {"error_code": 500, "error_message": "请求超时"},  # size=500 fails
+            {
+                "error_code": 0,
+                "data": {
+                    "page_info": {
+                        "list_total_num": 1,
+                        "total_page_num": 1,
+                        "current_page": 1,
+                        "size": 100,
+                    },
+                    "list": [sample_raw_task],
+                },
+            },
+        ]
+        with _auth_patch(mock_client):
+            result = await adm_list_user_tasks(fetch_all=True, page_size=500)
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["total"] == 1
+        # 验证第二次调用使用了 size=100
+        second_call = mock_client.get.call_args_list[1]
+        params = second_call.kwargs.get("params", second_call[1].get("params", {}))
+        assert params["size"] == "100"
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_size_fallback_still_fails(self, mock_client):
+        """size=500 和 size=100 都失败时返回错误."""
+        mock_client.get.return_value = {"error_code": 500, "error_message": "服务器错误"}
+        with _auth_patch(mock_client):
+            result = await adm_list_user_tasks(fetch_all=True, page_size=500)
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "LIST_USER_TASKS_ERROR"
+
+    @pytest.mark.asyncio
+    async def test_error_response(self, mock_client):
+        """API 错误时返回标准错误结构."""
+        mock_client.get.return_value = {"error_code": 500, "error_message": "服务器错误"}
+        with _auth_patch(mock_client):
+            result = await adm_list_user_tasks()
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "LIST_USER_TASKS_ERROR"
+        assert "服务器错误" in parsed["error_message"]
+
+    @pytest.mark.asyncio
+    async def test_with_filters(self, mock_client, single_page_response):
+        """带筛选条件时正确构建 search_condition."""
+        mock_client.get.return_value = single_page_response
+        with _auth_patch(mock_client):
+            result = await adm_list_user_tasks(
+                task_types="1,2",
+                learn_status="0,3",
+                due_status="1",
+                department_ids="82064",
+                group_ids="1001",
+                class_ids="3001",
+                assigner_umu_ids="20439812",
+                student_umu_ids="20439813",
+                task_name="test",
+                course_keywords="python",
+                assign_start_day="2026-01-01",
+                assign_end_day="2026-06-14",
+                due_start_day="2026-03-01",
+                due_end_day="2026-12-31",
+            )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        call_args = mock_client.get.call_args
+        params = call_args.kwargs.get("params", call_args[1].get("params", {}))
+        condition = json.loads(params["search_condition"])
+        assert condition["obj_type"] == "1,2"
+        assert condition["learn_status"] == "0,3"
+        assert condition["due_status"] == "1"
+        assert condition["department_ids"] == "82064"
+        assert condition["enterprise_group_ids"] == "1001"
+        assert condition["class_ids"] == "3001"
+        assert condition["from_umu_ids"] == "20439812"
+        assert condition["assign_umu_ids"] == "20439813"
+        assert condition["task_name"] == "test"
+        assert condition["keywords"] == "python"
+        assert "assign_start_ts" in condition
+        assert "assign_stop_ts" in condition
+        assert "due_start_ts" in condition
+        assert "due_stop_ts" in condition
+
+    @pytest.mark.asyncio
+    async def test_merge_explicit_and_resolved_ids(self, mock_client, single_page_response):
+        """显式 ID 和解析 ID 应合并去重."""
+        # Patch resolvers to return IDs
+        with _auth_patch(mock_client):
+            with patch(
+                "umu_sdk.adapters.mcp.admin._resolve_department_names",
+                return_value=["82065"],
+            ):
+                with patch(
+                    "umu_sdk.adapters.mcp.admin._resolve_group_names",
+                    return_value=["1002"],
+                ):
+                    mock_client.get.return_value = single_page_response
+                    result = await adm_list_user_tasks(
+                        department_ids="82064,82065",
+                        department_names="技术部",
+                        group_ids="1001",
+                        group_names="新员工",
+                    )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        call_args = mock_client.get.call_args
+        params = call_args.kwargs.get("params", call_args[1].get("params", {}))
+        condition = json.loads(params["search_condition"])
+        # 82064 (explicit) + 82065 (explicit + resolved, deduped) = 82064,82065
+        assert condition["department_ids"] == "82064,82065"
+        # 1001 (explicit) + 1002 (resolved) = 1001,1002
+        assert condition["enterprise_group_ids"] == "1001,1002"
+
+    @pytest.mark.asyncio
+    async def test_not_authenticated(self, mock_client):
+        """未认证时返回错误."""
+        with patch("umu_sdk.adapters.mcp.admin._get_client", return_value=mock_client):
+            with patch(
+                "umu_sdk.adapters.mcp.admin._require_auth",
+                return_value="当前未登录",
+            ):
+                result = await adm_list_user_tasks()
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "NOT_AUTHENTICATED"
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self, mock_client):
+        """空结果应正确返回."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {
+                "page_info": {
+                    "list_total_num": 0,
+                    "total_page_num": 0,
+                    "current_page": 1,
+                    "size": 500,
+                },
+                "list": [],
+            },
+        }
+        with _auth_patch(mock_client):
+            result = await adm_list_user_tasks()
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["total"] == 0
+        assert parsed["data"]["tasks"] == []
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_50_page_limit(self, mock_client, sample_raw_task):
+        """fetch_all 达到 50 页安全上限时停止."""
+        # 模拟每页返回 1 条，总共 100 条，但 50 页上限应该停止
+        responses = []
+        for i in range(1, 52):
+            responses.append(
+                {
+                    "error_code": 0,
+                    "data": {
+                        "page_info": {
+                            "list_total_num": 100,
+                            "total_page_num": 100,
+                            "current_page": i,
+                            "size": 500,
+                        },
+                        "list": [{**sample_raw_task, "task_obj_id": str(9500 + i)}],
+                    },
+                }
+            )
+        mock_client.get.side_effect = responses
+        with _auth_patch(mock_client):
+            result = await adm_list_user_tasks(fetch_all=True)
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        # 应该获取了 50 页（因为第 51 页超出上限）
+        assert mock_client.get.call_count == 50
+        assert parsed["data"]["total"] == 50

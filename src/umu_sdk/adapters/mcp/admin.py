@@ -45,6 +45,8 @@ from ...core.admin_models import (
     format_timestamp_beijing,
     LearningRecord,
     LearningRecordRaw,
+    UserTask,
+    UserTaskRaw,
 )
 from .session import SessionManager
 from . import prompts
@@ -4618,6 +4620,564 @@ async def adm_list_learning_records(
     except Exception as e:
         return _err(
             error_code="LIST_LEARNING_RECORDS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+def _day_to_timestamp(day: str, end_of_day: bool = False) -> int:
+    """将 YYYY-MM-DD 转换为 Unix 时间戳（Asia/Shanghai +08:00）.
+
+    Args:
+        day: 日期字符串，格式 YYYY-MM-DD
+        end_of_day: 是否转换为当天 23:59:59；否则为 00:00:00
+
+    Returns:
+        Unix 时间戳（秒）
+    """
+    dt = datetime.strptime(day, "%Y-%m-%d")
+    tz = timezone(timedelta(hours=8))
+    if end_of_day:
+        dt = dt.replace(hour=23, minute=59, second=59)
+    else:
+        dt = dt.replace(hour=0, minute=0, second=0)
+    return int(dt.replace(tzinfo=tz).timestamp())
+
+
+def _build_user_task_search_condition(
+    task_types: list[str] | None = None,
+    learn_status: list[str] | None = None,
+    due_status: list[str] | None = None,
+    department_ids: list[str] | None = None,
+    group_ids: list[str] | None = None,
+    class_ids: list[str] | None = None,
+    from_umu_ids: list[str] | None = None,
+    assign_umu_ids: list[str] | None = None,
+    task_name: str | None = None,
+    course_keywords: str | None = None,
+    assign_start_ts: int | None = None,
+    assign_stop_ts: int | None = None,
+    due_start_ts: int | None = None,
+    due_stop_ts: int | None = None,
+) -> dict[str, Any]:
+    """构建任务明细查询的 search_condition JSON 对象.
+
+    对应 GET /uapi/v1/dashboard/user-task-list 的 search_condition 参数。
+
+    Args:
+        task_types: 任务类型列表，"1"=小节, "2"=课程, "3"=学习项目
+        learn_status: 完成状态列表，"0"=待学习, "1"=学习中, "2"=按时完成, "3"=逾期完成
+        due_status: 到期状态列表，"0"=已到期, "1"=未到期, "2"=未指定到期时间
+        department_ids: 部门 ID 列表
+        group_ids: 分组 ID 列表
+        class_ids: 班级 ID 列表
+        from_umu_ids: 分配者 umu_id 列表
+        assign_umu_ids: 学员 umu_id 列表
+        task_name: 学习任务名称模糊搜索
+        course_keywords: 课程名称/描述/标签模糊搜索
+        assign_start_ts: 分配时间起始时间戳（秒）
+        assign_stop_ts: 分配时间结束时间戳（秒）
+        due_start_ts: 到期时间起始时间戳（秒）
+        due_stop_ts: 到期时间结束时间戳（秒）
+
+    Returns:
+        search_condition 字典，将被 JSON 序列化后作为查询参数。
+    """
+    condition: dict[str, Any] = {}
+
+    if task_types:
+        condition["obj_type"] = ",".join(task_types)
+    if learn_status:
+        condition["learn_status"] = ",".join(learn_status)
+    if due_status:
+        condition["due_status"] = ",".join(due_status)
+    if department_ids:
+        condition["department_ids"] = ",".join(department_ids)
+    if group_ids:
+        condition["enterprise_group_ids"] = ",".join(group_ids)
+    if class_ids:
+        condition["class_ids"] = ",".join(class_ids)
+    if from_umu_ids:
+        condition["from_umu_ids"] = ",".join(from_umu_ids)
+    if assign_umu_ids:
+        condition["assign_umu_ids"] = ",".join(assign_umu_ids)
+    if task_name:
+        condition["task_name"] = task_name
+    if course_keywords:
+        condition["keywords"] = course_keywords
+    if assign_start_ts is not None:
+        condition["assign_start_ts"] = assign_start_ts
+    if assign_stop_ts is not None:
+        condition["assign_stop_ts"] = assign_stop_ts
+    if due_start_ts is not None:
+        condition["due_start_ts"] = due_start_ts
+    if due_stop_ts is not None:
+        condition["due_stop_ts"] = due_stop_ts
+
+    return condition
+
+
+@mcp.tool()
+async def adm_list_user_tasks(
+    task_types: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="任务类型，逗号分隔：1=小节, 2=课程, 3=学习项目",
+        ),
+    ] = None,
+    learn_status: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="完成状态，逗号分隔：0=待学习, 1=学习中, 2=按时完成, 3=逾期完成",
+        ),
+    ] = None,
+    due_status: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="到期状态，逗号分隔：0=已到期, 1=未到期, 2=未指定到期时间",
+        ),
+    ] = None,
+    department_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="部门 ID 列表，多个用逗号分隔，如 '251103,251104'。不提供则不按部门筛选。",
+        ),
+    ] = None,
+    department_names: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="部门名称关键词，多个用逗号分隔。提供时工具内部会自动解析为 ID 进行精确筛选。",
+        ),
+    ] = None,
+    group_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分组 ID 列表，多个用逗号分隔，如 '177124,177125'。不提供则不按分组筛选。",
+        ),
+    ] = None,
+    group_names: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分组名称关键词，多个用逗号分隔。提供时工具内部会自动解析为 ID 进行精确筛选。",
+        ),
+    ] = None,
+    class_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="班级 ID 列表，多个用逗号分隔，如 '442992,442993'。不提供则不按班级筛选。",
+        ),
+    ] = None,
+    class_names: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="班级名称关键词，多个用逗号分隔。提供时工具内部会自动解析为 ID 进行精确筛选。",
+        ),
+    ] = None,
+    assigner_umu_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分配者 umu_id 列表，多个用逗号分隔。不提供则不按分配者筛选。",
+        ),
+    ] = None,
+    assigner_keywords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分配者姓名/邮箱/用户名关键词，内部自动解析为 umu_id 进行精确筛选。",
+        ),
+    ] = None,
+    student_umu_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分配学员 umu_id 列表，多个用逗号分隔。不提供则不按学员筛选。",
+        ),
+    ] = None,
+    student_keywords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分配学员姓名/邮箱/用户名关键词，内部自动解析为 umu_id 进行精确筛选。",
+        ),
+    ] = None,
+    task_name: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="学习任务名称模糊搜索关键词。",
+        ),
+    ] = None,
+    course_keywords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="课程名称/描述/标签模糊搜索关键词。",
+        ),
+    ] = None,
+    assign_start_day: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分配时间起始日期，格式 YYYY-MM-DD。与 assign_end_day 配合使用。未提供时默认查询最近 90 天。",
+        ),
+    ] = None,
+    assign_end_day: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分配时间结束日期，格式 YYYY-MM-DD。与 assign_start_day 配合使用。",
+        ),
+    ] = None,
+    due_start_day: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="到期时间起始日期，格式 YYYY-MM-DD。与 due_end_day 配合使用。",
+        ),
+    ] = None,
+    due_end_day: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="到期时间结束日期，格式 YYYY-MM-DD。与 due_start_day 配合使用。",
+        ),
+    ] = None,
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=500, ge=1, le=1000, description="每页数量（1-1000），默认500"),
+    ] = 500,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询企业学习任务明细.
+
+    触发条件：需要查看学员被分配的学习任务、完成状态、到期状态等明细时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+
+    支持按任务类型、完成状态、到期状态、部门、分组、班级、分配者、学员、
+    学习任务名称、课程关键词、分配时间范围、到期时间范围等多条件交集筛选。
+
+    未提供分配时间范围（assign_start_day / assign_end_day）时，默认查询最近 90 天。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    # -----------------------------------------------------------------------
+    # 默认最近 90 天（UTC+8）
+    # -----------------------------------------------------------------------
+    if not assign_start_day and not assign_end_day:
+        today = datetime.now(timezone(timedelta(hours=8)))
+        start = today - timedelta(days=90)
+        assign_start_day = start.strftime("%Y-%m-%d")
+        assign_end_day = today.strftime("%Y-%m-%d")
+        date_limited_by_default = True
+    else:
+        date_limited_by_default = False
+
+    # -----------------------------------------------------------------------
+    # 解析名称/关键词为 IDs
+    # -----------------------------------------------------------------------
+    resolved_dept_ids: list[str] | None = None
+    if department_names:
+        try:
+            resolved_dept_ids = await _resolve_department_names(client, department_names)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_DEPARTMENT_ERROR",
+                error_message=str(e),
+                suggested_action="检查部门名称或网络连接后重试",
+            )
+        if resolved_dept_ids is None:
+            return _err(
+                error_code="DEPARTMENT_NOT_FOUND",
+                error_message=f"找不到匹配的部门: {department_names}",
+                suggested_action="检查部门名称拼写，或调用 adm_get_department_tree 查询部门信息",
+            )
+
+    resolved_group_ids: list[str] | None = None
+    if group_names:
+        try:
+            resolved_group_ids = await _resolve_group_names(client, group_names)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_GROUP_ERROR",
+                error_message=str(e),
+                suggested_action="检查分组名称或网络连接后重试",
+            )
+        if resolved_group_ids is None:
+            return _err(
+                error_code="GROUP_NOT_FOUND",
+                error_message=f"找不到匹配的分组: {group_names}",
+                suggested_action="检查分组名称拼写，或调用 adm_list_groups 查询分组信息",
+            )
+
+    resolved_class_ids: list[str] | None = None
+    if class_names:
+        try:
+            resolved_class_ids = await _resolve_class_names_all(client, class_names)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_CLASS_ERROR",
+                error_message=str(e),
+                suggested_action="检查班级名称或网络连接后重试",
+            )
+        if resolved_class_ids is None:
+            return _err(
+                error_code="CLASS_NOT_FOUND",
+                error_message=f"找不到匹配的班级: {class_names}",
+                suggested_action="检查班级名称拼写，或调用 adm_list_classes 查询班级信息",
+            )
+
+    resolved_assigner_ids: list[str] | None = None
+    if assigner_keywords:
+        try:
+            resolved_assigner_ids = await _resolve_user_keywords(client, assigner_keywords)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_ASSIGNER_ERROR",
+                error_message=str(e),
+                suggested_action="检查分配者关键词或网络连接后重试",
+            )
+        if resolved_assigner_ids is None:
+            return _err(
+                error_code="ASSIGNER_NOT_FOUND",
+                error_message=f"找不到匹配的分配者: {assigner_keywords}",
+                suggested_action="检查关键词拼写，或调用 adm_list_accounts 查询用户信息",
+            )
+
+    resolved_student_ids: list[str] | None = None
+    if student_keywords:
+        try:
+            resolved_student_ids = await _resolve_user_keywords(client, student_keywords)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_STUDENT_ERROR",
+                error_message=str(e),
+                suggested_action="检查学员关键词或网络连接后重试",
+            )
+        if resolved_student_ids is None:
+            return _err(
+                error_code="STUDENT_NOT_FOUND",
+                error_message=f"找不到匹配的学员: {student_keywords}",
+                suggested_action="检查关键词拼写，或调用 adm_list_accounts 查询学员信息",
+            )
+
+    # -----------------------------------------------------------------------
+    # 合并显式 ID 与解析得到的 ID，去重
+    # -----------------------------------------------------------------------
+    def _merge_ids(explicit: str | None, resolved: list[str] | None) -> list[str] | None:
+        result: list[str] = []
+        if explicit:
+            result.extend([x.strip() for x in explicit.split(",") if x.strip()])
+        if resolved:
+            result.extend(resolved)
+        return list(dict.fromkeys(result)) if result else None
+
+    final_department_ids = _merge_ids(department_ids, resolved_dept_ids)
+    final_group_ids = _merge_ids(group_ids, resolved_group_ids)
+    final_class_ids = _merge_ids(class_ids, resolved_class_ids)
+    final_assigner_ids = _merge_ids(assigner_umu_ids, resolved_assigner_ids)
+    final_student_ids = _merge_ids(student_umu_ids, resolved_student_ids)
+
+    # -----------------------------------------------------------------------
+    # 时间范围转时间戳
+    # -----------------------------------------------------------------------
+    assign_start_ts: int | None = None
+    assign_stop_ts: int | None = None
+    if assign_start_day:
+        assign_start_ts = _day_to_timestamp(assign_start_day, end_of_day=False)
+    if assign_end_day:
+        assign_stop_ts = _day_to_timestamp(assign_end_day, end_of_day=True)
+
+    due_start_ts: int | None = None
+    due_stop_ts: int | None = None
+    if due_start_day:
+        due_start_ts = _day_to_timestamp(due_start_day, end_of_day=False)
+    if due_end_day:
+        due_stop_ts = _day_to_timestamp(due_end_day, end_of_day=True)
+
+    # -----------------------------------------------------------------------
+    # 构建 search_condition
+    # -----------------------------------------------------------------------
+    search_condition = _build_user_task_search_condition(
+        task_types=[x.strip() for x in task_types.split(",") if x.strip()] if task_types else None,
+        learn_status=[x.strip() for x in learn_status.split(",") if x.strip()]
+        if learn_status
+        else None,
+        due_status=[x.strip() for x in due_status.split(",") if x.strip()] if due_status else None,
+        department_ids=final_department_ids,
+        group_ids=final_group_ids,
+        class_ids=final_class_ids,
+        from_umu_ids=final_assigner_ids,
+        assign_umu_ids=final_student_ids,
+        task_name=task_name,
+        course_keywords=course_keywords,
+        assign_start_ts=assign_start_ts,
+        assign_stop_ts=assign_stop_ts,
+        due_start_ts=due_start_ts,
+        due_stop_ts=due_stop_ts,
+    )
+
+    # -----------------------------------------------------------------------
+    # 单页获取
+    # -----------------------------------------------------------------------
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        params: dict[str, str] = {
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "page": str(p),
+            "size": str(sz),
+            "search_condition": json.dumps(search_condition, ensure_ascii=False),
+        }
+
+        resp = client.get(
+            client.desktop_url("/uapi/v1/dashboard/user-task-list"),
+            params=params,
+        )
+
+        if resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error_message", "获取任务明细失败"))
+
+        task_list = resp.get("data", {}).get("list", [])
+        tasks: list[dict[str, Any]] = []
+        for item in task_list:
+            try:
+                raw = UserTaskRaw(**item)
+                tasks.append(UserTask.from_raw(raw).model_dump())
+            except Exception:
+                # 如果个别记录字段异常，回退到原始字典，保证列表不中断
+                tasks.append(item)
+
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
+        return tasks, total_all
+
+    # -----------------------------------------------------------------------
+    # 执行查询
+    # -----------------------------------------------------------------------
+    try:
+        if fetch_all:
+            all_tasks: list[dict[str, Any]] = []
+            current_page = 1
+            batch_size = page_size
+            total_all = 0
+
+            while True:
+                try:
+                    tasks, total_all = _fetch_page(current_page, batch_size)
+                except Exception:
+                    # 单页请求失败，尝试 size 降级到 100 重试一次
+                    if batch_size != 100:
+                        batch_size = 100
+                        tasks, total_all = _fetch_page(current_page, batch_size)
+                    else:
+                        raise
+
+                all_tasks.extend(tasks)
+
+                progress_pct = ""
+                if total_all > 0:
+                    pct = min(100, int(len(all_tasks) / total_all * 100))
+                    progress_pct = f" ({pct}%)"
+                if total_all > 0 and current_page == 1:
+                    print(
+                        f"[adm_list_user_tasks] 共 {total_all} 条，"
+                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
+                        file=sys.stderr,
+                    )
+                print(
+                    f"[adm_list_user_tasks] 已获取第 {current_page} 页，"
+                    f"累计 {len(all_tasks)} / {total_all} 条{progress_pct}",
+                    file=sys.stderr,
+                )
+
+                if len(all_tasks) >= total_all or not tasks:
+                    print(
+                        f"[adm_list_user_tasks] 获取完成，共 {len(all_tasks)} 条，"
+                        f"合计 {current_page} 页",
+                        file=sys.stderr,
+                    )
+                    break
+                current_page += 1
+                # 安全上限：最多 50 页
+                if current_page > 50:
+                    warning_msg = (
+                        f"[adm_list_user_tasks] 警告：达到 50 页安全上限，停止获取"
+                        f"（已获取 {len(all_tasks)} 条）"
+                    )
+                    print(warning_msg, file=sys.stderr)
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            suggested = ""
+            if date_limited_by_default:
+                suggested = (
+                    "默认仅查询最近 90 天，如需更长时间范围请指定 assign_start_day / assign_end_day"
+                )
+
+            return _ok(
+                data={
+                    "tasks": all_tasks,
+                    "total": len(all_tasks),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(all_tasks) if all_tasks else 0,
+                    },
+                },
+                next_action="proceed",
+                suggested_action=suggested,
+            )
+        else:
+            tasks, total_all = _fetch_page(page, page_size)
+            return _ok(
+                data={
+                    "tasks": tasks,
+                    "total": len(tasks),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": page,
+                        "page_size": page_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="",
+            )
+    except Exception as e:
+        return _err(
+            error_code="LIST_USER_TASKS_ERROR",
             error_message=str(e),
             suggested_action="检查网络连接后重试",
         )
