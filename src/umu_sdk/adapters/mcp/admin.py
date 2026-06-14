@@ -43,8 +43,13 @@ from ...core.admin_models import (
     AdminLearningProgram,
     AdminLearningProgramRaw,
     format_timestamp_beijing,
+    Instructor,
+    InstructorRaw,
     LearningRecord,
     LearningRecordRaw,
+    TeachingRecord,
+    TeachingRecordAuditStatus,
+    TeachingRecordRaw,
     UserTask,
     UserTaskRaw,
 )
@@ -978,6 +983,31 @@ async def _resolve_user_keywords(
         return None
 
     return [str(user.get("umu_id", "")) for user in user_list if user.get("umu_id")]
+
+
+async def _resolve_teacher_keywords(
+    client: UMUClient,
+    keywords: str,
+) -> list[str] | None:
+    """通过讲师关键词搜索获取匹配的 umu_id 列表.
+
+    Args:
+        client: UMUClient 实例
+        keywords: 讲师邮箱/手机号/用户名/姓名关键词，多个用逗号分隔
+
+    Returns:
+        匹配的 umu_id 列表，无匹配返回 None。
+    """
+    parts = [p.strip() for p in keywords.split(",") if p.strip()]
+    result: list[str] = []
+    for part in parts:
+        try:
+            ids = await _resolve_user_keywords(client, part)
+        except Exception:
+            ids = None
+        if ids:
+            result.extend(ids)
+    return list(dict.fromkeys(result)) if result else None
 
 
 @mcp.tool()
@@ -6541,6 +6571,783 @@ async def adm_list_learning_programs(
         )
 
 
+async def _resolve_instructor_tag_names(
+    client: UMUClient,
+    names: str,
+) -> list[str] | None:
+    """通过讲师标签名称关键词搜索获取匹配的标签 IDs.
+
+    Args:
+        client: UMUClient 实例
+        names: 标签名称关键词，多个用逗号分隔
+
+    Returns:
+        匹配的标签 ID 列表，无匹配返回 None。
+
+    Raises:
+        RuntimeError: 标签接口返回错误。
+    """
+    keywords_list = [n.strip() for n in names.split(",") if n.strip()]
+    if not keywords_list:
+        return None
+
+    resp = client.get(
+        client.desktop_url("/uapi/v1/teacher-manage/tag-list"),
+        params={
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "page": "1",
+            "size": "10000",
+        },
+    )
+
+    if resp.get("error_code") != 0:
+        msg = resp.get("error_message", "")
+        raise RuntimeError(f"查询讲师标签列表失败: {msg}" if msg else "查询讲师标签列表失败")
+
+    tag_list = resp.get("data", {}).get("list", [])
+    if not tag_list:
+        return None
+
+    matched_ids: list[str] = []
+    seen: set[str] = set()
+    for tag in tag_list:
+        tag_name = (tag.get("tag_name", "") or "").lower()
+        for kw in keywords_list:
+            if kw.lower() in tag_name:
+                tid = str(tag.get("tag_id", ""))
+                if tid and tid not in seen:
+                    seen.add(tid)
+                    matched_ids.append(tid)
+                break
+
+    return matched_ids if matched_ids else None
+
+
+async def _resolve_instructor_group_names(
+    client: UMUClient,
+    names: str,
+) -> list[str] | None:
+    """通过企业分组名称关键词搜索获取匹配的分组 IDs（用于讲师筛选）.
+
+    Args:
+        client: UMUClient 实例
+        names: 分组名称关键词，多个用逗号分隔
+
+    Returns:
+        匹配的分组 ID 列表，无匹配返回 None。
+
+    Raises:
+        RuntimeError: 分组接口返回错误。
+    """
+    keywords_list = [n.strip() for n in names.split(",") if n.strip()]
+    if not keywords_list:
+        return None
+
+    matched_ids: list[str] = []
+    seen: set[str] = set()
+    page = 1
+    max_pages = 50
+    page_size = 50
+    records_fetched = 0
+
+    while page <= max_pages:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/enterprise/enterprise-group-list"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "keywords": "",
+                "page": str(page),
+                "size": str(page_size),
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            msg = resp.get("error_message", "")
+            raise RuntimeError(f"查询分组列表失败: {msg}" if msg else "查询分组列表失败")
+
+        group_list = resp.get("data", {}).get("list", [])
+        if not group_list:
+            break
+
+        for group in group_list:
+            group_name = (group.get("group_name", "") or "").lower()
+            for kw in keywords_list:
+                if kw.lower() in group_name:
+                    gid = str(group.get("id", ""))
+                    if gid and gid not in seen:
+                        seen.add(gid)
+                        matched_ids.append(gid)
+                    break
+
+        records_fetched += len(group_list)
+        total = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
+        if total > 0 and records_fetched >= total:
+            break
+
+        page += 1
+
+    return matched_ids if matched_ids else None
+
+
+def _build_instructor_search_condition(
+    certification_status: int | None = None,
+    tag_ids: list[str] | None = None,
+    department_ids: list[str] | None = None,
+    group_ids: list[str] | None = None,
+    account_keyword: str | None = None,
+) -> dict[str, Any]:
+    """构建讲师列表查询的 search_condition JSON 对象.
+
+    对应 GET /uapi/v1/dashboard/teacher-manage-list 的 search_condition 参数。
+
+    Args:
+        certification_status: 认证状态：1=已认证, 0=未认证
+        tag_ids: 讲师标签 ID 列表
+        department_ids: 部门 ID 列表
+        group_ids: 企业分组 ID 列表
+        account_keyword: 账号关键词（模糊搜索姓名、邮箱、手机号、用户名）
+
+    Returns:
+        search_condition 字典，将被 JSON 序列化后作为查询参数。
+    """
+    condition: dict[str, Any] = {}
+
+    if certification_status is not None:
+        condition["certification_status"] = certification_status
+    if tag_ids:
+        condition["tag_ids"] = [int(x) for x in tag_ids]
+    if department_ids:
+        condition["department_ids"] = department_ids
+    if group_ids:
+        condition["enterprise_group_ids"] = [int(x) for x in group_ids]
+    if account_keyword:
+        condition["account_keyword"] = account_keyword
+
+    return condition
+
+
+@mcp.tool()
+async def adm_list_instructors(
+    certification_status: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description='认证状态筛选："all"/"certified"/"uncertified"，分别对应全部、已认证、未认证。不提供则默认全部。',
+        ),
+    ] = None,
+    tag_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="讲师标签 ID 列表，多个用逗号分隔，如 '354,355'。不提供则不按标签筛选。",
+        ),
+    ] = None,
+    tag_names: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="讲师标签名称关键词，多个用逗号分隔。提供时工具内部会自动解析为 ID 进行精确筛选。",
+        ),
+    ] = None,
+    department_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="部门 ID 列表，多个用逗号分隔，如 '82064,82065'。不提供则不按部门筛选。",
+        ),
+    ] = None,
+    department_names: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="部门名称关键词，多个用逗号分隔。提供时工具内部会自动解析为 ID 进行精确筛选。",
+        ),
+    ] = None,
+    group_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分组 ID 列表，多个用逗号分隔，如 '136804,127992'。不提供则不按分组筛选。",
+        ),
+    ] = None,
+    group_names: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="分组名称关键词，多个用逗号分隔。提供时工具内部会自动解析为 ID 进行精确筛选。",
+        ),
+    ] = None,
+    account_keyword: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="账号关键词，模糊搜索讲师姓名、邮箱、手机号、用户名。",
+        ),
+    ] = None,
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量（1-100），默认20"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询企业讲师列表（支持多条件组合筛选）.
+
+    触发条件：需要查看企业讲师、按认证状态/标签/部门/分组/关键词筛选讲师时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+
+    支持按以下条件的交集筛选：
+    - 认证状态：certified=已认证, uncertified=未认证, all=全部
+    - 讲师标签：tag_ids（直接传 ID）或 tag_names（按名称自动解析）
+    - 部门：department_ids（直接传 ID）或 department_names（按名称自动解析）
+    - 分组：group_ids（直接传 ID）或 group_names（按名称自动解析）
+    - 账号关键词：account_keyword（模糊匹配姓名、邮箱、手机号、用户名）
+
+    多个同类型条件（如多个标签、多个部门）使用逗号分隔，结果取并集后再与其他类型取交集。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    # -----------------------------------------------------------------------
+    # 解析名称关键词为 IDs
+    # -----------------------------------------------------------------------
+    resolved_tag_ids: list[str] | None = None
+    if tag_names:
+        try:
+            resolved_tag_ids = await _resolve_instructor_tag_names(client, tag_names)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_TAG_ERROR",
+                error_message=str(e),
+                suggested_action="检查标签名称或网络连接后重试",
+            )
+        if resolved_tag_ids is None:
+            return _err(
+                error_code="TAG_NOT_FOUND",
+                error_message=f"找不到匹配的标签: {tag_names}",
+                suggested_action="检查标签名称拼写",
+            )
+
+    resolved_department_ids: list[str] | None = None
+    if department_names:
+        try:
+            resolved_department_ids = await _resolve_department_names(client, department_names)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_DEPARTMENT_ERROR",
+                error_message=str(e),
+                suggested_action="检查部门名称或网络连接后重试",
+            )
+        if resolved_department_ids is None:
+            return _err(
+                error_code="DEPARTMENT_NOT_FOUND",
+                error_message=f"找不到匹配的部门: {department_names}",
+                suggested_action="检查部门名称拼写，或调用 adm_get_department_tree 查询部门信息",
+            )
+
+    resolved_group_ids: list[str] | None = None
+    if group_names:
+        try:
+            resolved_group_ids = await _resolve_instructor_group_names(client, group_names)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_GROUP_ERROR",
+                error_message=str(e),
+                suggested_action="检查分组名称或网络连接后重试",
+            )
+        if resolved_group_ids is None:
+            return _err(
+                error_code="GROUP_NOT_FOUND",
+                error_message=f"找不到匹配的分组: {group_names}",
+                suggested_action="检查分组名称拼写",
+            )
+
+    # -----------------------------------------------------------------------
+    # 合并显式 ID 与解析得到的 ID，去重
+    # -----------------------------------------------------------------------
+    def _merge_id_lists(explicit: str | None, resolved: list[str] | None) -> list[str] | None:
+        result: list[str] = []
+        if explicit:
+            result.extend([x.strip() for x in explicit.split(",") if x.strip()])
+        if resolved:
+            result.extend(resolved)
+        return list(dict.fromkeys(result)) if result else None
+
+    final_tag_ids = _merge_id_lists(tag_ids, resolved_tag_ids)
+    final_department_ids = _merge_id_lists(department_ids, resolved_department_ids)
+    final_group_ids = _merge_id_lists(group_ids, resolved_group_ids)
+
+    # -----------------------------------------------------------------------
+    # 认证状态映射
+    # -----------------------------------------------------------------------
+    certification_value: int | None = None
+    if certification_status:
+        status_key = certification_status.strip().lower()
+        if status_key == "certified":
+            certification_value = 1
+        elif status_key == "uncertified":
+            certification_value = 0
+        elif status_key not in ("all", ""):
+            return _err(
+                error_code="INVALID_CERTIFICATION_STATUS",
+                error_message=f"不支持的认证状态: {certification_status}",
+                suggested_action='请使用 "all"、"certified" 或 "uncertified"',
+            )
+
+    # -----------------------------------------------------------------------
+    # 构建 search_condition
+    # -----------------------------------------------------------------------
+    search_condition = _build_instructor_search_condition(
+        certification_status=certification_value,
+        tag_ids=final_tag_ids,
+        department_ids=final_department_ids,
+        group_ids=final_group_ids,
+        account_keyword=account_keyword,
+    )
+
+    # -----------------------------------------------------------------------
+    # 单页获取
+    # -----------------------------------------------------------------------
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        params: dict[str, str] = {
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "page": str(p),
+            "size": str(sz),
+            "search_condition": json.dumps(search_condition, ensure_ascii=False),
+        }
+
+        resp = client.get(
+            client.desktop_url("/uapi/v1/dashboard/teacher-manage-list"),
+            params=params,
+        )
+
+        if resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error_message", "获取讲师列表失败"))
+
+        instructor_list = resp.get("data", {}).get("list", [])
+        instructors: list[dict[str, Any]] = []
+        for item in instructor_list:
+            try:
+                raw = InstructorRaw(**item)
+                instructors.append(Instructor.from_raw(raw).model_dump())
+            except Exception:
+                # 如果个别记录字段异常，回退到原始字典，保证列表不中断
+                instructors.append(item)
+
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
+        return instructors, total_all
+
+    # -----------------------------------------------------------------------
+    # 执行查询
+    # -----------------------------------------------------------------------
+    try:
+        if fetch_all:
+            all_instructors: list[dict[str, Any]] = []
+            current_page = 1
+            batch_size = page_size
+            total_all = 0
+
+            while True:
+                try:
+                    instructors, total_all = _fetch_page(current_page, batch_size)
+                except Exception:
+                    # 单页请求失败，尝试 size 降级到 100 重试一次
+                    if batch_size != 100:
+                        batch_size = 100
+                        instructors, total_all = _fetch_page(current_page, batch_size)
+                    else:
+                        raise
+
+                all_instructors.extend(instructors)
+
+                progress_pct = ""
+                if total_all > 0:
+                    pct = min(100, int(len(all_instructors) / total_all * 100))
+                    progress_pct = f" ({pct}%)"
+                if total_all > 0 and current_page == 1:
+                    print(
+                        f"[adm_list_instructors] 共 {total_all} 条，"
+                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
+                        file=sys.stderr,
+                    )
+                print(
+                    f"[adm_list_instructors] 已获取第 {current_page} 页，"
+                    f"累计 {len(all_instructors)} / {total_all} 条{progress_pct}",
+                    file=sys.stderr,
+                )
+
+                if len(all_instructors) >= total_all or not instructors:
+                    print(
+                        f"[adm_list_instructors] 获取完成，共 {len(all_instructors)} 条，"
+                        f"合计 {current_page} 页",
+                        file=sys.stderr,
+                    )
+                    break
+                current_page += 1
+                # 安全上限：最多 50 页
+                if current_page > 50:
+                    warning_msg = (
+                        f"[adm_list_instructors] 警告：达到 50 页安全上限，停止获取"
+                        f"（已获取 {len(all_instructors)} 条）"
+                    )
+                    print(warning_msg, file=sys.stderr)
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            return _ok(
+                data={
+                    "instructors": all_instructors,
+                    "total": len(all_instructors),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(all_instructors) if all_instructors else 0,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="",
+            )
+        else:
+            instructors, total_all = _fetch_page(page, page_size)
+            return _ok(
+                data={
+                    "instructors": instructors,
+                    "total": len(instructors),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": page,
+                        "page_size": page_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="",
+            )
+    except Exception as e:
+        return _err(
+            error_code="LIST_INSTRUCTORS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+def _parse_teaching_record_audit_status(status_value: str) -> int:
+    """将审核状态参数解析为接口状态码."""
+    mapping = {
+        "pending": TeachingRecordAuditStatus.PENDING,
+        "待审核": TeachingRecordAuditStatus.PENDING,
+        "passed": TeachingRecordAuditStatus.PASSED,
+        "已通过": TeachingRecordAuditStatus.PASSED,
+        "rejected": TeachingRecordAuditStatus.REJECTED,
+        "已拒绝": TeachingRecordAuditStatus.REJECTED,
+    }
+    key = status_value.strip().lower()
+    if key in mapping:
+        return mapping[key]
+    try:
+        code = int(status_value)
+        if code in (
+            TeachingRecordAuditStatus.PENDING,
+            TeachingRecordAuditStatus.PASSED,
+            TeachingRecordAuditStatus.REJECTED,
+        ):
+            return code
+    except ValueError:
+        pass
+    raise ValueError(f"不支持的审核状态: {status_value}")
+
+
+@mcp.tool()
+async def adm_list_teaching_records(
+    audit_status: Annotated[
+        str,
+        Field(
+            description='审核状态："pending"/"待审核"/2，"passed"/"已通过"/3，"rejected"/"已拒绝"/4',
+        ),
+    ],
+    teacher_umu_ids: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="授课讲师 umu_id 列表，多个用逗号分隔。不提供则不按讲师筛选。",
+        ),
+    ] = None,
+    teacher_keywords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="授课讲师邮箱/手机号/用户名/姓名关键词，多个用逗号分隔。内部自动解析为 umu_id。",
+        ),
+    ] = None,
+    course_keywords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="课程名称模糊搜索关键词。",
+        ),
+    ] = None,
+    access_code: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="课程访问码。若与 course_keywords 同时提供，返回两者交集。",
+        ),
+    ] = None,
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量（1-100），默认20"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询讲师授课记录.
+
+    触发条件：需要查看企业讲师的授课记录、按审核状态/讲师/课程名称/访问码筛选时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+
+    支持以下条件的交集筛选：
+    - 审核状态：pending/待审核/2、passed/已通过/3、rejected/已拒绝/4
+    - 授课讲师：teacher_umu_ids（直接传 ID）或 teacher_keywords（按关键词自动解析）
+    - 课程名称：course_keywords
+    - 访问码：access_code（与 course_keywords 同时提供时本地取交集）
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    # -----------------------------------------------------------------------
+    # 解析审核状态
+    # -----------------------------------------------------------------------
+    try:
+        audit_status_code = _parse_teaching_record_audit_status(audit_status)
+    except ValueError as e:
+        return _err(
+            error_code="INVALID_AUDIT_STATUS",
+            error_message=str(e),
+            suggested_action='请使用 "pending"/"待审核"/2、"passed"/"已通过"/3、"rejected"/"已拒绝"/4',
+        )
+
+    # -----------------------------------------------------------------------
+    # 解析讲师关键词为 umu_id
+    # -----------------------------------------------------------------------
+    resolved_teacher_ids: list[str] | None = None
+    if teacher_keywords:
+        try:
+            resolved_teacher_ids = await _resolve_teacher_keywords(client, teacher_keywords)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_TEACHER_ERROR",
+                error_message=str(e),
+                suggested_action="检查讲师关键词或网络连接后重试",
+            )
+        if resolved_teacher_ids is None:
+            return _err(
+                error_code="TEACHER_NOT_FOUND",
+                error_message=f"找不到匹配的讲师: {teacher_keywords}",
+                suggested_action="检查关键词拼写，或调用 adm_list_instructors 查询讲师信息",
+            )
+
+    explicit_teacher_ids: list[str] = []
+    if teacher_umu_ids:
+        explicit_teacher_ids = [x.strip() for x in teacher_umu_ids.split(",") if x.strip()]
+
+    final_teacher_ids: list[str] = []
+    if explicit_teacher_ids:
+        final_teacher_ids.extend(explicit_teacher_ids)
+    if resolved_teacher_ids:
+        final_teacher_ids.extend(resolved_teacher_ids)
+    final_teacher_ids = list(dict.fromkeys(final_teacher_ids))
+
+    # -----------------------------------------------------------------------
+    # 课程名称 / 访问码筛选
+    # -----------------------------------------------------------------------
+    search_keyword = (course_keywords or "").strip()
+    access_code_value = (access_code or "").strip()
+
+    def _matches_access_code(record: dict[str, Any]) -> bool:
+        if not access_code_value:
+            return True
+        return record.get("group_access_code") == access_code_value
+
+    # -----------------------------------------------------------------------
+    # 单页获取
+    # -----------------------------------------------------------------------
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        params: dict[str, str] = {
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "page": str(p),
+            "size": str(sz),
+            "audit_status": str(audit_status_code),
+            "search_keyword": search_keyword,
+            "uids": ",".join(final_teacher_ids) if final_teacher_ids else "0",
+        }
+
+        resp = client.get(
+            client.desktop_url("/uapi/v1/teacher-manage/enterprise-lecturing-record-list"),
+            params=params,
+        )
+
+        if resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error_message", "获取授课记录失败"))
+
+        record_list = resp.get("data", {}).get("list", [])
+        records: list[dict[str, Any]] = []
+        for item in record_list:
+            try:
+                raw = TeachingRecordRaw(**item)
+                records.append(TeachingRecord.from_raw(raw).model_dump())
+            except Exception:
+                # 如果个别记录字段异常，回退到原始字典，保证列表不中断
+                records.append(item)
+
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
+        return records, total_all
+
+    # -----------------------------------------------------------------------
+    # 执行查询
+    # -----------------------------------------------------------------------
+    try:
+        if fetch_all:
+            all_records: list[dict[str, Any]] = []
+            current_page = 1
+            batch_size = page_size
+            total_all = 0
+
+            while True:
+                try:
+                    records, total_all = _fetch_page(current_page, batch_size)
+                except Exception:
+                    # 单页请求失败，尝试 size 降级到 100 重试一次
+                    if batch_size != 100:
+                        batch_size = 100
+                        records, total_all = _fetch_page(current_page, batch_size)
+                    else:
+                        raise
+
+                all_records.extend(records)
+
+                progress_pct = ""
+                if total_all > 0:
+                    pct = min(100, int(len(all_records) / total_all * 100))
+                    progress_pct = f" ({pct}%)"
+                if total_all > 0 and current_page == 1:
+                    print(
+                        f"[adm_list_teaching_records] 共 {total_all} 条，"
+                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
+                        file=sys.stderr,
+                    )
+                print(
+                    f"[adm_list_teaching_records] 已获取第 {current_page} 页，"
+                    f"累计 {len(all_records)} / {total_all} 条{progress_pct}",
+                    file=sys.stderr,
+                )
+
+                if len(all_records) >= total_all or not records:
+                    print(
+                        f"[adm_list_teaching_records] 获取完成，共 {len(all_records)} 条，"
+                        f"合计 {current_page} 页",
+                        file=sys.stderr,
+                    )
+                    break
+                current_page += 1
+                # 安全上限：最多 50 页
+                if current_page > 50:
+                    warning_msg = (
+                        f"[adm_list_teaching_records] 警告：达到 50 页安全上限，停止获取"
+                        f"（已获取 {len(all_records)} 条）"
+                    )
+                    print(warning_msg, file=sys.stderr)
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            if access_code_value:
+                all_records = [r for r in all_records if _matches_access_code(r)]
+
+            return _ok(
+                data={
+                    "records": all_records,
+                    "total": len(all_records),
+                    "pagination": {
+                        "total_all": len(all_records),
+                        "current_page": 1,
+                        "page_size": len(all_records) if all_records else 0,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="",
+            )
+        else:
+            records, total_all = _fetch_page(page, page_size)
+            if access_code_value:
+                records = [r for r in records if _matches_access_code(r)]
+
+            return _ok(
+                data={
+                    "records": records,
+                    "total": len(records),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": page,
+                        "page_size": page_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="",
+            )
+    except Exception as e:
+        return _err(
+            error_code="LIST_TEACHING_RECORDS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
@@ -6609,7 +7416,8 @@ def main() -> None:
     print("        adm_remove_group_managers")
     print("  课程: adm_list_courses")
     print("  学习项目: adm_list_learning_programs")
-    print("  数据: adm_list_learning_records")
+    print("  数据: adm_list_learning_records, adm_list_user_tasks,")
+    print("        adm_list_instructors")
     print()
     print("可用 Prompts:")
     print("  - adm_account_management_guide")

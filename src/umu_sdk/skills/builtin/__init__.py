@@ -4,6 +4,8 @@
 Teacher / Student / Admin 子 MCP 的原子工具。
 """
 
+from .admin_instructors import get_instructors
 from .admin_tasks import get_user_tasks
+from .admin_teaching_records import get_teaching_records
 
-__all__ = ["get_user_tasks"]
+__all__ = ["get_instructors", "get_user_tasks", "get_teaching_records"]
