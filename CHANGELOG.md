@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-14
+
+### Added
+- 为所有自动分页 / 全量获取循环增加 stderr 进度打印，统一格式包含总条数、当前页、已获取条数、百分比、完成提示及 50 页安全上限警告
+- Teacher MCP 6 个列表工具新增 `fetch_all` 自动全量获取：
+  - `tch_list_resources`、`tch_list_documents`、`tch_list_audio_videos`
+  - `tch_list_created_courses`、`tch_list_cooperated_courses`、`tch_list_participated_courses`
+- Student MCP 2 个列表工具新增 `fetch_all` 自动全量获取：
+  - `stu_get_my_courses`、`stu_list_participated_courses`
+- `endpoints/courses.py` 的 `CourseEndpoint.iterate_all` 增加分页进度打印
+- Skill 层对应列表 Skill 透传 `fetch_all` 参数：
+  - `list_scorm_resources`、`list_document_resources`、`list_video_resources`
+  - `list_my_courses`（teacher）
+  - `list_my_courses_student`
+
+### Changed
+- `adapters/mcp/utils.py` 新增共享辅助函数 `report_pagination_progress`，统一所有分页进度输出
+- `README.md` 功能特性补充自动分页与全量获取说明
+
 ## [0.11.0] - 2026-06-14
 
 ### Added
