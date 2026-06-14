@@ -23,6 +23,7 @@ from .errors import (  # noqa: E402
     ValidationError,
 )
 from .models import LoginCredentials  # noqa: E402
+from .rate_limiter import RateLimiter  # noqa: E402
 
 
 
@@ -47,6 +48,7 @@ class UMUClient:
         retries: int = 3,
         follow_redirects: bool = True,
         endpoint_overrides: dict[str, str] | None = None,
+        min_request_interval: float = 0.5,
     ):
         """初始化 UMU 客户端.
 
@@ -57,6 +59,7 @@ class UMUClient:
             retries: 重试次数
             follow_redirects: 是否跟随重定向
             endpoint_overrides: 接口路径覆盖（用于极少数接口路径不同的情况）
+            min_request_interval: 两次 UMU 接口调用之间的最小时间间隔（秒），默认 0.5.
         """
         if not base_url:
             raise ValueError("UMUClient 初始化失败: base_url 不能为空")
@@ -73,6 +76,7 @@ class UMUClient:
         self.timeout = timeout
         self.retries = retries
         self.endpoint_overrides = endpoint_overrides or {}
+        self._rate_limiter = RateLimiter(min_interval=min_request_interval)
 
         # 从 base_url 推断 desktop_domain 和 mobile_domain
         hostname = parsed.hostname or ""
@@ -94,7 +98,7 @@ class UMUClient:
         )
 
         # 初始化认证管理器
-        self.auth = AuthManager(self.http, auth, self.base_url)
+        self.auth = AuthManager(self.http, auth, self.base_url, rate_limiter=self._rate_limiter)
 
         logger.info("UMUClient 初始化完成，目标: %s", self.base_url)
         logger.debug(
@@ -178,6 +182,7 @@ class UMUClient:
 
         for attempt in range(self.retries):
             try:
+                self._rate_limiter.wait_if_needed()
                 logger.debug("HTTP %s %s", method.upper(), url)
                 response = self.http.request(method, url, headers=headers, **kwargs)
                 response.raise_for_status()

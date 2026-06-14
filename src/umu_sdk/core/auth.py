@@ -7,12 +7,16 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import TYPE_CHECKING
 
 import httpx
 
 from .encrypt import encrypt_password
 from .errors import AuthenticationError
 from .models import LoginCredentials
+
+if TYPE_CHECKING:
+    from .rate_limiter import RateLimiter
 
 logger = logging.getLogger("umu.sdk.auth")
 
@@ -25,10 +29,12 @@ class AuthManager:
         http: httpx.Client,
         credentials: LoginCredentials | None = None,
         base_url: str = "",
+        rate_limiter: RateLimiter | None = None,
     ):
         self.http = http
         self.credentials = credentials
         self.base_url = base_url or (credentials.base_url if credentials else "")
+        self._rate_limiter = rate_limiter
 
         self._token: str | None = None
         self._refresh_token: str | None = None
@@ -68,6 +74,9 @@ class AuthManager:
         endpoint = "/passport/ajax/account/login"
 
         try:
+            if self._rate_limiter is not None:
+                self._rate_limiter.wait_if_needed()
+
             response = self.http.post(
                 endpoint,
                 data={
