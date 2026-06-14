@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-14
+
+### Added
+- `core/rate_limiter.py` 新增 `RateLimiter`，基于最小调用间隔限制 UMU 接口请求频率
+- `UMUClient` 新增 `min_request_interval` 参数（默认 0.5 秒），每次 HTTP 请求前自动等待以满足间隔要求
+- `AuthManager.login` 同样纳入频率限制，确保登录接口也不会高频调用
+- 新增 `tests/test_rate_limiter.py` 覆盖频率限制器、客户端集成、登录集成的单元测试
+
 ## [0.12.0] - 2026-06-14
 
 ### Added
