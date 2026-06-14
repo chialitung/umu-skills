@@ -40,7 +40,7 @@ Thumbs.db
 dev-tools/
 
 # 辅助脚本（不属于 SDK 交付物）
-scripts/
+/scripts/
 
 # 本地临时工作区（非 SDK 交付物，用户手动管理，禁止自动清理）
 workbench/

@@ -24,6 +24,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install build twine
 
+      - name: Release readiness check
+        run: python .github/scripts/check_release_readiness.py
+
       - name: Build package
         run: python -m build
 
