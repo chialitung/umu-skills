@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-14
+
+### Added
+- Admin MCP 新增企业知识库课程审核能力：
+  - `adm_list_course_audit_records`：查询待审核/已通过/已拒绝课程列表，支持课程名称/访问码模糊搜索、拥有者姓名/邮箱/手机号/用户名关键词解析、课程分类筛选、提交时间排序、过滤上次审核通过课程
+  - `adm_audit_course`：对课程执行通过、拒绝或撤销提交操作，拒绝时可选将提交人加入黑名单
+  - `adm_list_course_categories`：查询企业课程分类列表
+  - `adm_list_course_blacklist`：查询课程提交黑名单
+  - `adm_save_course_blacklist`：将用户加入或移出课程提交黑名单
+- Skill 层新增 5 个课程审核相关 Skill：`list_course_audit_records`、`audit_course`、`list_course_categories`、`list_course_blacklist`、`manage_course_blacklist`
+- 新增 Admin 课程审核数据模型：`AdminCourseAuditRecord`、`AdminCourseCategory`、`AdminCourseBlacklistEntry`
+
+### Changed
+- `README.md` 更新 Admin MCP 工具列表与 Skill 列表，补充课程审核、分类、黑名单相关条目
+
 ## [0.9.2] - 2026-06-13
 
 ### Changed
