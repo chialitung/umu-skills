@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-14
+
+### Added
+- Teacher MCP 新增提交课程至企业知识库审核能力：
+  - `tch_submit_course_for_audit`：将指定课程提交给管理员审核，审核通过后课程可被推荐并支持搜索
+- Skill 层新增 `submit_course_for_audit` 封装，对应 Teacher 原子工具
+
+### Changed
+- `README.md` 更新 Teacher MCP 工具列表与 Skill 列表，补充提交审核相关条目及数量
+
 ## [0.10.0] - 2026-06-14
 
 ### Added

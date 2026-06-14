@@ -127,8 +127,48 @@ async def list_my_courses(
     }
 
 
+@skill(
+    name="submit_course_for_audit",
+    description="将课程提交至企业知识库进行审核，管理员审核通过后可被推荐和搜索",
+    required_servers=["teacher"],
+    return_description="提交结果，包含 release_status 与 audit_status",
+)
+async def submit_course_for_audit(
+    ctx: SkillContext,
+    group_id: str,
+) -> dict[str, Any]:
+    """提交课程审核."""
+    result = await ctx.call_tool(
+        server="teacher",
+        tool="tch_submit_course_for_audit",
+        arguments={
+            "group_id": group_id,
+        },
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "SUBMIT_COURSE_FOR_AUDIT_FAILED",
+            "error_message": result.get("error_message") or "课程审核提交失败",
+            "suggested_action": result.get("suggested_action") or "请确认 group_id 正确且讲师已登录",
+            "next_action": "needs_user_input",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "提交成功，等待管理员审核",
+        "next_action": "proceed",
+    }
+
+
 __all__ = [
     "get_course_categories",
     "get_course_info",
     "list_my_courses",
+    "submit_course_for_audit",
 ]

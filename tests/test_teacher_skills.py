@@ -328,3 +328,50 @@ class TestTeacherCourses:
         assert mock_mcp.calls == [
             ("teacher", "tch_list_created_courses", {"page": 1, "page_size": 10, "order": "update_time"}),
         ]
+
+    async def test_submit_course_for_audit(self, registry_with_teacher_skills: SkillRegistry) -> None:
+        responses = {
+            ("teacher", "tch_submit_course_for_audit"): {
+                "success": True,
+                "data": {
+                    "group_id": "g-123",
+                    "release_status": "2",
+                    "audit_status": "0",
+                },
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_teacher_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="submit_course_for_audit",
+            arguments={"group_id": "g-123"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["release_status"] == "2"
+        assert mock_mcp.calls == [
+            ("teacher", "tch_submit_course_for_audit", {"group_id": "g-123"}),
+        ]
+
+    async def test_submit_course_for_audit_failure(self, registry_with_teacher_skills: SkillRegistry) -> None:
+        responses = {
+            ("teacher", "tch_submit_course_for_audit"): {
+                "success": False,
+                "error_code": "SUBMIT_COURSE_FOR_AUDIT_FAILED",
+                "error_message": "课程不存在",
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_teacher_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="submit_course_for_audit",
+            arguments={"group_id": "g-999"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "SUBMIT_COURSE_FOR_AUDIT_FAILED"
+        assert parsed["next_action"] == "needs_user_input"

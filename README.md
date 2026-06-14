@@ -199,13 +199,13 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 | 讲师 | `adm_list_instructors` |
 | 授课记录 | `adm_list_teaching_records` |
 
-### 教师工具（54）
+### 教师工具（55）
 
 | 分类 | 工具 |
 |----------|-------|
 | 认证 | `tch_login`, `tch_check_auth` |
 | 会话 | `tch_create_session`, `tch_list_sessions`, `tch_destroy_session` |
-| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext` |
+| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext`, `tch_submit_course_for_audit` |
 | 课程列表 | `tch_list_created_courses`, `tch_list_cooperated_courses`, `tch_list_participated_courses` |
 | 课程分类 | `tch_get_categories` |
 | 环节 | `tch_create_scorm_section`, `tch_create_video_section`, `tch_create_article_section`, `tch_create_infographic_section`, `tch_create_document_section`, `tch_create_survey_section`, `tch_create_exam_section`, `tch_create_signin_section` |
@@ -261,7 +261,7 @@ python -m umu_sdk.skills.server
 - 返回与 Skill 统一的标准信封格式
 - AI 应优先使用 `skill_run` 调用已封装 Skill，仅在工具未覆盖时使用透传
 
-内置 Skill 覆盖高频场景（共 74）：
+内置 Skill 覆盖高频场景（共 75）：
 
 | Skill | 涉及子 MCP | 说明 |
 |-------|-----------|------|
@@ -283,6 +283,7 @@ python -m umu_sdk.skills.server
 | `get_course_categories` | teacher | 获取课程分类 |
 | `get_course_info` | teacher | 获取课程详情 |
 | `list_my_courses` | teacher | 列出讲师创建的课程 |
+| `submit_course_for_audit` | teacher | 将课程提交至企业知识库审核 |
 | `enroll_course` | student | 学员报名课程 |
 | `get_course_progress` | student | 查询学员课程进度 |
 | `resolve_course_identifier` | student | 解析课程访问码/短域名/URL |
