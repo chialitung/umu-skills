@@ -39,6 +39,12 @@ from ...core.admin_models import (
     AdminClass,
     AdminClassRaw,
     AdminCourse,
+    AdminCourseAuditRecord,
+    AdminCourseAuditRecordRaw,
+    AdminCourseBlacklistEntry,
+    AdminCourseBlacklistEntryRaw,
+    AdminCourseCategory,
+    AdminCourseCategoryRaw,
     AdminCourseRaw,
     AdminLearningProgram,
     AdminLearningProgramRaw,
@@ -6285,6 +6291,659 @@ async def adm_list_courses(
 
 
 @mcp.tool()
+async def adm_list_course_audit_records(
+    audit_status: Annotated[
+        int,
+        Field(description="审核状态：0=待审核，1=已通过，2=已拒绝"),
+    ],
+    course_keywords: Annotated[
+        str | None,
+        Field(default=None, description="课程名称关键词，模糊匹配课程标题"),
+    ] = None,
+    access_code: Annotated[
+        str | None,
+        Field(default=None, description="课程访问码，如 'btq943'"),
+    ] = None,
+    owner_keywords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="课程拥有者关键词（姓名、邮箱、手机号、用户名），内部自动解析为 uids",
+        ),
+    ] = None,
+    owner_uids: Annotated[
+        str | None,
+        Field(default=None, description="课程拥有者 umu_id 列表，多个用逗号分隔。与 owner_keywords 二选一"),
+    ] = None,
+    category_id: Annotated[
+        str | None,
+        Field(default=None, description="课程分类 ID（可选，后端决定是否生效）"),
+    ] = None,
+    filter_last_passed: Annotated[
+        bool,
+        Field(default=False, description="是否过滤掉上次审核状态为通过的课程"),
+    ] = False,
+    sort_field: Annotated[
+        str,
+        Field(default="submit_time", description="排序字段，如 submit_time"),
+    ] = "submit_time",
+    sort_order: Annotated[
+        str,
+        Field(default="desc", description="排序方向：asc / desc"),
+    ] = "desc",
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量（1-100），默认20"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID"),
+    ] = None,
+) -> str:
+    """查询企业知识库课程审核记录.
+
+    触发条件：需要查看待审核/已通过/已拒绝课程列表，或按条件筛选审核课程时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+
+    支持的筛选条件：
+    - 审核状态：audit_status（0=待审核，1=已通过，2=已拒绝）
+    - 课程关键词：course_keywords（模糊匹配课程标题）
+    - 访问码：access_code（可与课程关键词组合）
+    - 拥有者：owner_keywords（自动解析）或 owner_uids（直接传入 UID）
+    - 课程分类：category_id（可选）
+    - 过滤上次通过：filter_last_passed
+    - 提交时间排序：sort_field + sort_order
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    if audit_status not in (0, 1, 2):
+        return _err(
+            error_code="INVALID_AUDIT_STATUS",
+            error_message="audit_status 必须是 0（待审核）、1（已通过）或 2（已拒绝）",
+            suggested_action="检查 audit_status 参数",
+        )
+
+    # 解析拥有者关键词
+    resolved_owner_uids: list[str] | None = None
+    if owner_keywords:
+        try:
+            resolved_owner_uids = await _resolve_course_owner_keywords(client, owner_keywords)
+        except Exception as e:
+            return _err(
+                error_code="RESOLVE_OWNER_ERROR",
+                error_message=str(e),
+                suggested_action="检查拥有者关键词或网络连接后重试",
+            )
+        if resolved_owner_uids is None:
+            return _err(
+                error_code="OWNER_NOT_FOUND",
+                error_message=f"找不到匹配的拥有者: {owner_keywords}",
+                suggested_action="检查关键词拼写，或调用 adm_list_accounts 查询账号信息",
+            )
+
+    final_owner_uids: list[str] | None = None
+    if owner_uids:
+        final_owner_uids = [uid.strip() for uid in owner_uids.split(",") if uid.strip()]
+    if resolved_owner_uids:
+        if final_owner_uids:
+            final_owner_uids = list(set(final_owner_uids + resolved_owner_uids))
+        else:
+            final_owner_uids = resolved_owner_uids
+
+    # 构造 search_keyword：优先使用课程名称关键词
+    search_keyword = course_keywords or ""
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        """获取单页数据，返回(审核记录列表, 总数量)."""
+        params: dict[str, str] = {
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "page": str(p),
+            "size": str(sz),
+            "audit_status": str(audit_status),
+            "search_keyword": search_keyword,
+            "uids": ",".join(final_owner_uids) if final_owner_uids else "",
+            "filter_last_passed": "1" if filter_last_passed else "0",
+            "sort_field": sort_field,
+            "sort_order": sort_order,
+        }
+        if category_id is not None:
+            params["category_id"] = category_id
+
+        resp = client.get(
+            client.desktop_url("/api/enterprise/getcourseauditlist"),
+            params=params,
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取课程审核列表失败"))
+
+        record_list = resp.get("data", {}).get("list", [])
+        records: list[dict[str, Any]] = []
+        for item in record_list:
+            try:
+                raw = AdminCourseAuditRecordRaw(**item)
+                records.append(AdminCourseAuditRecord.from_raw(raw).model_dump())
+            except Exception:
+                # 如果个别记录字段异常，回退到原始字典，保证列表不中断
+                records.append(item)
+
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
+        return records, total_all
+
+    try:
+        if fetch_all:
+            all_records: list[dict[str, Any]] = []
+            current_page = 1
+            batch_size = 20
+            total_all = 0
+
+            while True:
+                records, total_all = _fetch_page(current_page, batch_size)
+                all_records.extend(records)
+
+                progress_pct = ""
+                if total_all > 0:
+                    pct = min(100, int(len(all_records) / total_all * 100))
+                    progress_pct = f" ({pct}%)"
+                if total_all > 0 and current_page == 1:
+                    print(
+                        f"[adm_list_course_audit_records] 共 {total_all} 条，"
+                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
+                        file=sys.stderr,
+                    )
+                print(
+                    f"[adm_list_course_audit_records] 已获取第 {current_page} 页，"
+                    f"累计 {len(all_records)} / {total_all} 条{progress_pct}",
+                    file=sys.stderr,
+                )
+
+                if len(all_records) >= total_all or not records:
+                    print(
+                        f"[adm_list_course_audit_records] 获取完成，共 {len(all_records)} 条，"
+                        f"合计 {current_page} 页",
+                        file=sys.stderr,
+                    )
+                    break
+                current_page += 1
+                if current_page > 50:
+                    warning_msg = (
+                        f"[adm_list_course_audit_records] 警告：达到 50 页安全上限，停止获取"
+                        f"（已获取 {len(all_records)} 条）"
+                    )
+                    print(warning_msg, file=sys.stderr)
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            # 本地按 access_code 过滤
+            if access_code:
+                code = access_code.strip().lower()
+                all_records = [
+                    r for r in all_records
+                    if code in (r.get("access_code", "") or "").lower()
+                ]
+
+            return _ok(
+                data={
+                    "records": all_records,
+                    "total": len(all_records),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(all_records) if all_records else 0,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 group_id 调用 adm_audit_course 执行审核操作",
+            )
+        else:
+            records, total_all = _fetch_page(page, page_size)
+
+            if access_code:
+                code = access_code.strip().lower()
+                records = [
+                    r for r in records
+                    if code in (r.get("access_code", "") or "").lower()
+                ]
+
+            return _ok(
+                data={
+                    "records": records,
+                    "total": len(records),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": page,
+                        "page_size": page_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 group_id 调用 adm_audit_course 执行审核操作",
+            )
+    except Exception as e:
+        return _err(
+            error_code="LIST_COURSE_AUDIT_RECORDS_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接或参数后重试",
+        )
+
+
+@mcp.tool()
+async def adm_audit_course(
+    group_ids: Annotated[
+        str,
+        Field(description="课程 ID 列表，多个用逗号分隔，如 '7330085,7330086'"),
+    ],
+    action: Annotated[
+        str,
+        Field(description="审核动作：approve/通过/1、reject/拒绝/2、revoke/撤销提交/3"),
+    ],
+    reason: Annotated[
+        str | None,
+        Field(default=None, description="拒绝或撤销提交的原因（可选）"),
+    ] = None,
+    add_to_blacklist: Annotated[
+        bool,
+        Field(default=False, description="拒绝时是否将课程拥有者加入黑名单（仅 action=reject 时生效）"),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID"),
+    ] = None,
+) -> str:
+    """对企业知识库课程执行审核操作.
+
+    触发条件：用户需要对课程进行通过、拒绝或撤销提交时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：会改变课程审核状态；拒绝时若 add_to_blacklist=True 会将拥有者加入黑名单。
+
+    说明：
+    - 通过审核后，课程进入企业知识库，可被管理员转发/推荐，企业内其他学员可搜索学习。
+    - 拒绝审核后，课程被设置为拒绝状态。
+    - 撤销提交后，课程回到未提交状态，仍可编辑和分享，但管理员不会推荐，其他学员搜索不到。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    action_lower = action.strip().lower()
+    action_map = {
+        "approve": 1, "通过": 1, "1": 1,
+        "reject": 2, "拒绝": 2, "2": 2,
+        "revoke": 3, "撤销提交": 3, "撤销": 3, "3": 3,
+    }
+    if action_lower not in action_map:
+        return _err(
+            error_code="INVALID_AUDIT_ACTION",
+            error_message=f"不支持的审核动作: {action}",
+            suggested_action="请使用 approve/通过、reject/拒绝、revoke/撤销提交",
+        )
+    audit_status_code = action_map[action_lower]
+
+    if not group_ids.strip():
+        return _err(
+            error_code="EMPTY_GROUP_IDS",
+            error_message="group_ids 不能为空",
+            suggested_action="提供需要审核的课程 ID",
+        )
+
+    if audit_status_code != 2 and add_to_blacklist:
+        return _err(
+            error_code="BLACKLIST_ONLY_ON_REJECT",
+            error_message="add_to_blacklist 仅在拒绝操作时有效",
+            suggested_action="将 action 设置为 reject/拒绝，或关闭 add_to_blacklist",
+        )
+
+    payload: dict[str, str] = {
+        "group_ids": group_ids.strip(),
+        "audit_status": str(audit_status_code),
+    }
+    if reason:
+        payload["desc"] = reason
+    if audit_status_code == 2:
+        payload["is_add_black"] = "1" if add_to_blacklist else "0"
+
+    try:
+        resp = client.post(
+            client.desktop_url("/api/group/auditCourse"),
+            data=payload,
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "课程审核操作失败"))
+
+        action_text = {1: "通过", 2: "拒绝", 3: "撤销提交"}[audit_status_code]
+        return _ok(
+            data={
+                "group_ids": group_ids.strip(),
+                "action": action_text,
+                "audit_status": audit_status_code,
+                "add_to_blacklist": add_to_blacklist if audit_status_code == 2 else False,
+            },
+            next_action="proceed",
+            suggested_action="可调用 adm_list_course_audit_records 查看最新状态",
+        )
+    except Exception as e:
+        return _err(
+            error_code="AUDIT_COURSE_ERROR",
+            error_message=str(e),
+            suggested_action="检查课程 ID、网络连接或权限后重试",
+        )
+
+
+@mcp.tool()
+async def adm_list_course_categories(
+    is_with_course_num: Annotated[
+        bool,
+        Field(default=False, description="是否返回每个分类下的课程数量"),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID"),
+    ] = None,
+) -> str:
+    """查询企业课程分类列表.
+
+    触发条件：需要查看课程分类、为审核列表按分类筛选做准备时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/enterprise/get-category-list"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "is_with_course_num": "1" if is_with_course_num else "0",
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error_message", "获取课程分类失败"))
+
+        category_list = resp.get("data", {}).get("list", [])
+        categories: list[dict[str, Any]] = []
+        for item in category_list:
+            try:
+                raw = AdminCourseCategoryRaw(**item)
+                categories.append(AdminCourseCategory.from_raw(raw).model_dump())
+            except Exception:
+                categories.append(item)
+
+        return _ok(
+            data={
+                "categories": categories,
+                "total": len(categories),
+            },
+            next_action="proceed",
+            suggested_action="使用 category_id 调用 adm_list_course_audit_records 按分类筛选",
+        )
+    except Exception as e:
+        return _err(
+            error_code="LIST_COURSE_CATEGORIES_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_list_course_blacklist(
+    page: Annotated[
+        int,
+        Field(default=1, ge=1, description="页码，默认第1页"),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=15, ge=1, le=100, description="每页数量（1-100），默认15"),
+    ] = 15,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID"),
+    ] = None,
+) -> str:
+    """查询课程提交黑名单.
+
+    触发条件：需要查看哪些课程拥有者被加入黑名单时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：无（只读查询）。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        """获取单页数据，返回(黑名单列表, 总数量)."""
+        resp = client.get(
+            client.desktop_url("/uapi/v1/course/course-blacklist"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "page": str(p),
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error_message", "获取黑名单失败"))
+
+        blacklist_list = resp.get("data", {}).get("list", [])
+        entries: list[dict[str, Any]] = []
+        for item in blacklist_list:
+            try:
+                raw = AdminCourseBlacklistEntryRaw(**item)
+                entries.append(AdminCourseBlacklistEntry.from_raw(raw).model_dump())
+            except Exception:
+                entries.append(item)
+
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
+        return entries, total_all
+
+    try:
+        if fetch_all:
+            all_entries: list[dict[str, Any]] = []
+            current_page = 1
+            batch_size = 15
+            total_all = 0
+
+            while True:
+                entries, total_all = _fetch_page(current_page, batch_size)
+                all_entries.extend(entries)
+
+                progress_pct = ""
+                if total_all > 0:
+                    pct = min(100, int(len(all_entries) / total_all * 100))
+                    progress_pct = f" ({pct}%)"
+                if total_all > 0 and current_page == 1:
+                    print(
+                        f"[adm_list_course_blacklist] 共 {total_all} 条，"
+                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
+                        file=sys.stderr,
+                    )
+                print(
+                    f"[adm_list_course_blacklist] 已获取第 {current_page} 页，"
+                    f"累计 {len(all_entries)} / {total_all} 条{progress_pct}",
+                    file=sys.stderr,
+                )
+
+                if len(all_entries) >= total_all or not entries:
+                    print(
+                        f"[adm_list_course_blacklist] 获取完成，共 {len(all_entries)} 条，"
+                        f"合计 {current_page} 页",
+                        file=sys.stderr,
+                    )
+                    break
+                current_page += 1
+                if current_page > 50:
+                    warning_msg = (
+                        f"[adm_list_course_blacklist] 警告：达到 50 页安全上限，停止获取"
+                        f"（已获取 {len(all_entries)} 条）"
+                    )
+                    print(warning_msg, file=sys.stderr)
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            return _ok(
+                data={
+                    "blacklist": all_entries,
+                    "total": len(all_entries),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(all_entries) if all_entries else 0,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 umu_id 调用 adm_save_course_blacklist 移除黑名单",
+            )
+        else:
+            entries, total_all = _fetch_page(page, page_size)
+            return _ok(
+                data={
+                    "blacklist": entries,
+                    "total": len(entries),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": page,
+                        "page_size": page_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 umu_id 调用 adm_save_course_blacklist 移除黑名单",
+            )
+    except Exception as e:
+        return _err(
+            error_code="LIST_COURSE_BLACKLIST_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_save_course_blacklist(
+    umu_id: Annotated[
+        str,
+        Field(description="用户 umu_id"),
+    ],
+    action: Annotated[
+        str,
+        Field(description="操作：add/加入/1、remove/移除/2"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID"),
+    ] = None,
+) -> str:
+    """将用户加入或移出课程提交黑名单.
+
+    触发条件：需要手动将课程提交人加入黑名单，或从黑名单移除时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：会改变用户在黑名单中的状态。被加入黑名单的账户，其提交的所有课程必须进入审核流程。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    action_lower = action.strip().lower()
+    action_map = {
+        "add": 1, "加入": 1, "1": 1,
+        "remove": 2, "移除": 2, "2": 2,
+    }
+    if action_lower not in action_map:
+        return _err(
+            error_code="INVALID_BLACKLIST_ACTION",
+            error_message=f"不支持的黑名单操作: {action}",
+            suggested_action="请使用 add/加入 或 remove/移除",
+        )
+    type_code = action_map[action_lower]
+
+    if not umu_id.strip():
+        return _err(
+            error_code="EMPTY_UMU_ID",
+            error_message="umu_id 不能为空",
+            suggested_action="提供有效的用户 umu_id",
+        )
+
+    try:
+        resp = client.post(
+            client.desktop_url("/uapi/v1/course/save-course-blacklist"),
+            data={
+                "umu_id": umu_id.strip(),
+                "type": str(type_code),
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error_message", "黑名单操作失败"))
+
+        action_text = {1: "加入", 2: "移除"}[type_code]
+        return _ok(
+            data={
+                "umu_id": umu_id.strip(),
+                "action": action_text,
+                "type": type_code,
+            },
+            next_action="proceed",
+            suggested_action="可调用 adm_list_course_blacklist 查看最新黑名单",
+        )
+    except Exception as e:
+        return _err(
+            error_code="SAVE_COURSE_BLACKLIST_ERROR",
+            error_message=str(e),
+            suggested_action="检查 umu_id、网络连接或权限后重试",
+        )
+
+
+@mcp.tool()
 async def adm_list_learning_programs(
     keywords: Annotated[
         str | None,
@@ -7414,7 +8073,10 @@ def main() -> None:
     print("        adm_list_group_managers, adm_add_group_members,")
     print("        adm_remove_group_members, adm_add_group_managers,")
     print("        adm_remove_group_managers")
-    print("  课程: adm_list_courses")
+    print("  课程: adm_list_courses,")
+    print("        adm_list_course_audit_records, adm_audit_course,")
+    print("        adm_list_course_categories")
+    print("  课程审核黑名单: adm_list_course_blacklist, adm_save_course_blacklist")
     print("  学习项目: adm_list_learning_programs")
     print("  数据: adm_list_learning_records, adm_list_user_tasks,")
     print("        adm_list_instructors")

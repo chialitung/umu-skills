@@ -493,6 +493,235 @@ class AdminClassListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 课程审核
+# ---------------------------------------------------------------------------
+
+
+_RELEASE_STATUS_MAP = {
+    "0": "未发布",
+    "1": "已发布",
+    "2": "已发布",
+}
+
+
+def _get_release_status_text(status_code: str) -> str:
+    """将发布状态码转换为人读文本."""
+    return _RELEASE_STATUS_MAP.get(str(status_code), f"未知状态({status_code})")
+
+
+_BLACKLIST_SOURCE_MAP = {
+    "course_audit_reject": "课程审核拒绝",
+    "admin_add": "管理员手动添加",
+}
+
+
+def _get_blacklist_source_text(source: str) -> str:
+    """将黑名单来源转换为人读文本."""
+    return _BLACKLIST_SOURCE_MAP.get(source, source)
+
+
+class AdminCourseAuditRecordReleaseActivity(BaseModel):
+    """审核记录中的近期发布/审核活动."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: str = ""
+    desc: str = ""
+    times: str = ""
+    update_ts: str = ""
+
+
+class AdminCourseAuditRecordRaw(BaseModel):
+    """UMU 原始课程审核记录对象.
+
+    对应 /api/enterprise/getcourseauditlist 响应中 `data.list[]` 的单个元素。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    group_id: str = ""
+    course_version_id: str = ""
+    release_status: str = ""
+    release_time: int = 0
+    teacher_id: str = ""
+    umu_id: str = ""
+    is_blacklist: int = 0
+    group_title: str = ""
+    shareUrl: str = ""
+    auditUrl: str = ""
+    user_name: str = ""
+    avatar: str = ""
+    session_num: str = ""
+    participate_num: int = 0
+    like_num: int = 0
+    release_num: int = 0
+    reject_num: int = 0
+    current_reject_times: int = 0
+    release_activity: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdminCourseAuditRecord(BaseModel):
+    """Admin MCP 标准化课程审核记录对象."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    group_id: str = Field(..., description="课程分组 ID")
+    course_version_id: str = Field(default="", description="课程版本 ID")
+    title: str = Field(..., description="课程标题")
+    release_status: str = Field(default="", description="发布状态码")
+    release_status_text: str = Field(default="", description="发布状态文本")
+    release_time: int = Field(default=0, description="发布时间（Unix 秒）")
+    release_time_readable: str = Field(default="", description="发布时间北京时间")
+    teacher_id: str = Field(default="", description="讲师 ID")
+    umu_id: str = Field(default="", description="创建者 UMU ID")
+    is_blacklist: bool = Field(default=False, description="是否在黑名单")
+    is_blacklist_text: str = Field(default="", description="黑名单状态文本")
+    share_url: str = Field(default="", description="课程分享链接")
+    audit_url: str = Field(default="", description="课程审核链接")
+    owner_name: str = Field(default="", description="创建者姓名")
+    avatar: str = Field(default="", description="创建者头像")
+    session_num: int = Field(default=0, description="小节数量")
+    participate_num: int = Field(default=0, description="参与人数")
+    like_num: int = Field(default=0, description="点赞数")
+    release_num: int = Field(default=0, description="发布次数")
+    reject_num: int = Field(default=0, description="拒绝次数")
+    current_reject_times: int = Field(default=0, description="当前连续拒绝次数")
+    release_activity: dict[str, Any] = Field(default_factory=dict, description="近期发布/审核活动")
+
+    @classmethod
+    def from_raw(cls, raw: AdminCourseAuditRecordRaw) -> "AdminCourseAuditRecord":
+        """从原始 UMU 审核记录构造标准化对象."""
+        return cls(
+            group_id=raw.group_id,
+            course_version_id=raw.course_version_id,
+            title=raw.group_title,
+            release_status=raw.release_status,
+            release_status_text=_get_release_status_text(raw.release_status),
+            release_time=raw.release_time,
+            release_time_readable=format_timestamp_beijing(raw.release_time),
+            teacher_id=raw.teacher_id,
+            umu_id=raw.umu_id,
+            is_blacklist=bool(raw.is_blacklist),
+            is_blacklist_text="是" if raw.is_blacklist else "否",
+            share_url=raw.shareUrl,
+            audit_url=raw.auditUrl,
+            owner_name=raw.user_name,
+            avatar=raw.avatar,
+            session_num=int(raw.session_num or 0),
+            participate_num=raw.participate_num,
+            like_num=raw.like_num,
+            release_num=raw.release_num,
+            reject_num=raw.reject_num,
+            current_reject_times=raw.current_reject_times,
+            release_activity=raw.release_activity,
+        )
+
+
+class AdminCourseCategoryRaw(BaseModel):
+    """UMU 原始课程分类对象."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = ""
+    parent_id: str = ""
+    name: str = ""
+    name_letter: str = ""
+    name_i18n: str = ""
+    show_index: str = ""
+    auth_type: str = ""
+
+
+class AdminCourseCategory(BaseModel):
+    """Admin MCP 标准化课程分类对象."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., description="分类 ID")
+    parent_id: str = Field(default="", description="父分类 ID")
+    name: str = Field(..., description="分类名称")
+    name_letter: str = Field(default="", description="分类拼音")
+    show_index: int = Field(default=0, description="展示顺序")
+    auth_type: str = Field(default="", description="权限类型")
+
+    @classmethod
+    def from_raw(cls, raw: AdminCourseCategoryRaw) -> "AdminCourseCategory":
+        """从原始分类对象构造标准化对象."""
+        return cls(
+            id=raw.id,
+            parent_id=raw.parent_id,
+            name=raw.name,
+            name_letter=raw.name_letter,
+            show_index=int(raw.show_index or 0),
+            auth_type=raw.auth_type,
+        )
+
+
+class AdminCourseBlacklistEntryRaw(BaseModel):
+    """UMU 原始课程黑名单对象."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_name: str = ""
+    teacher_id: str = ""
+    student_id: str = ""
+    enterprise_id: str = ""
+    email: str = ""
+    phone: str = ""
+    login_name: str = ""
+    umu_id: str = ""
+    source: str = ""
+    role_type: int = 0
+    release_num: int = 0
+    reject_num: int = 0
+    last_login_time: int = 0
+
+
+class AdminCourseBlacklistEntry(BaseModel):
+    """Admin MCP 标准化课程黑名单对象."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    umu_id: str = Field(..., description="用户 UMU ID")
+    user_name: str = Field(default="", description="用户姓名")
+    teacher_id: str = Field(default="", description="讲师 ID")
+    student_id: str = Field(default="", description="学员 ID")
+    enterprise_id: str = Field(default="", description="企业 ID")
+    email: str = Field(default="", description="邮箱")
+    phone: str = Field(default="", description="手机号")
+    login_name: str = Field(default="", description="登录名")
+    source: str = Field(default="", description="来源")
+    source_text: str = Field(default="", description="来源文本")
+    role_type: int = Field(default=0, description="角色类型码")
+    role_type_text: str = Field(default="", description="角色类型文本")
+    release_num: int = Field(default=0, description="发布课程数")
+    reject_num: int = Field(default=0, description="拒绝次数")
+    last_login_time: int = Field(default=0, description="最后登录时间（Unix 秒）")
+    last_login_time_readable: str = Field(default="", description="最后登录时间北京时间")
+
+    @classmethod
+    def from_raw(cls, raw: AdminCourseBlacklistEntryRaw) -> "AdminCourseBlacklistEntry":
+        """从原始黑名单对象构造标准化对象."""
+        return cls(
+            umu_id=raw.umu_id,
+            user_name=raw.user_name,
+            teacher_id=raw.teacher_id,
+            student_id=raw.student_id,
+            enterprise_id=raw.enterprise_id,
+            email=raw.email,
+            phone=raw.phone,
+            login_name=raw.login_name,
+            source=raw.source,
+            source_text=_get_blacklist_source_text(raw.source),
+            role_type=raw.role_type,
+            role_type_text=get_role_name(raw.role_type),
+            release_num=raw.release_num,
+            reject_num=raw.reject_num,
+            last_login_time=raw.last_login_time,
+            last_login_time_readable=format_timestamp_beijing(raw.last_login_time),
+        )
+
+
+# ---------------------------------------------------------------------------
 # 课程清单
 # ---------------------------------------------------------------------------
 
