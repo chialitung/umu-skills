@@ -880,10 +880,30 @@ async def _resolve_group_names(
 
         records_fetched += len(group_list)
         total = int(resp.get("data", {}).get("total", 0) or 0)
+
+        report_pagination_progress(
+            "_resolve_group_names",
+            page,
+            records_fetched,
+            total,
+            page_size,
+            is_complete=total > 0 and records_fetched >= total,
+        )
+
         if total > 0 and records_fetched >= total:
             break
 
         page += 1
+        if page > max_pages:
+            report_pagination_progress(
+                "_resolve_group_names",
+                page,
+                records_fetched,
+                total,
+                page_size,
+                is_safety_limit=True,
+            )
+            break
 
     if not matched_ids:
         return None
@@ -943,10 +963,30 @@ async def _resolve_class_names_all(
 
         records_fetched += len(class_list)
         total = int(resp.get("data", {}).get("total", 0) or 0)
+
+        report_pagination_progress(
+            "_resolve_class_names_all",
+            page,
+            records_fetched,
+            total,
+            page_size,
+            is_complete=total > 0 and records_fetched >= total,
+        )
+
         if total > 0 and records_fetched >= total:
             break
 
         page += 1
+        if page > max_pages:
+            report_pagination_progress(
+                "_resolve_class_names_all",
+                page,
+                records_fetched,
+                total,
+                page_size,
+                is_safety_limit=True,
+            )
+            break
 
     if not matched_ids:
         return None
@@ -3241,10 +3281,27 @@ def _get_all_group_users(
         users, total_all = _fetch_group_users(client, group_id, is_manager, current_page, page_size)
         all_users.extend(users)
 
+        report_pagination_progress(
+            "_get_all_group_users",
+            current_page,
+            len(all_users),
+            total_all,
+            page_size,
+            is_complete=len(all_users) >= total_all or not users,
+        )
+
         if len(all_users) >= total_all or not users:
             break
         current_page += 1
         if current_page > 50:
+            report_pagination_progress(
+                "_get_all_group_users",
+                current_page,
+                len(all_users),
+                total_all,
+                page_size,
+                is_safety_limit=True,
+            )
             logger.warning("获取分组成员达到 50 页安全上限")
             break
 
