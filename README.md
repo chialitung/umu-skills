@@ -192,7 +192,8 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 | 组织架构 | `adm_list_departments`, `adm_get_department_tree`, `adm_get_department`, `adm_get_child_departments`, `adm_list_department_members`, `adm_search_department_members`, `adm_create_department`, `adm_update_department`, `adm_sort_departments`, `adm_add_department_members`, `adm_move_department_members`, `adm_remove_department_members`, `adm_delete_departments`, `adm_list_groups` |
 | 分组 | `adm_create_group`, `adm_update_group`, `adm_delete_groups`, `adm_get_group`, `adm_list_group_members`, `adm_list_group_managers`, `adm_add_group_members`, `adm_remove_group_members`, `adm_add_group_managers`, `adm_remove_group_managers` |
 | 班级 | `adm_list_classes` |
-| 课程/学习项目 | `adm_list_courses`, `adm_list_learning_programs` |
+| 课程/学习项目 | `adm_list_courses`, `adm_list_course_audit_records`, `adm_audit_course`, `adm_list_course_categories`, `adm_list_learning_programs` |
+| 课程审核黑名单 | `adm_list_course_blacklist`, `adm_save_course_blacklist` |
 | 学习记录 | `adm_list_learning_records` |
 | 用户任务 | `adm_list_user_tasks` |
 | 讲师 | `adm_list_instructors` |
@@ -325,6 +326,11 @@ python -m umu_sdk.skills.server
 | `list_classes` | admin | 列出班级 |
 | `list_accounts` | admin | 查询账号列表 |
 | `list_courses` | admin | 查询企业课程清单 |
+| `list_course_audit_records` | admin | 查询企业知识库课程审核记录 |
+| `audit_course` | admin | 对课程执行通过/拒绝/撤销提交操作 |
+| `list_course_categories` | admin | 查询企业课程分类列表 |
+| `list_course_blacklist` | admin | 查询课程提交黑名单 |
+| `manage_course_blacklist` | admin | 将用户加入或移出课程提交黑名单 |
 | `list_learning_programs` | admin | 查询企业学习项目清单 |
 | `disable_account` | admin | 禁用账号 |
 | `enable_account` | admin | 启用账号 |
