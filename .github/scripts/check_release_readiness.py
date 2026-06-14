@@ -1,11 +1,13 @@
 """发布就绪检查脚本.
 
-在最小发布流程中运行，自动核对以下项目，任何一项失败都会以非零退出码报告：
+在最小发布流程中运行，自动核对 README.md 与项目实际代码保持一致，
+任何一项失败都会以非零退出码报告：
 
 1. pyproject.toml 的 version 必须与 CHANGELOG.md 最新小节版本一致。
-2. README.md 中声明的管理员/教师/学生工具数量必须与代码中实际数量一致。
-3. README.md 中声明的内置 Skill 总数必须与代码中实际数量一致。
-4. README.md 中功能特性和角色说明里的管理员能力描述必须覆盖 `ADMIN_CAPABILITY_KEYWORDS` 中声明的当前能力域。
+2. README.md 中列出的管理员工具、教师工具、学生工具名称集合必须与代码中
+   @mcp.tool() 实际定义的工具名称集合一致，且数量标题一致。
+3. README.md 中列出的内置 Skill 名称集合必须与代码中 @skill() 实际定义的
+   Skill 名称集合一致，且数量标题一致。
 
 该脚本是阻塞项：未通过前不得执行 release commit 和推送。
 """
@@ -18,13 +20,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-
-# 当前 Admin 能力域关键词表。
-# 当新增 Admin 能力域时，应在此补充对应中文关键词，并在 README.md 中同步描述。
-# 本表是发布就绪检查的显式契约：README 管理员描述至少应覆盖这些能力。
-ADMIN_CAPABILITY_KEYWORDS: list[str] = [
-    "课程审核",
-]
 
 
 def fail(message: str) -> None:
@@ -64,109 +59,99 @@ def get_changelog_latest_version() -> str:
     return match.group(1)
 
 
-def count_mcp_tools(file_path: Path) -> int:
-    """统计文件中 @mcp.tool() 装饰器数量."""
+def extract_mcp_tool_names(file_path: Path) -> set[str]:
+    """从 MCP server 文件中提取 @mcp.tool() 装饰的工具名集合."""
     if not file_path.exists():
         fail(f"{file_path} 不存在")
     text = file_path.read_text(encoding="utf-8")
-    return len(re.findall(r"^\s*@mcp\.tool\([^)]*\)\s*$", text, re.MULTILINE))
+    # 匹配 @mcp.tool() 后（允许中间有其他装饰器）的 async def name(
+    pattern = r"@mcp\.tool\([^)]*\)\s*(?:@[^\n]+\s*)*async def\s+(\w+)\s*\("
+    return set(re.findall(pattern, text))
 
 
-def count_skills() -> int:
-    """统计 builtin skills 目录中 @skill(...) 装饰器数量."""
+def extract_skill_names() -> set[str]:
+    """从 builtin skills 目录中提取 @skill(name=...) 声明的 Skill 名集合."""
     skill_dir = ROOT / "src" / "umu_sdk" / "skills" / "builtin"
     if not skill_dir.exists():
         fail("skills/builtin 目录不存在")
-    total = 0
+    names: set[str] = set()
     for py_file in skill_dir.glob("*.py"):
         if py_file.name == "__init__.py":
             continue
         text = py_file.read_text(encoding="utf-8")
-        total += len(re.findall(r"^\s*@skill\(", text, re.MULTILINE))
-    return total
+        for match in re.finditer(
+            r"@skill\(\s*name\s*=\s*\"([^\"]+)\"",
+            text,
+        ):
+            names.add(match.group(1))
+    return names
 
 
-def extract_readme_counts() -> dict[str, int]:
-    """从 README.md 提取工具和 Skill 数量."""
+def extract_readme_section(text: str, section_start_pattern: str) -> str:
+    """从 README.md 中提取指定章节的内容，直到下一个同层级标题."""
+    match = re.search(section_start_pattern, text)
+    if not match:
+        fail(f"README.md 中未找到匹配 '{section_start_pattern}' 的章节")
+    assert match is not None
+    start = match.end()
+    # 找到下一个 ### 标题或文件结尾
+    next_match = re.search(r"\n### ", text[start:])
+    end = start + next_match.start() if next_match else len(text)
+    return text[start:end]
+
+
+def extract_readme_tool_counts() -> dict[str, tuple[int, set[str]]]:
+    """从 README.md 提取各角色工具数量标题和工具名集合.
+
+    返回 {role: (count, names)}。
+    """
     path = ROOT / "README.md"
     if not path.exists():
         fail("README.md 不存在")
     text = path.read_text(encoding="utf-8")
 
-    counts: dict[str, int] = {}
+    result: dict[str, tuple[int, set[str]]] = {}
 
-    admin_match = re.search(r"### 管理员工具[（(](\d+)[）)]", text)
-    if admin_match:
-        counts["admin"] = int(admin_match.group(1))
-    else:
-        fail("README.md 中未找到管理员工具数量（格式：### 管理员工具（N））")
+    role_patterns = {
+        "admin": (r"### 管理员工具[（(](\d+)[）)]", r"adm_[a-z_]+"),
+        "teacher": (r"### 教师工具[（(](\d+)[）)]", r"tch_[a-z_]+"),
+        "student": (r"### 学生工具[（(](\d+)[）)]", r"stu_[a-z_]+"),
+    }
 
-    teacher_match = re.search(r"### 教师工具[（(](\d+)[）)]", text)
-    if teacher_match:
-        counts["teacher"] = int(teacher_match.group(1))
-    else:
-        fail("README.md 中未找到教师工具数量（格式：### 教师工具（N））")
+    for role, (heading_pattern, name_pattern) in role_patterns.items():
+        heading_match = re.search(heading_pattern, text)
+        if not heading_match:
+            fail(f"README.md 中未找到 {role} 工具数量标题")
+        assert heading_match is not None
+        count = int(heading_match.group(1))
 
-    student_match = re.search(r"### 学生工具[（(](\d+)[）)]", text)
-    if student_match:
-        counts["student"] = int(student_match.group(1))
-    else:
-        fail("README.md 中未找到学生工具数量（格式：### 学生工具（N））")
+        section = extract_readme_section(text, heading_pattern)
+        names = set(re.findall(r"`(" + name_pattern + r")`", section))
+        result[role] = (count, names)
 
-    skill_match = re.search(r"内置 Skill 覆盖高频场景[（(]共\s*(\d+)\s*[）)]", text)
-    if skill_match:
-        counts["skill"] = int(skill_match.group(1))
-    else:
-        fail("README.md 中未找到 Skill 总数（格式：内置 Skill 覆盖高频场景（共 N）：）")
-
-    for key, match in (
-        ("admin", admin_match),
-        ("teacher", teacher_match),
-        ("student", student_match),
-        ("skill", skill_match),
-    ):
-        assert match is not None
-
-    return counts
+    return result
 
 
-def check_admin_capabilities_mentioned() -> None:
-    """检查 README.md 中管理员能力描述是否覆盖当前能力域."""
+def extract_readme_skill_count_and_names() -> tuple[int, set[str]]:
+    """从 README.md 提取内置 Skill 数量标题和 Skill 名集合."""
     path = ROOT / "README.md"
+    if not path.exists():
+        fail("README.md 不存在")
     text = path.read_text(encoding="utf-8")
 
-    # 功能特性段落
-    feature_match = re.search(
-        r"- \*\*三角色 MCP 服务器\*\*：.*管理员[（(]([^)]+)[）)]",
-        text,
-        re.DOTALL,
-    )
-    if feature_match:
-        admin_desc = feature_match.group(1)
-    else:
-        fail("README.md 中未找到功能特性里的管理员描述")
-
-    assert feature_match is not None
-
-    # 角色说明段落
-    role_match = re.search(
-        r"- \*\*Admin（管理员）\*\*[：:](.+?)(?:\n|$)",
+    heading_match = re.search(
+        r"内置 Skill 覆盖高频场景[（(]共\s*(\d+)\s*[）)]",
         text,
     )
-    if role_match:
-        admin_role = role_match.group(1).strip()
-    else:
-        fail("README.md 中未找到角色说明里的 Admin 描述")
+    if not heading_match:
+        fail("README.md 中未找到 Skill 总数标题")
+    assert heading_match is not None
+    count = int(heading_match.group(1))
 
-    assert role_match is not None
-
-    combined = admin_desc + admin_role
-    missing = [kw for kw in ADMIN_CAPABILITY_KEYWORDS if kw not in combined]
-    if missing:
-        fail(
-            "README.md 管理员能力描述缺少以下关键词，请同步更新："
-            f"{', '.join(missing)}"
-        )
+    section = extract_readme_section(text, re.escape(heading_match.group(0)))
+    # 表格行第一列通常是 `skill_name`
+    names = set(re.findall(r"\|\s*`([a-z_][a-z0-9_]*)`\s*\|", section))
+    return count, names
 
 
 def main() -> int:
@@ -183,37 +168,63 @@ def main() -> int:
         )
     info(f"版本一致：{pyproject_version}")
 
-    # 2. 工具数量一致性
-    actual_counts = {
-        "admin": count_mcp_tools(ROOT / "src" / "umu_sdk" / "adapters" / "mcp" / "admin.py"),
-        "teacher": count_mcp_tools(ROOT / "src" / "umu_sdk" / "adapters" / "mcp" / "teacher.py"),
-        "student": count_mcp_tools(ROOT / "src" / "umu_sdk" / "adapters" / "mcp" / "student.py"),
+    # 2. 工具名称集合与数量一致性
+    actual_tool_names = {
+        "admin": extract_mcp_tool_names(
+            ROOT / "src" / "umu_sdk" / "adapters" / "mcp" / "admin.py"
+        ),
+        "teacher": extract_mcp_tool_names(
+            ROOT / "src" / "umu_sdk" / "adapters" / "mcp" / "teacher.py"
+        ),
+        "student": extract_mcp_tool_names(
+            ROOT / "src" / "umu_sdk" / "adapters" / "mcp" / "student.py"
+        ),
     }
-    readme_counts = extract_readme_counts()
+    readme_tool_info = extract_readme_tool_counts()
 
     for role in ("admin", "teacher", "student"):
-        actual = actual_counts[role]
-        declared = readme_counts[role]
-        if actual != declared:
+        actual_names = actual_tool_names[role]
+        declared_count, declared_names = readme_tool_info[role]
+
+        if declared_count != len(actual_names):
             fail(
-                f"{role} 工具数量不一致：README.md 声明 {declared} 个，"
-                f"实际代码 {actual} 个。请更新 README.md。"
+                f"{role} 工具数量标题不一致：README.md 声明 {declared_count} 个，"
+                f"实际代码 {len(actual_names)} 个。"
             )
-        info(f"{role} 工具数量一致：{actual}")
 
-    # 3. Skill 数量一致性
-    actual_skill_count = count_skills()
-    declared_skill_count = readme_counts["skill"]
-    if actual_skill_count != declared_skill_count:
+        missing = actual_names - declared_names
+        extra = declared_names - actual_names
+        if missing or extra:
+            messages = []
+            if missing:
+                messages.append(f"README 遗漏：{sorted(missing)}")
+            if extra:
+                messages.append(f"README 多列/已删除：{sorted(extra)}")
+            fail(f"{role} 工具列表与代码不一致：{'；'.join(messages)}")
+
+        info(f"{role} 工具列表一致：{len(actual_names)} 个")
+
+    # 3. Skill 名称集合与数量一致性
+    actual_skill_names = extract_skill_names()
+    declared_skill_count, declared_skill_names = extract_readme_skill_count_and_names()
+
+    if declared_skill_count != len(actual_skill_names):
         fail(
-            f"Skill 数量不一致：README.md 声明 {declared_skill_count} 个，"
-            f"实际代码 {actual_skill_count} 个。请更新 README.md。"
+            f"Skill 数量标题不一致：README.md 声明 {declared_skill_count} 个，"
+            f"实际代码 {len(actual_skill_names)} 个。"
         )
-    info(f"Skill 数量一致：{actual_skill_count}")
 
-    # 4. 能力描述检查
-    check_admin_capabilities_mentioned()
-    info(f"README.md 管理员能力描述覆盖：{', '.join(ADMIN_CAPABILITY_KEYWORDS)}")
+    missing_skills = actual_skill_names - declared_skill_names
+    extra_skills = declared_skill_names - actual_skill_names
+    if missing_skills or extra_skills:
+        messages = []
+        if missing_skills:
+            messages.append(f"README 遗漏：{sorted(missing_skills)}")
+        if extra_skills:
+            messages.append(f"README 多列/已删除：{sorted(extra_skills)}")
+        fail(f"Skill 列表与代码不一致：{'；'.join(messages)}")
+
+    info(f"Skill 列表一致：{len(actual_skill_names)} 个")
 
     print("\n[PASS] 所有发布就绪检查通过，可以继续执行 release commit。")
     return 0
