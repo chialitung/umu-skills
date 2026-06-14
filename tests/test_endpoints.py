@@ -6,10 +6,8 @@ import sys
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from umu_sdk.endpoints.courses import CourseEndpoint, ListCoursesParams
 from umu_sdk.core.models import PaginatedResponse
+from umu_sdk.endpoints.courses import CourseEndpoint, ListCoursesParams
 
 
 class TestCourseEndpointIterateAll:

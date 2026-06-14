@@ -7,8 +7,6 @@ import sys
 from io import StringIO
 from unittest.mock import patch
 
-import pytest
-
 from umu_sdk.adapters.mcp.utils import report_pagination_progress
 
 
