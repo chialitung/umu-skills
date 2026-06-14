@@ -168,6 +168,7 @@ mcp = FastMCP(
   - tch_update_course_schedule — 有效期和上课时段（语义化时间参数）
   - tch_update_course_images — 封面图/背景图上传替换
   - tch_update_course_richtext — 富文本介绍（含图片上传）
+- 提交课程至企业知识库审核（tch_submit_course_for_audit，管理员审核后可被推荐和搜索）
 - 添加 SCORM 小节到课程（支持使用已有资源或上传新 SCORM 包）
 - 列出课程小节（获取所有小节的 ID、标题、资源绑定等信息）
 - 获取单个小节详情（查看当前状态，过滤只读统计字段）
@@ -6389,6 +6390,56 @@ async def tch_update_course_richtext(
             error_code="UPDATE_RICHTEXT_FAILED",
             error_message=str(e),
             suggested_action="请检查 group_id 是否正确，HTML 内容是否有效",
+        )
+
+
+@mcp.tool()
+async def tch_submit_course_for_audit(
+    group_id: Annotated[str, Field(description="课程 ID，要提交审核的课程")],
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID"),
+    ] = None,
+) -> str:
+    """将课程提交至企业知识库进行审核.
+
+    触发条件：讲师希望课程被管理员审核、推荐并支持搜索时调用。
+    前置依赖：需先调用 tch_login 完成登录，且课程已存在。
+
+    提交后课程状态会变为待审核（audit_status=0, release_status=2）。
+    课程仍可继续编辑，更新内容会同步到已提交的版本中。
+
+    返回：包含 release_status、audit_status 等字段的 JSON
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+        )
+
+    try:
+        builder = CourseBuilder(client)
+        result = builder.submit_course_for_audit(group_id=group_id)
+
+        return _ok(
+            data={
+                "group_id": group_id,
+                "release_status": result.get("data", {}).get("release_status"),
+                "audit_status": result.get("data", {}).get("audit_status"),
+            },
+            next_action="proceed",
+            suggested_action="提交成功，等待管理员审核。可调用 tch_get_course 查看最新状态",
+        )
+    except Exception as e:
+        logger.exception("提交课程审核失败")
+        return _err(
+            error_code="SUBMIT_COURSE_FOR_AUDIT_FAILED",
+            error_message=str(e),
+            suggested_action="请检查 group_id 是否正确，或稍后重试",
         )
 
 

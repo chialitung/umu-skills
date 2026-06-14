@@ -2581,6 +2581,43 @@ class CourseBuilder:
         return leaf_ids
 
     # ------------------------------------------------------------------
+    # 提交课程审核至企业知识库
+    # ------------------------------------------------------------------
+
+    def submit_course_for_audit(self, group_id: str) -> dict[str, Any]:
+        """将课程提交至企业知识库进行审核.
+
+        对应 HAR 中的 POST /api/group/submitcourse 调用。
+        提交后课程进入管理员审核流程，审核通过后会被推荐并支持搜索。
+
+        Args:
+            group_id: 课程 ID
+
+        Returns:
+            API 原始响应字典（包含 release_status / audit_status 等）
+
+        Raises:
+            RuntimeError: 提交失败或网络错误
+        """
+        self._write_cooldown()
+
+        resp = self.client.post(
+            self.client.desktop_url("/api/group/submitcourse"),
+            data={"group_id": str(group_id)},
+        )
+
+        self._mark_write()
+
+        # UMU 此接口在成功时 status=true/error_code=0，但顶层 success 字段可能为 false
+        if resp.get("status") is True or resp.get("error_code") == 0:
+            logger.info("提交课程审核成功: group_id=%s", group_id)
+            return resp
+
+        error = resp.get("error") or resp.get("error_message") or "提交课程审核失败"
+        logger.error("提交课程审核失败: group_id=%s, resp=%s", group_id, resp)
+        raise RuntimeError(error)
+
+    # ------------------------------------------------------------------
     # 获取课程分类树
     # ------------------------------------------------------------------
 
