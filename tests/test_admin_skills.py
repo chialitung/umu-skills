@@ -510,11 +510,19 @@ class TestAdminAccounts:
             (
                 "admin",
                 "adm_list_accounts",
-                {"keywords": "张三", "role_type": 1, "page": 1, "page_size": 500, "fetch_all": True},
+                {
+                    "keywords": "张三",
+                    "role_type": 1,
+                    "page": 1,
+                    "page_size": 500,
+                    "fetch_all": True,
+                },
             ),
         ]
 
-    async def test_disable_account_by_umu_id(self, registry_with_admin_skills: SkillRegistry) -> None:
+    async def test_disable_account_by_umu_id(
+        self, registry_with_admin_skills: SkillRegistry
+    ) -> None:
         mock_mcp = MockMCPClientManager()
         skills_server._skill_registry = registry_with_admin_skills
         skills_server._mcp_client = mock_mcp
@@ -568,7 +576,9 @@ class TestAdminAccounts:
         assert parsed["error_code"] == "MISSING_IDENTIFIER"
         assert mock_mcp.calls == []
 
-    async def test_update_account_by_umu_id(self, registry_with_admin_skills: SkillRegistry) -> None:
+    async def test_update_account_by_umu_id(
+        self, registry_with_admin_skills: SkillRegistry
+    ) -> None:
         mock_mcp = MockMCPClientManager(
             responses={
                 ("admin", "adm_update_account"): {
@@ -665,7 +675,11 @@ class TestAdminData:
         parsed = json.loads(result)
         assert parsed["success"] is True
         assert mock_mcp.calls == [
-            ("admin", "adm_list_learning_records", {"page": 1, "page_size": 20, "fetch_all": False}),
+            (
+                "admin",
+                "adm_list_learning_records",
+                {"page": 1, "page_size": 20, "fetch_all": False},
+            ),
         ]
 
 
@@ -720,5 +734,123 @@ class TestAdminLearningPrograms:
         parsed = json.loads(result)
         assert parsed["success"] is True
         assert mock_mcp.calls == [
-            ("admin", "adm_list_learning_programs", {"page": 1, "page_size": 20, "fetch_all": False}),
+            (
+                "admin",
+                "adm_list_learning_programs",
+                {"page": 1, "page_size": 20, "fetch_all": False},
+            ),
+        ]
+
+
+class TestAdminTasks:
+    async def test_get_user_tasks(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="get_user_tasks",
+            arguments={"task_name": "test", "fetch_all": True},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_list_user_tasks",
+                {"task_name": "test", "fetch_all": True, "page": 1, "page_size": 500},
+            ),
+        ]
+
+    async def test_get_user_tasks_full_params(
+        self, registry_with_admin_skills: SkillRegistry
+    ) -> None:
+        mock_mcp = MockMCPClientManager(
+            responses={
+                ("admin", "adm_list_user_tasks"): {
+                    "success": True,
+                    "data": {
+                        "tasks": [],
+                        "total": 0,
+                        "pagination": {"total_all": 0, "current_page": 1, "page_size": 500},
+                    },
+                }
+            }
+        )
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="get_user_tasks",
+            arguments={
+                "task_types": "1,2",
+                "learn_status": "2,3",
+                "due_status": "1",
+                "department_ids": "82064",
+                "group_names": "新产品组",
+                "student_keywords": "张三",
+                "task_name": "入职培训",
+                "assign_start_day": "2026-01-01",
+                "assign_end_day": "2026-06-12",
+                "fetch_all": True,
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "admin",
+                "adm_list_user_tasks",
+                {
+                    "task_types": "1,2",
+                    "learn_status": "2,3",
+                    "due_status": "1",
+                    "department_ids": "82064",
+                    "group_names": "新产品组",
+                    "student_keywords": "张三",
+                    "task_name": "入职培训",
+                    "assign_start_day": "2026-01-01",
+                    "assign_end_day": "2026-06-12",
+                    "page": 1,
+                    "page_size": 500,
+                    "fetch_all": True,
+                },
+            ),
+        ]
+
+    async def test_get_user_tasks_error_response(
+        self, registry_with_admin_skills: SkillRegistry
+    ) -> None:
+        mock_mcp = MockMCPClientManager(
+            responses={
+                ("admin", "adm_list_user_tasks"): {
+                    "success": False,
+                    "error_code": "NOT_AUTHENTICATED",
+                    "error_message": "管理员未登录",
+                    "suggested_action": "调用 adm_login 登录",
+                }
+            }
+        )
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="get_user_tasks",
+            arguments={"task_name": "test"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "NOT_AUTHENTICATED"
+        assert parsed["next_action"] == "retry"
+
+    async def test_get_user_tasks_minimal(self, registry_with_admin_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_admin_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(name="get_user_tasks", arguments={})
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("admin", "adm_list_user_tasks", {"page": 1, "page_size": 500, "fetch_all": False}),
         ]
