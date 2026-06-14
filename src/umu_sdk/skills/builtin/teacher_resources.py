@@ -113,12 +113,14 @@ async def list_scorm_resources(
     ctx: SkillContext,
     page: int = 1,
     page_size: int = 20,
+    fetch_all: bool = False,
     search_keyword: str | None = None,
 ) -> dict[str, Any]:
     """列出 SCORM/音视频资源（media_type=videoweike，ext_type=scorm 可过滤 SCORM）."""
     arguments: dict[str, Any] = {
         "page": page,
         "page_size": page_size,
+        "fetch_all": fetch_all,
         "media_type": "videoweike",
         "ext_type": "scorm",
     }
@@ -147,10 +149,15 @@ async def list_document_resources(
     ctx: SkillContext,
     page: int = 1,
     page_size: int = 20,
+    fetch_all: bool = False,
     search_keyword: str | None = None,
 ) -> dict[str, Any]:
     """列出文档资源."""
-    arguments: dict[str, Any] = {"page": page, "page_size": page_size}
+    arguments: dict[str, Any] = {
+        "page": page,
+        "page_size": page_size,
+        "fetch_all": fetch_all,
+    }
     if search_keyword:
         arguments["search_keyword"] = search_keyword
 
@@ -176,10 +183,15 @@ async def list_video_resources(
     ctx: SkillContext,
     page: int = 1,
     page_size: int = 20,
+    fetch_all: bool = False,
     search_keyword: str | None = None,
 ) -> dict[str, Any]:
     """列出音视频资源."""
-    arguments: dict[str, Any] = {"page": page, "page_size": page_size}
+    arguments: dict[str, Any] = {
+        "page": page,
+        "page_size": page_size,
+        "fetch_all": fetch_all,
+    }
     if search_keyword:
         arguments["search_keyword"] = search_keyword
 

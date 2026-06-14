@@ -29,7 +29,7 @@ from pydantic import Field
 
 from ...core.client import UMUClient
 from ...core.credential_loader import CredentialSource, load_credentials_with_source
-from .utils import format_login_summary, get_login_identity
+from .utils import format_login_summary, get_login_identity, report_pagination_progress
 from . import prompts
 from .batch import AccountImporter, AccountSource, BatchExecutor
 from .session import SessionManager
@@ -850,6 +850,10 @@ async def stu_get_my_courses(
         int,
         Field(default=20, description="每页数量，默认20"),
     ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
+    ] = False,
     session_id: Annotated[
         str | None,
         Field(
@@ -868,52 +872,125 @@ async def stu_get_my_courses(
     获取 group_id 后，可调用 stu_get_course_structure 获取课程详情。
     """
     client = _get_client(session_id)
-    courses: list[dict[str, Any]] = []
 
-    # 尝试多个可能的 API 端点
-    endpoints = [
-        client.desktop_url(f"/uapi/v1/course/list-my-course?page={page}&size={page_size}"),
-        client.mobile_url(f"/uapi/v2/course/list-my-course?page={page}&size={page_size}"),
-        client.desktop_url(f"/uapi/v1/course/my-courses?page={page}&size={page_size}"),
-    ]
+    def _format_course(c: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "group_id": str(c.get("group_id", c.get("id", ""))),
+            "title": c.get("title", ""),
+            "cover_url": c.get("cover_url", c.get("cover", "")),
+            "status": c.get("status", ""),
+            "is_finished": c.get("is_finished", False),
+            "complete_rate": c.get("complete_rate", 0),
+        }
 
-    last_error = ""
-    for url in endpoints:
-        try:
-            r = client.get(url)
-            if r.get("error_code") == 0:
-                data = r.get("data", {})
-                items = data.get("list", []) if isinstance(data, dict) else data
-                for c in items:
-                    courses.append({
-                        "group_id": str(c.get("group_id", c.get("id", ""))),
-                        "title": c.get("title", ""),
-                        "cover_url": c.get("cover_url", c.get("cover", "")),
-                        "status": c.get("status", ""),
-                        "is_finished": c.get("is_finished", False),
-                        "complete_rate": c.get("complete_rate", 0),
-                    })
-                return _ok(
-                    data={
-                        "total": len(courses),
-                        "page": page,
-                        "page_size": page_size,
-                        "courses": courses,
-                    },
-                    next_action="proceed",
-                    suggested_action="选择要学习的课程，调用 stu_get_course_structure 获取详情",
+    def _fetch_page(
+        p: int, sz: int, preferred_endpoint: str | None = None
+    ) -> tuple[list[dict[str, Any]], int, str | None]:
+        """Fetch a single page. Returns (courses, total_all, successful_endpoint)."""
+        if preferred_endpoint:
+            endpoints_to_try = [preferred_endpoint]
+        else:
+            endpoints_to_try = [
+                client.desktop_url(f"/uapi/v1/course/list-my-course?page={p}&size={sz}"),
+                client.mobile_url(f"/uapi/v2/course/list-my-course?page={p}&size={sz}"),
+                client.desktop_url(f"/uapi/v1/course/my-courses?page={p}&size={sz}"),
+            ]
+
+        last_error = ""
+        for url in endpoints_to_try:
+            try:
+                r = client.get(url)
+                if r.get("error_code") == 0:
+                    data = r.get("data", {})
+                    items = data.get("list", []) if isinstance(data, dict) else data
+                    courses = [_format_course(c) for c in items]
+                    page_info = data.get("page_info", {}) if isinstance(data, dict) else {}
+                    total_all = int(page_info.get("list_total_num", 0) or 0)
+                    return courses, total_all, url
+                else:
+                    last_error = r.get("message", "未知错误")
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        raise RuntimeError(f"无法获取课程列表: {last_error}")
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_courses: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+            successful_endpoint: str | None = None
+
+            while True:
+                page_courses, total_all, successful_endpoint = _fetch_page(
+                    current_page, batch_size, successful_endpoint
                 )
-            else:
-                last_error = r.get("message", "未知错误")
-        except Exception as e:
-            last_error = str(e)
-            continue
+                all_courses.extend(page_courses)
 
-    return _err(
-        error_code="FETCH_MY_COURSES_FAILED",
-        error_message=f"无法获取课程列表: {last_error}",
-        suggested_action="检查网络连接和认证状态，或确认 API 端点是否正确",
-    )
+                report_pagination_progress(
+                    "stu_get_my_courses",
+                    current_page,
+                    len(all_courses),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_courses or len(all_courses) >= total_all:
+                    report_pagination_progress(
+                        "stu_get_my_courses",
+                        current_page,
+                        len(all_courses),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "stu_get_my_courses",
+                        current_page,
+                        len(all_courses),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    break
+
+                current_page += 1
+
+            return _ok(
+                data={
+                    "total": total_all,
+                    "page": current_page,
+                    "page_size": batch_size,
+                    "courses": all_courses,
+                },
+                next_action="proceed",
+                suggested_action="选择要学习的课程，调用 stu_get_course_structure 获取详情",
+            )
+
+        # Single-page mode (original behavior)
+        courses, total_all, _ = _fetch_page(page, page_size)
+        return _ok(
+            data={
+                "total": total_all,
+                "page": page,
+                "page_size": page_size,
+                "courses": courses,
+            },
+            next_action="proceed",
+            suggested_action="选择要学习的课程，调用 stu_get_course_structure 获取详情",
+        )
+
+    except Exception as e:
+        return _err(
+            error_code="FETCH_MY_COURSES_FAILED",
+            error_message=str(e),
+            suggested_action="检查网络连接和认证状态，或确认 API 端点是否正确",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -3663,6 +3740,10 @@ async def stu_list_participated_courses(
         int,
         Field(default=0, ge=0, le=3, description="学习状态筛选：0=所有, 1=已学习, 2=学习中, 3=待学习"),
     ] = 0,
+    fetch_all: Annotated[
+        bool,
+        Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
+    ] = False,
     session_id: Annotated[
         str | None,
         Field(default=None, description="可选的会话 ID"),
@@ -3688,45 +3769,107 @@ async def stu_list_participated_courses(
             suggested_action="调用 stu_login 完成登录后再重试",
         )
 
-    try:
+    status_map = {0: "all", 1: "pending", 2: "learning", 3: "completed"}
+
+    def _format_item(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "group_id": item.get("group_id", ""),
+            "title": item.get("group_title", ""),
+            "learn_status": item.get("learn_status", 0),
+            "learn_status_label": status_map.get(item.get("learn_status", 0), "unknown"),
+            "finish_ratio": item.get("finish_ratio", 0),
+            "cover_url": item.get("show_pic", ""),
+            "access_code": item.get("access_code", ""),
+            "group_url": item.get("group_url", ""),
+            "share_pc_url": item.get("share_pc_url", ""),
+            "session_num": item.get("session_num", 0),
+            "participant_time": item.get("participant_time", ""),
+        }
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         resp = client.get(
             client.desktop_url("/api/group/getmyparticipatedgrouplist"),
             params={
                 "t": str(int(time.time() * 1000)),
                 "learn_status": str(learn_status),
-                "page": str(page),
-                "size": str(page_size),
+                "page": str(p),
+                "size": str(sz),
             },
         )
 
         if resp.get("status") is not True and resp.get("error_code") != 0:
-            return _err(
-                error_code="LIST_PARTICIPATED_COURSES_FAILED",
-                error_message=resp.get("error", "获取已参与课程列表失败"),
-                suggested_action="请检查登录状态是否正确",
-            )
+            raise RuntimeError(resp.get("error", "获取已参与课程列表失败"))
 
         data = resp.get("data", {})
         page_info = data.get("page_info", {})
         course_list = data.get("list", [])
 
-        status_map = {0: "all", 1: "pending", 2: "learning", 3: "completed"}
+        formatted_list = [_format_item(item) for item in course_list]
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return formatted_list, total_all
 
-        formatted_list = []
-        for item in course_list:
-            formatted_list.append({
-                "group_id": item.get("group_id", ""),
-                "title": item.get("group_title", ""),
-                "learn_status": item.get("learn_status", 0),
-                "learn_status_label": status_map.get(item.get("learn_status", 0), "unknown"),
-                "finish_ratio": item.get("finish_ratio", 0),
-                "cover_url": item.get("show_pic", ""),
-                "access_code": item.get("access_code", ""),
-                "group_url": item.get("group_url", ""),
-                "share_pc_url": item.get("share_pc_url", ""),
-                "session_num": item.get("session_num", 0),
-                "participant_time": item.get("participant_time", ""),
-            })
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+
+            while True:
+                page_items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(page_items)
+
+                report_pagination_progress(
+                    "stu_list_participated_courses",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_items) >= total_all:
+                    report_pagination_progress(
+                        "stu_list_participated_courses",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "stu_list_participated_courses",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    break
+
+                current_page += 1
+
+            return _ok(
+                data={
+                    "courses": all_items,
+                    "filter": {
+                        "learn_status": learn_status,
+                        "learn_status_label": status_map.get(learn_status, "unknown"),
+                    },
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="选择要学习的课程，调用 stu_get_course_structure 获取详情",
+            )
+
+        # Single-page mode (original behavior)
+        formatted_list, total_all = _fetch_page(page, page_size)
 
         return _ok(
             data={
@@ -3736,10 +3879,10 @@ async def stu_list_participated_courses(
                     "learn_status_label": status_map.get(learn_status, "unknown"),
                 },
                 "pagination": {
-                    "total": int(page_info.get("list_total_num", 0) or 0),
-                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
-                    "current_page": int(page_info.get("current_page", 1) or 1),
-                    "page_size": int(page_info.get("size", page_size) or page_size),
+                    "total": total_all,
+                    "total_pages": 0,
+                    "current_page": page,
+                    "page_size": page_size,
                 },
             },
             next_action="proceed",

@@ -94,7 +94,11 @@ class TestStudentLearning:
         parsed = json.loads(result)
         assert parsed["success"] is True
         assert mock_mcp.calls == [
-            ("student", "stu_get_my_courses", {"page": 1, "page_size": 10}),
+            (
+                "student",
+                "stu_get_my_courses",
+                {"page": 1, "page_size": 10, "fetch_all": False},
+            ),
         ]
 
     async def test_complete_browse_lesson(self, registry_with_student_skills: SkillRegistry) -> None:
