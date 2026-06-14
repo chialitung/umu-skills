@@ -5,7 +5,7 @@
 1. pyproject.toml 的 version 必须与 CHANGELOG.md 最新小节版本一致。
 2. README.md 中声明的管理员/教师/学生工具数量必须与代码中实际数量一致。
 3. README.md 中声明的内置 Skill 总数必须与代码中实际数量一致。
-4. README.md 中功能特性和角色说明里的管理员能力描述必须包含"课程审核"。
+4. README.md 中功能特性和角色说明里的管理员能力描述必须覆盖 `ADMIN_CAPABILITY_KEYWORDS` 中声明的当前能力域。
 
 该脚本是阻塞项：未通过前不得执行 release commit 和推送。
 """
@@ -18,6 +18,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+
+# 当前 Admin 能力域关键词表。
+# 当新增 Admin 能力域时，应在此补充对应中文关键词，并在 README.md 中同步描述。
+# 本表是发布就绪检查的显式契约：README 管理员描述至少应覆盖这些能力。
+ADMIN_CAPABILITY_KEYWORDS: list[str] = [
+    "课程审核",
+]
 
 
 def fail(message: str) -> None:
@@ -123,8 +130,8 @@ def extract_readme_counts() -> dict[str, int]:
     return counts
 
 
-def check_admin_capability_mentioned() -> None:
-    """检查 README.md 中管理员能力描述是否包含课程审核."""
+def check_admin_capabilities_mentioned() -> None:
+    """检查 README.md 中管理员能力描述是否覆盖当前能力域."""
     path = ROOT / "README.md"
     text = path.read_text(encoding="utf-8")
 
@@ -136,11 +143,6 @@ def check_admin_capability_mentioned() -> None:
     )
     if feature_match:
         admin_desc = feature_match.group(1)
-        if "课程审核" not in admin_desc:
-            fail(
-                "README.md 功能特性中管理员描述缺少'课程审核'，"
-                f"当前为：{admin_desc}"
-            )
     else:
         fail("README.md 中未找到功能特性里的管理员描述")
 
@@ -153,15 +155,18 @@ def check_admin_capability_mentioned() -> None:
     )
     if role_match:
         admin_role = role_match.group(1).strip()
-        if "课程审核" not in admin_role:
-            fail(
-                "README.md 角色说明中 Admin 描述缺少'课程审核'，"
-                f"当前为：{admin_role}"
-            )
     else:
         fail("README.md 中未找到角色说明里的 Admin 描述")
 
     assert role_match is not None
+
+    combined = admin_desc + admin_role
+    missing = [kw for kw in ADMIN_CAPABILITY_KEYWORDS if kw not in combined]
+    if missing:
+        fail(
+            "README.md 管理员能力描述缺少以下关键词，请同步更新："
+            f"{', '.join(missing)}"
+        )
 
 
 def main() -> int:
@@ -207,8 +212,8 @@ def main() -> int:
     info(f"Skill 数量一致：{actual_skill_count}")
 
     # 4. 能力描述检查
-    check_admin_capability_mentioned()
-    info("README.md 管理员能力描述包含'课程审核'")
+    check_admin_capabilities_mentioned()
+    info(f"README.md 管理员能力描述覆盖：{', '.join(ADMIN_CAPABILITY_KEYWORDS)}")
 
     print("\n[PASS] 所有发布就绪检查通过，可以继续执行 release commit。")
     return 0
