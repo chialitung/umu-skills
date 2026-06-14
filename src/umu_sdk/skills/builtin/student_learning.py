@@ -54,12 +54,17 @@ async def list_my_courses_student(
     ctx: SkillContext,
     page: int = 1,
     page_size: int = 20,
+    fetch_all: bool = False,
 ) -> dict[str, Any]:
     """列出我的课程."""
     result = await ctx.call_tool(
         server="student",
         tool="stu_get_my_courses",
-        arguments={"page": page, "page_size": page_size},
+        arguments={
+            "page": page,
+            "page_size": page_size,
+            "fetch_all": fetch_all,
+        },
     )
 
     if not result["success"]:

@@ -127,7 +127,13 @@ class TestTeacherResources:
             (
                 "teacher",
                 "tch_list_resources",
-                {"page": 1, "page_size": 10, "media_type": "videoweike", "ext_type": "scorm"},
+                {
+                    "page": 1,
+                    "page_size": 10,
+                    "fetch_all": False,
+                    "media_type": "videoweike",
+                    "ext_type": "scorm",
+                },
             ),
         ]
 
@@ -143,7 +149,16 @@ class TestTeacherResources:
         parsed = json.loads(result)
         assert parsed["success"] is True
         assert mock_mcp.calls == [
-            ("teacher", "tch_list_documents", {"page": 1, "page_size": 20, "search_keyword": "test"}),
+            (
+                "teacher",
+                "tch_list_documents",
+                {
+                    "page": 1,
+                    "page_size": 20,
+                    "fetch_all": False,
+                    "search_keyword": "test",
+                },
+            ),
         ]
 
     async def test_list_video_resources(self, registry_with_teacher_skills: SkillRegistry) -> None:
@@ -158,7 +173,11 @@ class TestTeacherResources:
         parsed = json.loads(result)
         assert parsed["success"] is True
         assert mock_mcp.calls == [
-            ("teacher", "tch_list_audio_videos", {"page": 2, "page_size": 20}),
+            (
+                "teacher",
+                "tch_list_audio_videos",
+                {"page": 2, "page_size": 20, "fetch_all": False},
+            ),
         ]
 
 
@@ -326,7 +345,16 @@ class TestTeacherCourses:
         parsed = json.loads(result)
         assert parsed["success"] is True
         assert mock_mcp.calls == [
-            ("teacher", "tch_list_created_courses", {"page": 1, "page_size": 10, "order": "update_time"}),
+            (
+                "teacher",
+                "tch_list_created_courses",
+                {
+                    "page": 1,
+                    "page_size": 10,
+                    "fetch_all": False,
+                    "order": "update_time",
+                },
+            ),
         ]
 
     async def test_submit_course_for_audit(self, registry_with_teacher_skills: SkillRegistry) -> None:

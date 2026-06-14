@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import sys
 from io import StringIO
+from unittest.mock import patch
 
 import pytest
 
@@ -55,10 +56,15 @@ class TestReportPaginationProgress:
         assert "%" not in output
 
     def test_output_goes_to_stderr_by_default(self) -> None:
-        """默认 file 参数应为 sys.stderr."""
+        """未传入 file 时默认应为 None，运行时解析为当前 sys.stderr."""
         sig = inspect.signature(report_pagination_progress)
         default = sig.parameters["file"].default
-        assert default is sys.stderr
+        assert default is None
+
+        stderr = StringIO()
+        with patch.object(sys, "stderr", stderr):
+            report_pagination_progress("adm_test", 1, 0, 0, 20)
+        assert "0 / 0 条" in stderr.getvalue()
 
     def test_fetched_exceeds_total_caps_percentage(self) -> None:
         """已获取数超过总数时百分比应封顶在 100%."""

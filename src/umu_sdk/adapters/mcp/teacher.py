@@ -1282,13 +1282,13 @@ async def tch_list_resources(
             )
 
         # Single-page mode (original behavior)
-        formatted_list, _ = _fetch_page(page, page_size)
+        formatted_list, total_all = _fetch_page(page, page_size)
 
         return _ok(
             data={
                 "resources": formatted_list,
                 "pagination": {
-                    "total": 0,
+                    "total": total_all,
                     "total_pages": 0,
                     "current_page": page,
                     "page_size": page_size,
@@ -1301,7 +1301,7 @@ async def tch_list_resources(
     except Exception as e:
         logger.exception("查询资源列表失败")
         return _err(
-            error_code="LIST_RESOURCES_ERROR",
+            error_code="LIST_RESOURCES_FAILED",
             error_message=str(e),
             suggested_action="请检查网络连接后重试",
         )

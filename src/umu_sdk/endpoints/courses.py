@@ -9,6 +9,9 @@
 后续根据 Phase 2 分析结果填充具体端点.
 """
 
+from __future__ import annotations
+
+import sys
 
 import httpx
 
@@ -170,6 +173,7 @@ class CourseEndpoint:
         """
         all_courses: list[Course] = []
         page = 1
+        total_all = 0
 
         while True:
             query_params = params or ListCoursesParams()
@@ -177,9 +181,41 @@ class CourseEndpoint:
 
             result = self.list(query)
             all_courses.extend([Course(**item) for item in result.data])
+            total_all = result.total
+
+            # 控制台进度提示（输出到 stderr，避免干扰 MCP stdio 协议）
+            progress_pct = ""
+            if total_all > 0:
+                pct = min(100, int(len(all_courses) / total_all * 100))
+                progress_pct = f" ({pct}%)"
+            if total_all > 0 and page == 1:
+                estimated_pages = max(1, (total_all + page_size - 1) // page_size)
+                print(
+                    f"[CourseEndpoint.iterate_all] 共 {total_all} 条，"
+                    f"预计 {estimated_pages} 页",
+                    file=sys.stderr,
+                )
+            print(
+                f"[CourseEndpoint.iterate_all] 已获取第 {page} 页，"
+                f"累计 {len(all_courses)} / {total_all} 条{progress_pct}",
+                file=sys.stderr,
+            )
 
             if page >= result.total_pages:
+                print(
+                    f"[CourseEndpoint.iterate_all] 获取完成，"
+                    f"共 {len(all_courses)} 条，合计 {page} 页",
+                    file=sys.stderr,
+                )
                 break
             page += 1
+            # 安全上限：最多 50 页
+            if page > 50:
+                print(
+                    f"[CourseEndpoint.iterate_all] 警告：达到 50 页安全上限，停止获取"
+                    f"（已获取 {len(all_courses)} 条）",
+                    file=sys.stderr,
+                )
+                break
 
         return all_courses

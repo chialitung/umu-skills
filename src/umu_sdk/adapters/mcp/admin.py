@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Annotated, Any, AsyncIterator
@@ -6796,13 +6795,13 @@ async def adm_list_course_blacklist(
                 report_pagination_progress(
                     "adm_list_course_blacklist",
                     current_page,
-                    len(all_blacklist),
+                    len(all_entries),
                     total_all,
                     15,
-                    is_complete=len(all_blacklist) >= total_all or not blacklist,
+                    is_complete=len(all_entries) >= total_all or not entries,
                 )
 
-                if len(all_blacklist) >= total_all or not blacklist:
+                if len(all_entries) >= total_all or not entries:
                     break
                 current_page += 1
                 # 安全上限：最多 50 页
@@ -6810,7 +6809,7 @@ async def adm_list_course_blacklist(
                     report_pagination_progress(
                         "adm_list_course_blacklist",
                         current_page,
-                        len(all_blacklist),
+                        len(all_entries),
                         total_all,
                         15,
                         is_safety_limit=True,

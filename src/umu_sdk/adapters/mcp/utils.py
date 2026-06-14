@@ -65,7 +65,7 @@ def report_pagination_progress(
     *,
     is_complete: bool = False,
     is_safety_limit: bool = False,
-    file: Any = sys.stderr,
+    file: Any | None = None,
 ) -> None:
     """打印分页进度到 stderr（遵循 CLAUDE.md 分页进度上报规则）.
 
@@ -77,8 +77,11 @@ def report_pagination_progress(
         batch_size: 每页条数。
         is_complete: 为 True 时打印完成提示。
         is_safety_limit: 为 True 时打印 50 页安全上限警告。
-        file: 输出目标，默认 sys.stderr。
+        file: 输出目标，默认 None 表示使用当前 sys.stderr。
     """
+    if file is None:
+        file = sys.stderr
+
     prefix = f"[{tool_name}]"
 
     if is_complete:
