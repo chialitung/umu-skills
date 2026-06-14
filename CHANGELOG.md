@@ -32,7 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `adapters/mcp/utils.py` 新增共享辅助函数 `report_pagination_progress`，统一所有分页进度输出
-- `README.md` 功能特性补充自动分页与全量获取说明
 
 ## [0.11.0] - 2026-06-14
 
