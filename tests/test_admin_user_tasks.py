@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
+from umu_sdk.adapters.mcp.admin import (
+    _resolve_department_names,
+    _resolve_group_names,
+    _resolve_class_names_all,
+    _resolve_user_keywords,
+)
 from umu_sdk.core.admin_models import (
     UserTaskRaw,
     UserTask,
@@ -12,6 +20,15 @@ from umu_sdk.core.admin_models import (
     UserTaskListData,
     UserTaskListResponse,
 )
+
+
+@pytest.fixture
+def mock_client():
+    """创建模拟的已认证 UMUClient."""
+    client = MagicMock()
+    client.auth.is_authenticated.return_value = True
+    client.desktop_url.side_effect = lambda path: f"https://www.umu.cn{path}"
+    return client
 
 
 @pytest.fixture
@@ -311,3 +328,301 @@ class TestUserTaskListResponse:
         assert response.success is False
         assert response.error_code == "LIST_USER_TASKS_ERROR"
         assert response.next_action == "needs_user_input"
+
+
+class TestResolveDepartmentNames:
+    """测试 _resolve_department_names 辅助函数."""
+
+    @pytest.mark.asyncio
+    async def test_resolves_single_match(self, mock_client):
+        """单个匹配时返回部门 ID 列表."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {
+                "department_list": [
+                    {
+                        "department_id": "1001",
+                        "department_name": "技术部",
+                        "child_path": [],
+                    },
+                ],
+            },
+        }
+        ids = await _resolve_department_names(mock_client, "技术")
+        assert ids == ["1001"]
+        call_url = mock_client.get.call_args[0][0]
+        assert "/uapi/v1/department/get-departments-by-managerid" in call_url
+
+    @pytest.mark.asyncio
+    async def test_resolves_multiple_keywords(self, mock_client):
+        """多个关键词匹配时返回所有匹配的 ID."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {
+                "department_list": [
+                    {
+                        "department_id": "1001",
+                        "department_name": "技术部",
+                        "child_path": [],
+                    },
+                    {
+                        "department_id": "1002",
+                        "department_name": "销售部",
+                        "child_path": [],
+                    },
+                ],
+            },
+        }
+        ids = await _resolve_department_names(mock_client, "技术, 销售")
+        assert "1001" in ids
+        assert "1002" in ids
+
+    @pytest.mark.asyncio
+    async def test_recursive_child_departments(self, mock_client):
+        """递归匹配子部门."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {
+                "department_list": [
+                    {
+                        "department_id": "1001",
+                        "department_name": "总部",
+                        "child_path": [
+                            {
+                                "department_id": "1003",
+                                "department_name": "前端组",
+                                "child_path": [],
+                            },
+                        ],
+                    },
+                ],
+            },
+        }
+        ids = await _resolve_department_names(mock_client, "前端")
+        assert ids == ["1003"]
+
+    @pytest.mark.asyncio
+    async def test_no_match_returns_none(self, mock_client):
+        """无匹配时返回 None."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {"department_list": []},
+        }
+        ids = await _resolve_department_names(mock_client, "不存在")
+        assert ids is None
+
+    @pytest.mark.asyncio
+    async def test_empty_input_returns_none(self, mock_client):
+        """空输入时返回 None."""
+        ids = await _resolve_department_names(mock_client, "  ,  ")
+        assert ids is None
+
+    @pytest.mark.asyncio
+    async def test_api_error_raises(self, mock_client):
+        """接口失败时抛出 RuntimeError."""
+        mock_client.get.return_value = {
+            "error_code": 500,
+            "error_message": "服务器错误",
+        }
+        with pytest.raises(RuntimeError, match="查询部门列表失败"):
+            await _resolve_department_names(mock_client, "技术")
+
+
+class TestResolveGroupNames:
+    """测试 _resolve_group_names 辅助函数."""
+
+    @pytest.mark.asyncio
+    async def test_resolves_single_match(self, mock_client):
+        """单个匹配时返回分组 ID 列表."""
+        mock_client.get.return_value = {
+            "status": True,
+            "error_code": 0,
+            "data": {
+                "list": [
+                    {"id": "2001", "group_name": "新员工分组"},
+                ],
+                "total": 1,
+            },
+        }
+        ids = await _resolve_group_names(mock_client, "新员工")
+        assert ids == ["2001"]
+        call_url = mock_client.get.call_args[0][0]
+        assert "/ajax/enterprise/getGroupList" in call_url
+
+    @pytest.mark.asyncio
+    async def test_pagination_fetches_all(self, mock_client):
+        """分页拉取全部数据."""
+        responses = [
+            {
+                "status": True,
+                "error_code": 0,
+                "data": {
+                    "list": [
+                        {"id": "2001", "group_name": "分组A"},
+                    ],
+                    "total": 2,
+                },
+            },
+            {
+                "status": True,
+                "error_code": 0,
+                "data": {
+                    "list": [
+                        {"id": "2002", "group_name": "分组B"},
+                    ],
+                    "total": 2,
+                },
+            },
+        ]
+        mock_client.get.side_effect = responses
+        ids = await _resolve_group_names(mock_client, "分组")
+        assert "2001" in ids
+        assert "2002" in ids
+        assert mock_client.get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_match_returns_none(self, mock_client):
+        """无匹配时返回 None."""
+        mock_client.get.return_value = {
+            "status": True,
+            "error_code": 0,
+            "data": {"list": [], "total": 0},
+        }
+        ids = await _resolve_group_names(mock_client, "不存在")
+        assert ids is None
+
+    @pytest.mark.asyncio
+    async def test_api_error_raises(self, mock_client):
+        """接口失败时抛出 RuntimeError."""
+        mock_client.get.return_value = {
+            "status": False,
+            "error_code": 500,
+            "error": "服务器错误",
+        }
+        with pytest.raises(RuntimeError, match="查询分组列表失败"):
+            await _resolve_group_names(mock_client, "分组")
+
+
+class TestResolveClassNamesAll:
+    """测试 _resolve_class_names_all 辅助函数."""
+
+    @pytest.mark.asyncio
+    async def test_resolves_single_match(self, mock_client):
+        """单个匹配时返回班级 ID 列表."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {
+                "list": [
+                    {"id": "3001", "name": "复仇者联盟"},
+                ],
+                "total": 1,
+            },
+        }
+        ids = await _resolve_class_names_all(mock_client, "复仇者")
+        assert ids == ["3001"]
+        call_url = mock_client.get.call_args[0][0]
+        assert "/uapi/v1/enterprise/class-list" in call_url
+
+    @pytest.mark.asyncio
+    async def test_pagination_fetches_all(self, mock_client):
+        """分页拉取全部数据."""
+        responses = [
+            {
+                "error_code": 0,
+                "data": {
+                    "list": [
+                        {"id": "3001", "name": "班级A"},
+                    ],
+                    "total": 2,
+                },
+            },
+            {
+                "error_code": 0,
+                "data": {
+                    "list": [
+                        {"id": "3002", "name": "班级B"},
+                    ],
+                    "total": 2,
+                },
+            },
+        ]
+        mock_client.get.side_effect = responses
+        ids = await _resolve_class_names_all(mock_client, "班级")
+        assert "3001" in ids
+        assert "3002" in ids
+        assert mock_client.get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_match_returns_none(self, mock_client):
+        """无匹配时返回 None."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {"list": [], "total": 0},
+        }
+        ids = await _resolve_class_names_all(mock_client, "不存在")
+        assert ids is None
+
+    @pytest.mark.asyncio
+    async def test_api_error_raises(self, mock_client):
+        """接口失败时抛出 RuntimeError."""
+        mock_client.get.return_value = {
+            "error_code": 500,
+            "error_message": "服务器错误",
+        }
+        with pytest.raises(RuntimeError, match="查询班级列表失败"):
+            await _resolve_class_names_all(mock_client, "班级")
+
+
+class TestResolveUserKeywords:
+    """测试 _resolve_user_keywords 辅助函数."""
+
+    @pytest.mark.asyncio
+    async def test_resolves_single_match(self, mock_client):
+        """单个匹配时返回 umu_id 列表."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {
+                "list": [
+                    {"umu_id": "20439812", "user_name": "张三"},
+                ],
+            },
+        }
+        ids = await _resolve_user_keywords(mock_client, "张三")
+        assert ids == ["20439812"]
+        call_url = mock_client.get.call_args[0][0]
+        assert "/uapi/v1/enterprise/search-user" in call_url
+
+    @pytest.mark.asyncio
+    async def test_resolves_multiple_matches(self, mock_client):
+        """多个匹配时返回多个 umu_id."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {
+                "list": [
+                    {"umu_id": "20439812", "user_name": "张三"},
+                    {"umu_id": "20439813", "user_name": "张三丰"},
+                ],
+            },
+        }
+        ids = await _resolve_user_keywords(mock_client, "张")
+        assert ids == ["20439812", "20439813"]
+
+    @pytest.mark.asyncio
+    async def test_no_match_returns_none(self, mock_client):
+        """无匹配时返回 None."""
+        mock_client.get.return_value = {
+            "error_code": 0,
+            "data": {"list": []},
+        }
+        ids = await _resolve_user_keywords(mock_client, "不存在")
+        assert ids is None
+
+    @pytest.mark.asyncio
+    async def test_api_error_raises(self, mock_client):
+        """接口失败时抛出 RuntimeError."""
+        mock_client.get.return_value = {
+            "error_code": 500,
+            "error_message": "服务器错误",
+        }
+        with pytest.raises(RuntimeError, match="搜索用户失败"):
+            await _resolve_user_keywords(mock_client, "张三")

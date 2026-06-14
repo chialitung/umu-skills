@@ -658,13 +658,9 @@ def _build_learning_records_search_condition(
     if course_title:
         condition["group_title"] = course_title
     if department_ids:
-        condition["department_ids"] = [
-            d.strip() for d in department_ids.split(",") if d.strip()
-        ]
+        condition["department_ids"] = [d.strip() for d in department_ids.split(",") if d.strip()]
     if group_ids:
-        condition["enterprise_group_ids"] = [
-            g.strip() for g in group_ids.split(",") if g.strip()
-        ]
+        condition["enterprise_group_ids"] = [g.strip() for g in group_ids.split(",") if g.strip()]
     if class_ids:
         condition["class_ids"] = class_ids
 
@@ -754,6 +750,232 @@ async def _resolve_student_keywords(
         return None
 
     return [str(user.get("id", "")) for user in user_list if user.get("id")]
+
+
+async def _resolve_department_names(
+    client: UMUClient,
+    names: str,
+) -> list[str] | None:
+    """通过部门名称关键词搜索获取匹配的部门 IDs.
+
+    Args:
+        client: UMUClient 实例
+        names: 部门名称关键词，多个用逗号分隔
+
+    Returns:
+        匹配的部门 ID 列表，无匹配返回 None。
+
+    Raises:
+        RuntimeError: 部门接口返回错误。
+    """
+    keywords_list = [n.strip() for n in names.split(",") if n.strip()]
+    if not keywords_list:
+        return None
+
+    resp = client.get(
+        client.desktop_url("/uapi/v1/department/get-departments-by-managerid"),
+        params={
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "type": "2",
+        },
+    )
+
+    if resp.get("error_code") != 0:
+        msg = resp.get("error_message", "")
+        raise RuntimeError(f"查询部门列表失败: {msg}" if msg else "查询部门列表失败")
+
+    department_list = resp.get("data", {}).get("department_list", [])
+
+    def _walk_departments(depts: list[dict[str, Any]]) -> list[str]:
+        matched: list[str] = []
+        for dept in depts:
+            dept_name = (dept.get("department_name", "") or "").lower()
+            for kw in keywords_list:
+                if kw.lower() in dept_name:
+                    matched.append(str(dept.get("department_id", "")))
+                    break
+            # 递归检查子部门
+            children = dept.get("child_path", []) or []
+            if children:
+                matched.extend(_walk_departments(children))
+        return matched
+
+    matched_ids = _walk_departments(department_list)
+    if not matched_ids:
+        return None
+
+    # 去重并保持顺序
+    seen: set[str] = set()
+    unique_ids: list[str] = []
+    for did in matched_ids:
+        if did and did not in seen:
+            seen.add(did)
+            unique_ids.append(did)
+    return unique_ids
+
+
+async def _resolve_group_names(
+    client: UMUClient,
+    names: str,
+) -> list[str] | None:
+    """通过分组名称关键词搜索获取匹配的分组 IDs.
+
+    Args:
+        client: UMUClient 实例
+        names: 分组名称关键词，多个用逗号分隔
+
+    Returns:
+        匹配的分组 ID 列表，无匹配返回 None。
+
+    Raises:
+        RuntimeError: 分组接口返回错误。
+    """
+    keywords_list = [n.strip() for n in names.split(",") if n.strip()]
+    if not keywords_list:
+        return None
+
+    matched_ids: set[str] = set()
+    page = 1
+    max_pages = 50
+    page_size = 100
+    records_fetched = 0
+
+    while page <= max_pages:
+        resp = client.get(
+            client.desktop_url("/ajax/enterprise/getGroupList"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "page": str(page),
+                "size": str(page_size),
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            msg = resp.get("error", "")
+            raise RuntimeError(f"查询分组列表失败: {msg}" if msg else "查询分组列表失败")
+
+        group_list = resp.get("data", {}).get("list", [])
+        if not group_list:
+            break
+
+        for group in group_list:
+            group_name = (group.get("group_name", "") or "").lower()
+            for kw in keywords_list:
+                if kw.lower() in group_name:
+                    matched_ids.add(str(group.get("id", "")))
+                    break
+
+        records_fetched += len(group_list)
+        total = int(resp.get("data", {}).get("total", 0) or 0)
+        if total > 0 and records_fetched >= total:
+            break
+
+        page += 1
+
+    if not matched_ids:
+        return None
+    return list(matched_ids)
+
+
+async def _resolve_class_names_all(
+    client: UMUClient,
+    names: str,
+) -> list[str] | None:
+    """通过班级名称关键词搜索获取匹配的班级 IDs（全量翻页）.
+
+    Args:
+        client: UMUClient 实例
+        names: 班级名称关键词，多个用逗号分隔
+
+    Returns:
+        匹配的班级 ID 列表，无匹配返回 None。
+
+    Raises:
+        RuntimeError: class-list 接口返回错误。
+    """
+    keywords_list = [n.strip() for n in names.split(",") if n.strip()]
+    if not keywords_list:
+        return None
+
+    matched_ids: set[str] = set()
+    page = 1
+    max_pages = 50
+    page_size = 100
+    records_fetched = 0
+
+    while page <= max_pages:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/enterprise/class-list"),
+            params={
+                "t": str(int(datetime.now().timestamp() * 1000)),
+                "page": str(page),
+                "size": str(page_size),
+            },
+        )
+
+        if resp.get("error_code") != 0:
+            msg = resp.get("error_message", "")
+            raise RuntimeError(f"查询班级列表失败: {msg}" if msg else "查询班级列表失败")
+
+        class_list = resp.get("data", {}).get("list", [])
+        if not class_list:
+            break
+
+        for cls in class_list:
+            cls_name = (cls.get("name", "") or "").lower()
+            for kw in keywords_list:
+                if kw.lower() in cls_name:
+                    matched_ids.add(str(cls.get("id", "")))
+                    break
+
+        records_fetched += len(class_list)
+        total = int(resp.get("data", {}).get("total", 0) or 0)
+        if total > 0 and records_fetched >= total:
+            break
+
+        page += 1
+
+    if not matched_ids:
+        return None
+    return list(matched_ids)
+
+
+async def _resolve_user_keywords(
+    client: UMUClient,
+    keywords: str,
+) -> list[str] | None:
+    """通过用户关键词搜索获取匹配的 umu_id 列表.
+
+    Args:
+        client: UMUClient 实例
+        keywords: 用户姓名/邮箱/手机号/用户名关键词（单个）
+
+    Returns:
+        匹配的 umu_id 列表，无匹配返回 None。
+
+    Raises:
+        RuntimeError: search-user 接口返回错误。
+    """
+    resp = client.get(
+        client.desktop_url("/uapi/v1/enterprise/search-user"),
+        params={
+            "t": str(int(datetime.now().timestamp() * 1000)),
+            "keyword": keywords,
+            "condition": "",
+            "page": "1",
+            "size": "50",
+        },
+    )
+
+    if resp.get("error_code") != 0:
+        msg = resp.get("error_message", "")
+        raise RuntimeError(f"搜索用户失败: {msg}" if msg else "搜索用户失败")
+
+    user_list = resp.get("data", {}).get("list", [])
+    if not user_list:
+        return None
+
+    return [str(user.get("umu_id", "")) for user in user_list if user.get("umu_id")]
 
 
 @mcp.tool()
@@ -870,9 +1092,7 @@ async def adm_create_account(
         if precheck_resp.get("error_code") != 0:
             return _err(
                 error_code="PRECHECK_FAILED",
-                error_message=precheck_resp.get(
-                    "error_message", "预检未通过，参数可能不合法"
-                ),
+                error_message=precheck_resp.get("error_message", "预检未通过，参数可能不合法"),
                 suggested_action="检查邮箱是否已存在、角色权限是否足够，或员工号是否重复",
             )
         # data 不为 True 也表示预检不通过
@@ -1180,7 +1400,9 @@ async def adm_update_account(
     # manager_group_ids 角色校验
     # -----------------------------------------------------------------------
     if manager_group_ids is not None:
-        effective_role = role_type if role_type is not None else int(_get_current("role_type", 0) or 0)
+        effective_role = (
+            role_type if role_type is not None else int(_get_current("role_type", 0) or 0)
+        )
         if effective_role not in (3, 4, 5):
             return _err(
                 error_code="INVALID_MANAGER_ROLE",
@@ -1218,7 +1440,10 @@ async def adm_update_account(
         ]
         if current.get("departments")
         else [],
-        "groups": [{"id": str(g.get("id", "")), "name": g.get("group_name", "")} for g in current.get("members", [])]
+        "groups": [
+            {"id": str(g.get("id", "")), "name": g.get("group_name", "")}
+            for g in current.get("members", [])
+        ]
         if current.get("members")
         else [],
         "manager_groups": [
@@ -1287,7 +1512,10 @@ async def adm_update_account(
             precheck_failed = (
                 precheck_resp.get("error_code") != 0
                 or precheck_data is None
-                or (isinstance(precheck_data, dict) and precheck_data.get("res_code") not in (0, None))
+                or (
+                    isinstance(precheck_data, dict)
+                    and precheck_data.get("res_code") not in (0, None)
+                )
             )
             if precheck_failed:
                 return _err(
@@ -1428,7 +1656,10 @@ async def adm_update_account(
         ]
         if new_data.get("departments")
         else old_info["departments"],
-        "groups": [{"id": str(g.get("id", "")), "name": g.get("group_name", "")} for g in new_data.get("members", [])]
+        "groups": [
+            {"id": str(g.get("id", "")), "name": g.get("group_name", "")}
+            for g in new_data.get("members", [])
+        ]
         if new_data.get("members")
         else old_info["groups"],
         "manager_groups": [
@@ -1441,7 +1672,15 @@ async def adm_update_account(
 
     updated_fields = [
         field
-        for field in ("user_name", "email", "login_name", "phone", "number", "role_type", "platform_permission")
+        for field in (
+            "user_name",
+            "email",
+            "login_name",
+            "phone",
+            "number",
+            "role_type",
+            "platform_permission",
+        )
         if new_info[field] != old_info[field]
     ]
     if department_ids is not None:
@@ -1876,9 +2115,7 @@ async def adm_list_department_members(
             raise RuntimeError(resp.get("error_message", "获取部门成员失败"))
 
         member_list = resp.get("data", {}).get("list", [])
-        total_all = int(
-            resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0
-        )
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
 
         members: list[dict[str, Any]] = []
         for item in member_list:
@@ -2283,7 +2520,9 @@ async def adm_update_department(
 
     update_data: dict[str, Any] = {
         "department_id": department_id,
-        "department_name": department_name if department_name else current.get("department_name", ""),
+        "department_name": department_name
+        if department_name
+        else current.get("department_name", ""),
         "parent_department_id": (
             parent_department_id
             if parent_department_id is not None
@@ -2337,7 +2576,7 @@ async def adm_sort_departments(
         str,
         Field(
             description="部门排序列表，JSON 数组格式，如 "
-                        "'[{\"department_id\":\"297494\",\"index\":1},{\"department_id\":\"297481\",\"index\":2}]'"
+            '\'[{"department_id":"297494","index":1},{"department_id":"297481","index":2}]\''
         ),
     ],
     session_id: Annotated[
@@ -2374,7 +2613,7 @@ async def adm_sort_departments(
         return _err(
             error_code="INVALID_SORT_FORMAT",
             error_message=f"排序参数格式错误: {e}",
-            suggested_action="使用 JSON 数组格式，如 '[{\"department_id\":\"1\",\"index\":1}]'",
+            suggested_action='使用 JSON 数组格式，如 \'[{"department_id":"1","index":1}]\'',
         )
 
     try:
@@ -2566,7 +2805,7 @@ async def adm_remove_department_members(
         str,
         Field(
             description="要移除的成员 member_id 列表，多个用逗号分隔。"
-                        "member_id 可通过 adm_list_department_members 获取。",
+            "member_id 可通过 adm_list_department_members 获取。",
         ),
     ],
     session_id: Annotated[
@@ -2909,9 +3148,7 @@ def _normalize_group_user(user: dict[str, Any]) -> dict[str, Any]:
         "area_code": user.get("area_code", ""),
         "login_name": user.get("login_name", ""),
         "role_type": int(user.get("role_type", 0) or 0),
-        "role_name": _ROLE_TYPE_MAP.get(
-            int(user.get("role_type", 0) or 0), "未知"
-        ),
+        "role_name": _ROLE_TYPE_MAP.get(int(user.get("role_type", 0) or 0), "未知"),
         "manage_permission": int(user.get("manage_permission", 0) or 0),
     }
 
@@ -2971,9 +3208,7 @@ def _get_all_group_users(
     total_all = 0
 
     while True:
-        users, total_all = _fetch_group_users(
-            client, group_id, is_manager, current_page, page_size
-        )
+        users, total_all = _fetch_group_users(client, group_id, is_manager, current_page, page_size)
         all_users.extend(users)
 
         if len(all_users) >= total_all or not users:
@@ -3546,7 +3781,7 @@ async def adm_add_group_members(
                 ).strip("；"),
                 data=data,
                 suggested_action="检查账号角色权限或 umu_id 是否正确，"
-                                "必要时单独修复被误移除的管理员",
+                "必要时单独修复被误移除的管理员",
             )
 
         return _ok(
@@ -3739,8 +3974,7 @@ async def adm_add_group_managers(
                     f"原有成员被移除 {dropped_members}"
                 ).strip("；"),
                 data=data,
-                suggested_action="检查账号角色权限或 umu_id 是否正确，"
-                                "必要时单独修复被误移除的成员",
+                suggested_action="检查账号角色权限或 umu_id 是否正确，必要时单独修复被误移除的成员",
             )
 
         return _ok(
@@ -3872,7 +4106,7 @@ async def adm_list_accounts(
         Field(
             default="intersection",
             description='多分组关系："intersection"=交集（同时属于所有勾选的分组），'
-                        '"union"=并集（属于所勾选的任意一个分组）。',
+            '"union"=并集（属于所勾选的任意一个分组）。',
         ),
     ] = "intersection",
     role_type: Annotated[
@@ -3887,7 +4121,7 @@ async def adm_list_accounts(
         Field(
             default=None,
             description="状态筛选：0=待加入, 1=已启用, 2=已禁用, 3=定时禁用。"
-                        "注意：不同企业平台状态码映射可能不同，请以筛选结果为准。",
+            "注意：不同企业平台状态码映射可能不同，请以筛选结果为准。",
         ),
     ] = None,
     is_manager: Annotated[
@@ -3907,7 +4141,7 @@ async def adm_list_accounts(
         Field(
             default=False,
             description="是否自动获取全量数据。设为 True 时忽略 page/page_size，"
-                        "自动遍历所有分页并合并结果。",
+            "自动遍历所有分页并合并结果。",
         ),
     ] = False,
     session_id: Annotated[
@@ -3996,9 +4230,7 @@ async def adm_list_accounts(
                         "status_text": _get_status_text(status_code),
                         "is_active": user.get("is_active", ""),
                         "role_type": int(user.get("role_type", 0) or 0),
-                        "role_name": _ROLE_TYPE_MAP.get(
-                            int(user.get("role_type", 0) or 0), "未知"
-                        ),
+                        "role_name": _ROLE_TYPE_MAP.get(int(user.get("role_type", 0) or 0), "未知"),
                         "departments": user.get("departments", ""),
                         "account_joining_time": user.get("account_joining_time", 0),
                         "account_joining_time_readable": format_timestamp_beijing(
@@ -4015,9 +4247,7 @@ async def adm_list_accounts(
                     }
                 )
 
-        total_all = int(
-            resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0
-        )
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
         return accounts, total_all
 
     try:
@@ -4122,7 +4352,7 @@ async def adm_list_learning_records(
         Field(
             default=None,
             description="学员搜索关键词（姓名、邮箱、手机号、用户名）。"
-                        "提供时工具内部会自动调用 user-list 接口获取 uids 进行精确筛选。",
+            "提供时工具内部会自动调用 user-list 接口获取 uids 进行精确筛选。",
         ),
     ] = None,
     course_title: Annotated[
@@ -4158,7 +4388,7 @@ async def adm_list_learning_records(
         Field(
             default=None,
             description="班级名称关键词，多个用逗号分隔。提供时工具内部会自动调用 class-list 接口"
-                        "获取班级 IDs 进行精确筛选。",
+            "获取班级 IDs 进行精确筛选。",
         ),
     ] = None,
     page: Annotated[
@@ -4174,7 +4404,7 @@ async def adm_list_learning_records(
         Field(
             default=False,
             description="是否自动获取全量数据。设为 True 时忽略 page/page_size，"
-                        "自动遍历所有分页并合并结果。",
+            "自动遍历所有分页并合并结果。",
         ),
     ] = False,
     session_id: Annotated[
@@ -4309,9 +4539,7 @@ async def adm_list_learning_records(
                 # 如果个别记录字段异常，回退到原始字典构造逻辑，保证列表不中断
                 records.append(item)
 
-        total_all = int(
-            resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0
-        )
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
         return records, total_all
 
     try:
@@ -4410,7 +4638,7 @@ async def adm_list_classes(
         Field(
             default=False,
             description="是否自动获取全量数据。设为 True 时忽略 page/page_size，"
-                        "自动遍历所有分页并合并结果。",
+            "自动遍历所有分页并合并结果。",
         ),
     ] = False,
     session_id: Annotated[
@@ -4469,9 +4697,7 @@ async def adm_list_classes(
             except Exception:
                 classes.append(item)
 
-        total_all = int(
-            resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0
-        )
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
         return classes, total_all
 
     try:
@@ -4575,7 +4801,7 @@ async def adm_disable_account(
         Field(
             default=None,
             description='生效时间。留空或传 "immediate" 表示立即禁用；'
-                        '传日期时间如 "2026-06-12T09:00" 表示定时禁用（东八区）。',
+            '传日期时间如 "2026-06-12T09:00" 表示定时禁用（东八区）。',
         ),
     ] = None,
     session_id: Annotated[
@@ -4893,13 +5119,9 @@ async def adm_get_scheduled_disables(
                         "user_name": user.get("user_name", ""),
                         "email": user.get("email", ""),
                         "account_status": int(user.get("account_status", 0) or 0),
-                        "status_text": _get_status_text(
-                            int(user.get("account_status", 0) or 0)
-                        ),
+                        "status_text": _get_status_text(int(user.get("account_status", 0) or 0)),
                         "role_type": int(user.get("role_type", 0) or 0),
-                        "role_name": _ROLE_TYPE_MAP.get(
-                            int(user.get("role_type", 0) or 0), "未知"
-                        ),
+                        "role_name": _ROLE_TYPE_MAP.get(int(user.get("role_type", 0) or 0), "未知"),
                         "note": "定时禁用的具体生效时间请查看管理员后台或联系技术支持",
                     }
                 )
@@ -4931,8 +5153,8 @@ async def adm_batch_disable_accounts(
         Field(
             default=None,
             description='生效时间。留空或传 "immediate" 表示立即禁用；'
-                        '传日期时间如 "2026-06-12T09:00" 表示定时禁用（东八区）。'
-                        "所有账号使用相同的生效时间。",
+            '传日期时间如 "2026-06-12T09:00" 表示定时禁用（东八区）。'
+            "所有账号使用相同的生效时间。",
         ),
     ] = None,
     session_id: Annotated[
@@ -5182,7 +5404,7 @@ async def adm_list_courses(
         Field(
             default=None,
             description="课程搜索关键词（模糊匹配课程名称、标签、访问码），"
-                        "如 '数据分析'、'明星课程'、'btq943'。",
+            "如 '数据分析'、'明星课程'、'btq943'。",
         ),
     ] = None,
     owner_keywords: Annotated[
@@ -5190,23 +5412,21 @@ async def adm_list_courses(
         Field(
             default=None,
             description="课程创建人/拥有者搜索关键词（姓名、邮箱、手机号、用户名）。"
-                        "提供时工具内部会调用 user-list 接口解析为 uids。",
+            "提供时工具内部会调用 user-list 接口解析为 uids。",
         ),
     ] = None,
     owner_uids: Annotated[
         str | None,
         Field(
             default=None,
-            description="课程创建人/拥有者 UMU ID 列表，多个用逗号分隔。"
-                        "与 owner_keywords 二选一。",
+            description="课程创建人/拥有者 UMU ID 列表，多个用逗号分隔。与 owner_keywords 二选一。",
         ),
     ] = None,
     access_permission: Annotated[
         int | None,
         Field(
             default=None,
-            description="课程权限筛选：0=关闭，1=公开，2=企业内公开，3=指定账户。"
-                        "不提供则不筛选。",
+            description="课程权限筛选：0=关闭，1=公开，2=企业内公开，3=指定账户。不提供则不筛选。",
         ),
     ] = None,
     source: Annotated[
@@ -5214,7 +5434,7 @@ async def adm_list_courses(
         Field(
             default=None,
             description="课程来源筛选：'inner'=内部课程，'outer'=外部课程。"
-                        "通常与 access_permission 配合使用。",
+            "通常与 access_permission 配合使用。",
         ),
     ] = None,
     is_course_in_lib: Annotated[
@@ -5229,7 +5449,7 @@ async def adm_list_courses(
         Field(
             default=None,
             description="审核状态筛选：-1=未提交，0=待审核，1=已通过，2=已拒绝，3=已撤销。"
-                        "不提供则不筛选。",
+            "不提供则不筛选。",
         ),
     ] = None,
     start_day: Annotated[
@@ -5259,15 +5479,14 @@ async def adm_list_courses(
         Field(
             default=False,
             description="是否自动获取全量数据。设为 True 时忽略 page/page_size，"
-                        "自动遍历所有分页并合并结果。",
+            "自动遍历所有分页并合并结果。",
         ),
     ] = False,
     session_id: Annotated[
         str | None,
         Field(
             default=None,
-            description="可选的会话 ID。如果提供，在指定会话中执行；"
-                        "如果不提供，使用默认会话。",
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
         ),
     ] = None,
 ) -> str:
@@ -5315,9 +5534,7 @@ async def adm_list_courses(
     resolved_owner_uids: list[str] | None = None
     if owner_keywords:
         try:
-            resolved_owner_uids = await _resolve_course_owner_keywords(
-                client, owner_keywords
-            )
+            resolved_owner_uids = await _resolve_course_owner_keywords(client, owner_keywords)
         except Exception as e:
             return _err(
                 error_code="RESOLVE_OWNER_ERROR",
@@ -5391,9 +5608,7 @@ async def adm_list_courses(
                 # 如果个别课程字段异常，回退到原始字典构造逻辑，保证列表不中断
                 courses.append(item)
 
-        total_all = int(
-            resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0
-        )
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
         return courses, total_all
 
     try:
@@ -5486,7 +5701,7 @@ async def adm_list_learning_programs(
         Field(
             default=None,
             description="学习项目搜索关键词（模糊匹配项目名称、标签、访问码），"
-                        "如 '数据分析'、'新员工培训'、'crj556'。",
+            "如 '数据分析'、'新员工培训'、'crj556'。",
         ),
     ] = None,
     owner_keywords: Annotated[
@@ -5494,23 +5709,21 @@ async def adm_list_learning_programs(
         Field(
             default=None,
             description="项目创建人/拥有者搜索关键词（姓名、邮箱、手机号、用户名）。"
-                        "提供时工具内部会调用 user-list 接口解析为 uids。",
+            "提供时工具内部会调用 user-list 接口解析为 uids。",
         ),
     ] = None,
     owner_uids: Annotated[
         str | None,
         Field(
             default=None,
-            description="项目创建人/拥有者 UMU ID 列表，多个用逗号分隔。"
-                        "与 owner_keywords 二选一。",
+            description="项目创建人/拥有者 UMU ID 列表，多个用逗号分隔。与 owner_keywords 二选一。",
         ),
     ] = None,
     access_permission: Annotated[
         int | None,
         Field(
             default=None,
-            description="项目权限筛选：0=关闭，1=公开，2=企业内公开，3=指定账户。"
-                        "不提供则不筛选。",
+            description="项目权限筛选：0=关闭，1=公开，2=企业内公开，3=指定账户。不提供则不筛选。",
         ),
     ] = None,
     is_in_program_lib: Annotated[
@@ -5554,15 +5767,14 @@ async def adm_list_learning_programs(
         Field(
             default=False,
             description="是否自动获取全量数据。设为 True 时忽略 page/page_size，"
-                        "自动遍历所有分页并合并结果。",
+            "自动遍历所有分页并合并结果。",
         ),
     ] = False,
     session_id: Annotated[
         str | None,
         Field(
             default=None,
-            description="可选的会话 ID。如果提供，在指定会话中执行；"
-                        "如果不提供，使用默认会话。",
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
         ),
     ] = None,
 ) -> str:
@@ -5611,9 +5823,7 @@ async def adm_list_learning_programs(
     resolved_owner_uids: list[str] | None = None
     if owner_keywords:
         try:
-            resolved_owner_uids = await _resolve_course_owner_keywords(
-                client, owner_keywords
-            )
+            resolved_owner_uids = await _resolve_course_owner_keywords(client, owner_keywords)
         except Exception as e:
             return _err(
                 error_code="RESOLVE_OWNER_ERROR",
@@ -5685,9 +5895,7 @@ async def adm_list_learning_programs(
                 # 如果个别项目字段异常，回退到原始字典，保证列表不中断
                 programs.append(item)
 
-        total_all = int(
-            resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0
-        )
+        total_all = int(resp.get("data", {}).get("page_info", {}).get("list_total_num", 0) or 0)
         return programs, total_all
 
     try:
@@ -5776,6 +5984,7 @@ async def adm_list_learning_programs(
 # ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
+
 
 @mcp.prompt()
 def adm_account_management_guide() -> str:
