@@ -32,7 +32,7 @@ from pydantic import Field
 
 from ...core.client import UMUClient
 from ...core.credential_loader import CredentialSource, load_credentials_with_source
-from .utils import format_login_summary, get_login_identity
+from .utils import format_login_summary, get_login_identity, report_pagination_progress
 from ...core.admin_models import (
     AdminAccount,
     AdminAccountRaw,
@@ -2197,36 +2197,28 @@ async def adm_list_department_members(
                 members, total_all = _fetch_page(current_page, batch_size)
                 all_members.extend(members)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_members) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_department_members] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_department_members] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_members)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_department_members",
+                    current_page,
+                    len(all_members),
+                    total_all,
+                    page_size,
+                    is_complete=len(all_members) >= total_all or not members,
                 )
 
                 if len(all_members) >= total_all or not members:
-                    print(
-                        f"[adm_list_department_members] 获取完成，共 {len(all_members)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
+                # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_department_members] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_members)} 条）"
+                    report_pagination_progress(
+                        "adm_list_department_members",
+                        current_page,
+                        len(all_members),
+                        total_all,
+                        page_size,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -4301,34 +4293,28 @@ async def adm_list_accounts(
                 all_accounts.extend(accounts)
 
                 # 控制台进度提示（输出到 stderr，避免干扰 MCP stdio 协议）
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_accounts) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_accounts] 共 {total_all} 条，预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_accounts] 已获取第 {current_page} 页，累计 {len(all_accounts)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_accounts",
+                    current_page,
+                    len(all_accounts),
+                    total_all,
+                    500,
+                    is_complete=len(all_accounts) >= total_all or not accounts,
                 )
 
                 if len(all_accounts) >= total_all or not accounts:
-                    print(
-                        f"[adm_list_accounts] 获取完成，共 {len(all_accounts)} 条，合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
                 # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_accounts] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_accounts)} 条）"
+                    report_pagination_progress(
+                        "adm_list_accounts",
+                        current_page,
+                        len(all_accounts),
+                        total_all,
+                        500,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -4591,37 +4577,28 @@ async def adm_list_learning_records(
                 records, total_all = _fetch_page(current_page, batch_size)
                 all_records.extend(records)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_records) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_learning_records] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_learning_records] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_records)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_learning_records",
+                    current_page,
+                    len(all_records),
+                    total_all,
+                    20,
+                    is_complete=len(all_records) >= total_all or not records,
                 )
 
                 if len(all_records) >= total_all or not records:
-                    print(
-                        f"[adm_list_learning_records] 获取完成，共 {len(all_records)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
                 # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_learning_records] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_records)} 条）"
+                    report_pagination_progress(
+                        "adm_list_learning_records",
+                        current_page,
+                        len(all_records),
+                        total_all,
+                        20,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -5143,37 +5120,28 @@ async def adm_list_user_tasks(
 
                 all_tasks.extend(tasks)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_tasks) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_user_tasks] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_user_tasks] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_tasks)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_user_tasks",
+                    current_page,
+                    len(all_tasks),
+                    total_all,
+                    page_size,
+                    is_complete=len(all_tasks) >= total_all or not tasks,
                 )
 
                 if len(all_tasks) >= total_all or not tasks:
-                    print(
-                        f"[adm_list_user_tasks] 获取完成，共 {len(all_tasks)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
                 # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_user_tasks] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_tasks)} 条）"
+                    report_pagination_progress(
+                        "adm_list_user_tasks",
+                        current_page,
+                        len(all_tasks),
+                        total_all,
+                        page_size,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -5307,36 +5275,28 @@ async def adm_list_classes(
                 classes, total_all = _fetch_page(current_page, batch_size)
                 all_classes.extend(classes)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_classes) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_classes] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_classes] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_classes)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_classes",
+                    current_page,
+                    len(all_classes),
+                    total_all,
+                    20,
+                    is_complete=len(all_classes) >= total_all or not classes,
                 )
 
                 if len(all_classes) >= total_all or not classes:
-                    print(
-                        f"[adm_list_classes] 获取完成，共 {len(all_classes)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
+                # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_classes] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_classes)} 条）"
+                    report_pagination_progress(
+                        "adm_list_classes",
+                        current_page,
+                        len(all_classes),
+                        total_all,
+                        20,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -6219,37 +6179,28 @@ async def adm_list_courses(
                 courses, total_all = _fetch_page(current_page, batch_size)
                 all_courses.extend(courses)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_courses) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_courses] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_courses] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_courses)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_courses",
+                    current_page,
+                    len(all_courses),
+                    total_all,
+                    20,
+                    is_complete=len(all_courses) >= total_all or not courses,
                 )
 
                 if len(all_courses) >= total_all or not courses:
-                    print(
-                        f"[adm_list_courses] 获取完成，共 {len(all_courses)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
                 # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_courses] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_courses)} 条）"
+                    report_pagination_progress(
+                        "adm_list_courses",
+                        current_page,
+                        len(all_courses),
+                        total_all,
+                        20,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -6461,36 +6412,28 @@ async def adm_list_course_audit_records(
                 records, total_all = _fetch_page(current_page, batch_size)
                 all_records.extend(records)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_records) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_course_audit_records] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_course_audit_records] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_records)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_course_audit_records",
+                    current_page,
+                    len(all_records),
+                    total_all,
+                    20,
+                    is_complete=len(all_records) >= total_all or not records,
                 )
 
                 if len(all_records) >= total_all or not records:
-                    print(
-                        f"[adm_list_course_audit_records] 获取完成，共 {len(all_records)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
+                # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_course_audit_records] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_records)} 条）"
+                    report_pagination_progress(
+                        "adm_list_course_audit_records",
+                        current_page,
+                        len(all_records),
+                        total_all,
+                        20,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -6793,36 +6736,28 @@ async def adm_list_course_blacklist(
                 entries, total_all = _fetch_page(current_page, batch_size)
                 all_entries.extend(entries)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_entries) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_course_blacklist] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_course_blacklist] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_entries)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_course_blacklist",
+                    current_page,
+                    len(all_blacklist),
+                    total_all,
+                    15,
+                    is_complete=len(all_blacklist) >= total_all or not blacklist,
                 )
 
-                if len(all_entries) >= total_all or not entries:
-                    print(
-                        f"[adm_list_course_blacklist] 获取完成，共 {len(all_entries)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
+                if len(all_blacklist) >= total_all or not blacklist:
                     break
                 current_page += 1
+                # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_course_blacklist] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_entries)} 条）"
+                    report_pagination_progress(
+                        "adm_list_course_blacklist",
+                        current_page,
+                        len(all_blacklist),
+                        total_all,
+                        15,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -7159,37 +7094,28 @@ async def adm_list_learning_programs(
                 programs, total_all = _fetch_page(current_page, batch_size)
                 all_programs.extend(programs)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_programs) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_learning_programs] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_learning_programs] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_programs)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_learning_programs",
+                    current_page,
+                    len(all_programs),
+                    total_all,
+                    page_size,
+                    is_complete=len(all_programs) >= total_all or not programs,
                 )
 
                 if len(all_programs) >= total_all or not programs:
-                    print(
-                        f"[adm_list_learning_programs] 获取完成，共 {len(all_programs)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
                 # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_learning_programs] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_programs)} 条）"
+                    report_pagination_progress(
+                        "adm_list_learning_programs",
+                        current_page,
+                        len(all_programs),
+                        total_all,
+                        page_size,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -7643,37 +7569,28 @@ async def adm_list_instructors(
 
                 all_instructors.extend(instructors)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_instructors) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_instructors] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_instructors] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_instructors)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_instructors",
+                    current_page,
+                    len(all_instructors),
+                    total_all,
+                    page_size,
+                    is_complete=len(all_instructors) >= total_all or not instructors,
                 )
 
                 if len(all_instructors) >= total_all or not instructors:
-                    print(
-                        f"[adm_list_instructors] 获取完成，共 {len(all_instructors)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
                 # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_instructors] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_instructors)} 条）"
+                    report_pagination_progress(
+                        "adm_list_instructors",
+                        current_page,
+                        len(all_instructors),
+                        total_all,
+                        page_size,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
@@ -7931,37 +7848,28 @@ async def adm_list_teaching_records(
 
                 all_records.extend(records)
 
-                progress_pct = ""
-                if total_all > 0:
-                    pct = min(100, int(len(all_records) / total_all * 100))
-                    progress_pct = f" ({pct}%)"
-                if total_all > 0 and current_page == 1:
-                    print(
-                        f"[adm_list_teaching_records] 共 {total_all} 条，"
-                        f"预计 {max(1, (total_all + batch_size - 1) // batch_size)} 页",
-                        file=sys.stderr,
-                    )
-                print(
-                    f"[adm_list_teaching_records] 已获取第 {current_page} 页，"
-                    f"累计 {len(all_records)} / {total_all} 条{progress_pct}",
-                    file=sys.stderr,
+                report_pagination_progress(
+                    "adm_list_teaching_records",
+                    current_page,
+                    len(all_records),
+                    total_all,
+                    page_size,
+                    is_complete=len(all_records) >= total_all or not records,
                 )
 
                 if len(all_records) >= total_all or not records:
-                    print(
-                        f"[adm_list_teaching_records] 获取完成，共 {len(all_records)} 条，"
-                        f"合计 {current_page} 页",
-                        file=sys.stderr,
-                    )
                     break
                 current_page += 1
                 # 安全上限：最多 50 页
                 if current_page > 50:
-                    warning_msg = (
-                        f"[adm_list_teaching_records] 警告：达到 50 页安全上限，停止获取"
-                        f"（已获取 {len(all_records)} 条）"
+                    report_pagination_progress(
+                        "adm_list_teaching_records",
+                        current_page,
+                        len(all_records),
+                        total_all,
+                        page_size,
+                        is_safety_limit=True,
                     )
-                    print(warning_msg, file=sys.stderr)
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
