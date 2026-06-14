@@ -122,24 +122,14 @@ class AdminAccount(BaseModel):
     role_type: int = Field(..., description="角色类型码")
     role_name: str = Field(..., description="角色人读文本")
     departments: str = Field(default="-", description="所属部门，多个部门可能以逗号分隔")
-    account_joining_time: int = Field(
-        default=0, description="账号加入时间，Unix 时间戳（秒）"
-    )
+    account_joining_time: int = Field(default=0, description="账号加入时间，Unix 时间戳（秒）")
     account_joining_time_readable: str = Field(
         default="", description="账号加入时间，北京时间字符串"
     )
-    first_login_time: int = Field(
-        default=0, description="首次登录时间，Unix 时间戳（秒）"
-    )
-    first_login_time_readable: str = Field(
-        default="", description="首次登录时间，北京时间字符串"
-    )
-    last_login_time: int = Field(
-        default=0, description="最后登录时间，Unix 时间戳（秒）"
-    )
-    last_login_time_readable: str = Field(
-        default="", description="最后登录时间，北京时间字符串"
-    )
+    first_login_time: int = Field(default=0, description="首次登录时间，Unix 时间戳（秒）")
+    first_login_time_readable: str = Field(default="", description="首次登录时间，北京时间字符串")
+    last_login_time: int = Field(default=0, description="最后登录时间，Unix 时间戳（秒）")
+    last_login_time_readable: str = Field(default="", description="最后登录时间，北京时间字符串")
 
     @classmethod
     def from_raw(cls, raw: AdminAccountRaw) -> "AdminAccount":
@@ -209,7 +199,9 @@ class AdminAccountListResponse(BaseModel):
     error_code: str = ""
     error_message: str = ""
     suggested_action: str = ""
-    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = "proceed"
+    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = (
+        "proceed"
+    )
 
 
 class AdminAccountListParams(BaseModel):
@@ -294,9 +286,7 @@ class LearningRecord(BaseModel):
     login_name: str = Field(default="", description="登录用户名")
     number: str = Field(default="", description="员工编号/工号")
     enterprise_groups: list[str] = Field(default_factory=list, description="所属企业分组")
-    enterprise_departments: list[str] = Field(
-        default_factory=list, description="所属部门"
-    )
+    enterprise_departments: list[str] = Field(default_factory=list, description="所属部门")
     class_names: list[str] = Field(default_factory=list, description="所属班级")
     group_id: str = Field(default="", description="课程分组 ID")
     group_title: str = Field(default="", description="课程标题")
@@ -307,23 +297,13 @@ class LearningRecord(BaseModel):
     first_learning_time_readable: str = Field(
         default="", description="首次学习时间，北京时间字符串"
     )
-    last_learning_time: int = Field(
-        default=0, description="最后学习时间，Unix 时间戳（秒）"
-    )
-    last_learning_time_readable: str = Field(
-        default="", description="最后学习时间，北京时间字符串"
-    )
+    last_learning_time: int = Field(default=0, description="最后学习时间，Unix 时间戳（秒）")
+    last_learning_time_readable: str = Field(default="", description="最后学习时间，北京时间字符串")
     sum_learning_time: str = Field(default="", description="累计学习时长")
-    group_required_session_total_count: int = Field(
-        default=0, description="课程必修小节总数"
-    )
-    group_required_session_finished_count: int = Field(
-        default=0, description="已完成必修小节数"
-    )
+    group_required_session_total_count: int = Field(default=0, description="课程必修小节总数")
+    group_required_session_finished_count: int = Field(default=0, description="已完成必修小节数")
     group_completion_rate: float = Field(default=0.0, description="课程完成率（0-1）")
-    group_overall_completion_rate: float = Field(
-        default=0.0, description="整体完成率（0-1）"
-    )
+    group_overall_completion_rate: float = Field(default=0.0, description="整体完成率（0-1）")
     group_completion_time: int = Field(default=0, description="课程完成时间，Unix 时间戳（秒）")
     group_completion_time_readable: str = Field(
         default="", description="课程完成时间，北京时间字符串"
@@ -375,9 +355,7 @@ class LearningRecord(BaseModel):
             group_completion_time=completion_ts,
             group_completion_time_readable=format_timestamp_beijing(completion_ts),
             group_overall_completion_time=overall_completion_ts,
-            group_overall_completion_time_readable=format_timestamp_beijing(
-                overall_completion_ts
-            ),
+            group_overall_completion_time_readable=format_timestamp_beijing(overall_completion_ts),
             group_total_points=raw.group_total_points,
             group_total_points_rank=raw.group_total_points_rank,
             vlt=raw.vlt,
@@ -425,7 +403,9 @@ class LearningRecordListResponse(BaseModel):
     error_code: str = ""
     error_message: str = ""
     suggested_action: str = ""
-    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = "proceed"
+    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = (
+        "proceed"
+    )
 
 
 class AdminClassRaw(BaseModel):
@@ -507,7 +487,9 @@ class AdminClassListResponse(BaseModel):
     error_code: str = ""
     error_message: str = ""
     suggested_action: str = ""
-    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = "proceed"
+    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = (
+        "proceed"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -700,7 +682,9 @@ class AdminCourse(BaseModel):
     u_course_score: int = Field(default=0, description="课程学分/积分")
     first_learning_time: int = Field(default=0, description="首次学习时间，Unix 时间戳（秒）")
     last_learning_time: int = Field(default=0, description="最后学习时间，Unix 时间戳（秒）")
-    first_learning_time_readable: str = Field(default="", description="首次学习时间，北京时间字符串")
+    first_learning_time_readable: str = Field(
+        default="", description="首次学习时间，北京时间字符串"
+    )
     last_learning_time_readable: str = Field(default="", description="最后学习时间，北京时间字符串")
 
     @classmethod
@@ -795,7 +779,9 @@ class AdminCourseListResponse(BaseModel):
     error_code: str = ""
     error_message: str = ""
     suggested_action: str = ""
-    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = "proceed"
+    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = (
+        "proceed"
+    )
 
 
 class AdminLearningProgramRaw(BaseModel):
@@ -913,3 +899,190 @@ class AdminLearningProgramListData(BaseModel):
     programs: list[AdminLearningProgram] = Field(..., description="学习项目列表")
     total: int = Field(..., description="本次返回数量")
     pagination: AdminLearningProgramListPagination = Field(..., description="分页信息")
+
+
+# ---------------------------------------------------------------------------
+# 任务明细
+# ---------------------------------------------------------------------------
+
+
+class UserTaskRaw(BaseModel):
+    """UMU 原始任务明细对象.
+
+    对应 /uapi/v1/dashboard/user-task-list 响应中 `data.list[]` 的单个元素。
+    字段名和类型均保持原始接口返回形态。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    learning_time: str = ""
+    vlt: str = ""
+    first_learning_time: str = ""
+    last_learning_time: str = ""
+    learn_status: int = 0
+    finish_time: int = 0
+    assign_time: int = 0
+    due_time: int = 0
+    student: dict[str, Any] = Field(default_factory=dict)
+    operator: dict[str, Any] = Field(default_factory=dict)
+    task_obj: dict[str, Any] = Field(default_factory=dict)
+    assign_obj: dict[str, Any] = Field(default_factory=dict)
+    task_obj_id: str = ""
+
+
+class UserTask(BaseModel):
+    """Admin MCP 标准化任务明细对象.
+
+    对应 adm_list_user_tasks 返回的 `data.tasks[]` 单个元素。
+    在原始字段基础上做了类型转换和补充计算字段。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    task_obj_id: str = Field(default="", description="任务对象关系 ID")
+    learning_time: str = Field(default="", description="学习时长")
+    vlt: str = Field(default="", description="视频学习时长")
+    first_learning_time: int = Field(default=0, description="首次学习时间，Unix 时间戳（秒）")
+    first_learning_time_readable: str = Field(
+        default="", description="首次学习时间，北京时间字符串"
+    )
+    last_learning_time: int = Field(default=0, description="最后学习时间，Unix 时间戳（秒）")
+    last_learning_time_readable: str = Field(default="", description="最后学习时间，北京时间字符串")
+    learn_status: int = Field(default=0, description="学习状态码")
+    learn_status_text: str = Field(default="", description="学习状态人读文本")
+    finish_time: int = Field(default=0, description="完成时间，Unix 时间戳（秒）")
+    finish_time_readable: str = Field(default="", description="完成时间，北京时间字符串")
+    assign_time: int = Field(default=0, description="分配时间，Unix 时间戳（秒）")
+    assign_time_readable: str = Field(default="", description="分配时间，北京时间字符串")
+    due_time: int = Field(default=0, description="到期时间，Unix 时间戳（秒），0 表示未指定")
+    due_time_readable: str = Field(default="", description="到期时间，北京时间字符串")
+    is_overdue: bool = Field(default=False, description="是否逾期完成")
+    student_umu_id: str = Field(default="", description="学员 umu_id")
+    student_name: str = Field(default="", description="学员姓名")
+    student_home_url: str = Field(default="", description="学员主页链接")
+    student_groups: list[str] = Field(default_factory=list, description="学员所属分组")
+    operator_umu_id: str = Field(default="", description="分配者 umu_id")
+    operator_name: str = Field(default="", description="分配者姓名")
+    operator_groups: list[str] = Field(default_factory=list, description="分配者所属分组")
+    obj_id: str = Field(default="", description="任务对象 ID")
+    task_name: str = Field(default="", description="任务名称")
+    obj_type: int = Field(default=0, description="任务类型码")
+    obj_type_text: str = Field(default="", description="任务类型人读文本")
+    session_type: str = Field(default="", description="小节类型")
+    course_name: str = Field(default="", description="课程名称")
+    course_id: str = Field(default="", description="课程 ID")
+    task_url: str = Field(default="", description="任务链接")
+    share_url: str = Field(default="", description="分享链接")
+    assign_obj_id: str = Field(default="", description="分配对象 ID")
+    assign_obj_type: str = Field(default="", description="分配对象类型")
+    assign_obj_name: str = Field(default="", description="分配对象名称")
+
+    @classmethod
+    def from_raw(cls, raw: UserTaskRaw) -> "UserTask":
+        """从原始 UMU 任务明细对象构造标准化对象."""
+        first_ts = int(raw.first_learning_time or 0)
+        last_ts = int(raw.last_learning_time or 0)
+        finish_ts = int(raw.finish_time or 0)
+        assign_ts = int(raw.assign_time or 0)
+        due_ts = int(raw.due_time or 0)
+
+        student = raw.student or {}
+        operator = raw.operator or {}
+        task_obj = raw.task_obj or {}
+        assign_obj = raw.assign_obj or {}
+
+        obj_type = int(task_obj.get("obj_type") or 0)
+        learn_status = int(raw.learn_status or 0)
+
+        obj_type_map = {1: "小节", 2: "课程", 3: "学习项目"}
+        learn_status_map = {0: "待学习", 1: "学习中", 2: "按时完成", 3: "逾期完成"}
+
+        is_overdue = False
+        if learn_status == 3:
+            is_overdue = True
+        elif learn_status == 2 and finish_ts > 0 and due_ts > 0 and finish_ts > due_ts:
+            is_overdue = True
+
+        return cls(
+            task_obj_id=raw.task_obj_id,
+            learning_time=raw.learning_time,
+            vlt=raw.vlt,
+            first_learning_time=first_ts,
+            first_learning_time_readable=format_timestamp_beijing(first_ts),
+            last_learning_time=last_ts,
+            last_learning_time_readable=format_timestamp_beijing(last_ts),
+            learn_status=learn_status,
+            learn_status_text=learn_status_map.get(learn_status, f"未知({learn_status})"),
+            finish_time=finish_ts,
+            finish_time_readable=format_timestamp_beijing(finish_ts),
+            assign_time=assign_ts,
+            assign_time_readable=format_timestamp_beijing(assign_ts),
+            due_time=due_ts,
+            due_time_readable=format_timestamp_beijing(due_ts) if due_ts else "",
+            is_overdue=is_overdue,
+            student_umu_id=str(student.get("umu_id", "")),
+            student_name=student.get("user_name", "") or "",
+            student_home_url=student.get("home_url", "") or "",
+            student_groups=student.get("enterprise_groups", []) or [],
+            operator_umu_id=str(operator.get("umu_id", "")),
+            operator_name=operator.get("user_name", "") or "",
+            operator_groups=operator.get("enterprise_groups", []) or [],
+            obj_id=str(task_obj.get("obj_id", "")),
+            task_name=task_obj.get("task_name", "") or "",
+            obj_type=obj_type,
+            obj_type_text=obj_type_map.get(obj_type, f"未知({obj_type})"),
+            session_type=str(task_obj.get("session_type", "")),
+            course_name=task_obj.get("course_name", "") or "",
+            course_id=str(task_obj.get("course_id", "")),
+            task_url=task_obj.get("task_url", "") or "",
+            share_url=task_obj.get("share_url", "") or "",
+            assign_obj_id=str(assign_obj.get("id", "")),
+            assign_obj_type=str(assign_obj.get("type", "")),
+            assign_obj_name=assign_obj.get("name", "") or "",
+        )
+
+
+class UserTaskListPageInfo(BaseModel):
+    """UMU 原始任务明细分页信息."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    list_total_num: int = Field(..., description="符合条件的任务总数")
+    total_page_num: int = Field(..., description="总页数")
+    current_page: int = Field(..., description="当前页码")
+    size: int = Field(..., description="当前页大小")
+
+
+class UserTaskListPagination(BaseModel):
+    """MCP 标准化任务明细分页信息."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_all: int = Field(..., description="符合条件的任务总数")
+    current_page: int = Field(..., description="当前页码")
+    page_size: int = Field(..., description="当前页大小")
+
+
+class UserTaskListData(BaseModel):
+    """MCP 标准化任务明细列表数据."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tasks: list[UserTask] = Field(..., description="任务明细列表")
+    total: int = Field(..., description="本次返回任务数量")
+    pagination: UserTaskListPagination = Field(..., description="分页信息")
+
+
+class UserTaskListResponse(BaseModel):
+    """MCP 标准化任务明细列表响应."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    success: bool
+    data: UserTaskListData
+    error_code: str = ""
+    error_message: str = ""
+    suggested_action: str = ""
+    next_action: Literal["proceed", "needs_enrollment", "needs_user_input", "lesson_completed"] = (
+        "proceed"
+    )
