@@ -160,6 +160,11 @@ mcp = FastMCP(
 - 获取已创建的课程列表（支持分页、按更新时间/创建时间排序）
 - 获取协同给我的课程列表（支持分页、排序）
 - 获取我参与的课程列表（支持按学习状态筛选：已学习/学习中/待学习）
+- 列出课程协同者（含角色、协同关系 ID）：tch_list_course_collaborators
+- 搜索可协同账号（按邮箱/姓名/用户名/手机号）：tch_search_collaborator_accounts
+- 邀请/调整协同者权限（editor/operator/viewer）：tch_invite_course_collaborator / tch_update_collaborator_role
+- 删除课程协同者：tch_remove_course_collaborator
+- 转让课程拥有者：tch_transfer_course_owner
 - 获取课程信息（查看当前配置，过滤只读字段）
 - 综合修改课程信息（tch_update_course，适合一次改多个字段）
 - 原子化修改（6 个细粒度工具，适合只改一个维度）：
