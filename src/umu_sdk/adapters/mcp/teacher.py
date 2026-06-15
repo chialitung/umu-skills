@@ -7566,6 +7566,69 @@ async def tch_remove_course_collaborator(
         return _err("REMOVE_COLLABORATOR_FAILED", str(e))
 
 
+@mcp.tool()
+async def tch_transfer_course_owner(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    keyword: Annotated[str, Field(description="新拥有者查询关键词：邮箱、姓名、用户名或手机号")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """将课程拥有权转让给其他用户.
+
+    工具内部会先搜索账号，只有唯一匹配时才会执行转让。
+    注意：转让后当前用户将失去拥有者权限，请谨慎操作。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        ok, accounts, err = _search_collaborator_account(client, group_id, keyword)
+        if not ok:
+            return _err("SEARCH_COLLABORATOR_FAILED", err or "搜索账号失败")
+
+        account, err = _find_unique_account(accounts, keyword)
+        if account is None:
+            return _err("AMBIGUOUS_ACCOUNT", err, next_action="needs_user_input")
+
+        teacher_id = account.get("id")
+        if not teacher_id:
+            return _err("TRANSFER_OWNER_FAILED", "账号信息缺少 teacher_id，无法转让")
+
+        resp = client.post(
+            client.desktop_url("/uapi/v1/cooperation/permission-transfer"),
+            data={
+                "obj_id": group_id,
+                "obj_type": "group",
+                "transferred_teacher_id": str(teacher_id),
+            },
+        )
+        ok, data, err = _parse_collaboration_response(resp)
+        if not ok:
+            return _err("TRANSFER_OWNER_FAILED", err or "转让课程拥有者失败")
+
+        return _ok(
+            data={
+                "group_id": group_id,
+                "new_owner_id": teacher_id,
+                "new_owner_name": account.get("user_name"),
+                "new_owner_account": account.get("account") or account.get("email"),
+                "status": data.get("status") if isinstance(data, dict) else None,
+            },
+            next_action="proceed",
+            suggested_action="课程拥有权已转让，当前用户需重新确认权限",
+        )
+    except Exception as e:
+        logger.exception("转让课程拥有者失败")
+        return _err("TRANSFER_OWNER_FAILED", str(e))
+
+
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
