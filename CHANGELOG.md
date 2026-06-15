@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-15
+
+### Added
+- Teacher MCP 新增课程协同管理能力：
+  - `tch_list_course_collaborators`：列出课程协同者与创建者
+  - `tch_search_collaborator_accounts`：按关键词搜索可协同账号
+  - `tch_invite_course_collaborator`：邀请账号成为协同者（编辑者/运营者/查看者）
+  - `tch_update_collaborator_role`：调整已有协同者的权限类型
+  - `tch_remove_course_collaborator`：删除协同者权限
+  - `tch_transfer_course_owner`：将课程拥有权转让给指定账号
+- Skill 层新增 `manage_course_collaborators` 高阶 Skill，统一封装协同者列表、邀请、权限调整、删除、转让拥有者操作
+
+### Changed
+- `README.md` 更新 Teacher MCP 工具列表与内置 Skill 列表，补充课程协同相关条目及数量（教师工具 61 个，内置 Skill 75 个）
+
 ## [0.13.0] - 2026-06-14
 
 ### Added
