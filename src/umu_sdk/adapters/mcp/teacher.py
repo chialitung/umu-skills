@@ -7353,6 +7353,177 @@ async def tch_search_collaborator_accounts(
         return _err("SEARCH_COLLABORATOR_FAILED", str(e))
 
 
+
+def _add_or_update_cooperator(
+    client: UMUClient,
+    group_id: str,
+    account: dict[str, Any],
+    api_role: str,
+) -> tuple[bool, str]:
+    """调用 addcooperators 添加或更新协同权限."""
+    payload = [
+        {
+            "type": 1,
+            "role_type": api_role,
+            "account": account.get("account") or account.get("email") or account.get("phone") or "",
+            "account_type": account.get("account_type", "user"),
+            "umu_id": account.get("umu_id") or account.get("id") or "",
+        }
+    ]
+    resp = client.post(
+        client.desktop_url("/api/cooperation/addcooperators"),
+        data={
+            "obj_id": group_id,
+            "obj_type": "group",
+            "accounts": json.dumps(payload, ensure_ascii=False),
+        },
+    )
+    ok, _, err = _parse_collaboration_response(resp)
+    if not ok:
+        return False, err or "添加/更新协同权限失败"
+    return True, ""
+
+
+@mcp.tool()
+async def tch_invite_course_collaborator(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    keyword: Annotated[str, Field(description="被邀请者查询关键词：邮箱、姓名、用户名或手机号")],
+    role_type: Annotated[
+        str,
+        Field(description="协同权限：editor（编辑者）/ operator（运营者）/ viewer（查看者）"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """邀请用户成为课程协同者，或调整已有协同者权限.
+
+    工具内部会先搜索账号，只有唯一匹配时才会执行邀请。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    api_role = _map_role_to_api(role_type)
+    if api_role is None:
+        return _err(
+            "INVALID_ROLE_TYPE",
+            f"不支持的权限类型 '{role_type}'，请选择 editor/operator/viewer",
+            next_action="needs_user_input",
+        )
+
+    try:
+        ok, accounts, err = _search_collaborator_account(client, group_id, keyword)
+        if not ok:
+            return _err("SEARCH_COLLABORATOR_FAILED", err or "搜索账号失败")
+
+        account, err = _find_unique_account(accounts, keyword)
+        if account is None:
+            return _err("AMBIGUOUS_ACCOUNT", err, next_action="needs_user_input")
+
+        add_ok, add_err = _add_or_update_cooperator(client, group_id, account, api_role)
+        if not add_ok:
+            return _err("INVITE_COLLABORATOR_FAILED", add_err)
+
+        return _ok(
+            data={
+                "account": account.get("account") or account.get("email"),
+                "user_name": account.get("user_name"),
+                "role_type": api_role,
+                "role_label": _API_ROLE_TO_LABEL.get(api_role, api_role),
+                "group_id": group_id,
+            },
+            next_action="proceed",
+            suggested_action="如需确认权限，可调用 tch_list_course_collaborators",
+        )
+    except Exception as e:
+        logger.exception("邀请课程协同者失败")
+        return _err("INVITE_COLLABORATOR_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_update_collaborator_role(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    cooperation_info_id: Annotated[str, Field(description="协同关系 ID，从 tch_list_course_collaborators 获取")],
+    role_type: Annotated[
+        str,
+        Field(description="新的协同权限：editor（编辑者）/ operator（运营者）/ viewer（查看者）"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """调整已有协同者的权限."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    api_role = _map_role_to_api(role_type)
+    if api_role is None:
+        return _err(
+            "INVALID_ROLE_TYPE",
+            f"不支持的权限类型 '{role_type}'，请选择 editor/operator/viewer",
+            next_action="needs_user_input",
+        )
+
+    try:
+        resp = client.get(
+            client.desktop_url("/api/cooperation/getall"),
+            params={
+                "t": str(int(time.time() * 1000)),
+                "append_manage_role": "1",
+                "obj_id": group_id,
+                "obj_type": "group",
+                "page": "1",
+                "size": "20",
+            },
+        )
+        ok, data, err = _parse_collaboration_response(resp)
+        if not ok:
+            return _err("LIST_COLLABORATORS_FAILED", err or "获取协同者列表失败")
+
+        raw_list = data.get("list", []) if isinstance(data, dict) else []
+        target = next(
+            (item for item in raw_list if str(item.get("cooperation_info_id")) == str(cooperation_info_id)),
+            None,
+        )
+        if target is None:
+            return _err(
+                "COLLABORATOR_NOT_FOUND",
+                f"未找到协同关系 ID: {cooperation_info_id}",
+                next_action="needs_user_input",
+            )
+
+        add_ok, add_err = _add_or_update_cooperator(client, group_id, target, api_role)
+        if not add_ok:
+            return _err("UPDATE_COLLABORATOR_ROLE_FAILED", add_err)
+
+        return _ok(
+            data={
+                "cooperation_info_id": cooperation_info_id,
+                "teacher_id": target.get("teacher_id"),
+                "user_name": target.get("teacher_name"),
+                "new_role_type": api_role,
+                "new_role_label": _API_ROLE_TO_LABEL.get(api_role, api_role),
+                "group_id": group_id,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("更新协同者权限失败")
+        return _err("UPDATE_COLLABORATOR_ROLE_FAILED", str(e))
+
+
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
