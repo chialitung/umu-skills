@@ -840,6 +840,95 @@ def _upload_image_if_needed(
 
 
 # ---------------------------------------------------------------------------
+# 课程协同辅助函数
+# ---------------------------------------------------------------------------
+
+def _parse_collaboration_response(resp: dict[str, Any]) -> tuple[bool, Any, str]:
+    """解析 UMU 协同接口响应.
+
+    UMU 接口在业务成功时 status=true/error_code=0，但顶层 success 可能为 false。
+    返回 (is_success, data_or_none, error_message)。
+    """
+    if not isinstance(resp, dict):
+        return False, None, "响应格式异常"
+    if resp.get("status") is True or resp.get("error_code") == 0:
+        return True, resp.get("data"), ""
+    return False, None, resp.get("error", "") or resp.get("error_message", "业务请求失败")
+
+
+_ROLE_TO_API: dict[str, str] = {
+    "editor": "cooperator",
+    "operator": "operator",
+    "viewer": "viewer",
+}
+
+_API_ROLE_TO_LABEL: dict[str, str] = {
+    "cooperator": "编辑者",
+    "operator": "运营者",
+    "viewer": "查看者",
+    "creator": "拥有者",
+}
+
+
+def _map_role_to_api(role: str) -> str | None:
+    """将面向用户的角色名映射为 UMU API 的 role_type."""
+    return _ROLE_TO_API.get(role.lower())
+
+
+def _search_collaborator_account(
+    client: UMUClient,
+    group_id: str,
+    keyword: str,
+) -> tuple[bool, list[dict[str, Any]], str]:
+    """搜索可设置为协同者的账号.
+
+    Returns:
+        (success, accounts, error_message)
+    """
+    resp = client.post(
+        client.desktop_url("/api/manage/accessaccountmatchv2"),
+        data={
+            "accounts": keyword,
+            "search_source": "add_cooperator",
+            "is_suggestion": "1",
+            "group_id": group_id,
+            "is_sug": "1",
+        },
+    )
+    ok, data, err = _parse_collaboration_response(resp)
+    if not ok:
+        return False, [], err
+    accounts = [item for item in (data or []) if item.get("is_exist") == 1]
+    return True, accounts, ""
+
+
+def _find_unique_account(
+    accounts: list[dict[str, Any]],
+    keyword: str,
+) -> tuple[dict[str, Any] | None, str]:
+    """从搜索结果中确定唯一账号.
+
+    Returns:
+        (account, error_message)。account 为 None 时表示未找到或不唯一。
+    """
+    if not accounts:
+        return None, f"未找到与 '{keyword}' 匹配的可协同账号。仅支持讲师、学习负责人、子管理员、管理员角色。"
+    if len(accounts) > 1:
+        previews = [
+            {
+                "id": acc.get("id"),
+                "user_name": acc.get("user_name"),
+                "email": acc.get("email"),
+                "phone": acc.get("phone"),
+                "account": acc.get("account"),
+            }
+            for acc in accounts
+        ]
+        return None, f"找到多个匹配账号，请提供更精确的信息：{previews}"
+    return accounts[0], ""
+
+
+# ---------------------------------------------------------------------------
 # Tools: 认证
 # ---------------------------------------------------------------------------
 
