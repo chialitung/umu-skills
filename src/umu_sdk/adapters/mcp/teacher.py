@@ -7223,6 +7223,85 @@ async def tch_list_participated_courses(
         )
 
 
+@mcp.tool()
+async def tch_list_course_collaborators(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    page: Annotated[int, Field(default=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[int, Field(default=20, description="每页数量")] = 20,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """列出课程的协同者.
+
+    返回课程的协同者列表、创建者信息以及分页信息。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        resp = client.get(
+            client.desktop_url("/api/cooperation/getall"),
+            params={
+                "t": str(int(time.time() * 1000)),
+                "append_manage_role": "1",
+                "obj_id": group_id,
+                "obj_type": "group",
+                "page": str(page),
+                "size": str(page_size),
+            },
+        )
+        ok, data, err = _parse_collaboration_response(resp)
+        if not ok:
+            return _err("LIST_COLLABORATORS_FAILED", err or "获取协同者列表失败")
+
+        raw_list = data.get("list", []) if isinstance(data, dict) else []
+        creator_info = data.get("creator_info", {}) if isinstance(data, dict) else {}
+        page_info = data.get("page_info", {}) if isinstance(data, dict) else {}
+
+        collaborators = []
+        for item in raw_list:
+            collaborators.append({
+                "cooperation_info_id": item.get("cooperation_info_id"),
+                "teacher_id": item.get("teacher_id"),
+                "umu_id": item.get("umu_id"),
+                "role_type": item.get("role_type"),
+                "role_label": _API_ROLE_TO_LABEL.get(item.get("role_type", ""), item.get("role_type", "")),
+                "teacher_name": item.get("teacher_name"),
+                "teacher_email": item.get("teacher_email"),
+                "cooperator_type": item.get("cooperator_type"),
+                "is_manager": item.get("is_manager"),
+                "manager_role_type": item.get("manager_role_type"),
+            })
+
+        creator = {
+            "teacher_id": creator_info.get("teacher_id"),
+            "role_type": creator_info.get("role_type"),
+            "role_label": _API_ROLE_TO_LABEL.get(creator_info.get("role_type", ""), creator_info.get("role_type", "")),
+            "teacher_name": creator_info.get("teacher_name"),
+            "teacher_email": creator_info.get("teacher_email"),
+        } if creator_info else None
+
+        return _ok(
+            data={
+                "collaborators": collaborators,
+                "creator": creator,
+                "pagination": page_info,
+            },
+            next_action="proceed",
+            suggested_action="如需邀请/调整/删除协同者，可调用对应工具",
+        )
+    except Exception as e:
+        logger.exception("列出课程协同者失败")
+        return _err("LIST_COLLABORATORS_FAILED", str(e))
+
+
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
