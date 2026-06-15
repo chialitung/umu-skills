@@ -403,3 +403,50 @@ class TestTeacherCourses:
         assert parsed["success"] is False
         assert parsed["error_code"] == "SUBMIT_COURSE_FOR_AUDIT_FAILED"
         assert parsed["next_action"] == "needs_user_input"
+
+
+class TestManageCourseCollaborators:
+    async def test_invite_action(self, registry_with_teacher_skills: SkillRegistry) -> None:
+        responses = {
+            ("teacher", "tch_invite_course_collaborator"): {
+                "success": True,
+                "data": {"account": "a@example.com", "role_label": "编辑者"},
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_teacher_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="manage_course_collaborators",
+            arguments={
+                "group_id": "g1",
+                "action": "invite",
+                "keyword": "a@example.com",
+                "role_type": "editor",
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "teacher",
+                "tch_invite_course_collaborator",
+                {"group_id": "g1", "keyword": "a@example.com", "role_type": "editor"},
+            ),
+        ]
+
+    async def test_list_action(self, registry_with_teacher_skills: SkillRegistry) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_teacher_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="manage_course_collaborators",
+            arguments={"group_id": "g1", "action": "list"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            ("teacher", "tch_list_course_collaborators", {"group_id": "g1"}),
+        ]
