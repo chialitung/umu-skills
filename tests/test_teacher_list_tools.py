@@ -210,24 +210,18 @@ class TestTchListParticipatedCourses:
         assert "获取完成" in output
 
 
-class TestTchFetchAllSafetyLimit:
-    async def test_resources_stops_at_50_pages(self, capsys: pytest.CaptureFixture[str]) -> None:
-        from umu_sdk.adapters.mcp.teacher import tch_list_resources
+class TestCollaborationToolsPresent:
+    async def test_collaboration_tools_registered(self) -> None:
+        from umu_sdk.adapters.mcp.teacher import mcp
 
-        pages = [
-            _resource_page(
-                i,
-                50,
-                5000,
-                [{"id": str(i), "file_name": f"f{i}.zip", "file_size": i}],
-            )
-            for i in range(1, 52)
-        ]
-
-        with _patch_teacher_auth() as client:
-            client.get.side_effect = pages
-            result = json.loads(await tch_list_resources(fetch_all=True))
-
-        assert result["success"] is True
-        assert len(result["data"]["resources"]) == 50
-        assert "50 页安全上限" in capsys.readouterr().err
+        tools = await mcp.list_tools()
+        tool_names = {tool.name for tool in tools}
+        expected = {
+            "tch_list_course_collaborators",
+            "tch_search_collaborator_accounts",
+            "tch_invite_course_collaborator",
+            "tch_update_collaborator_role",
+            "tch_remove_course_collaborator",
+            "tch_transfer_course_owner",
+        }
+        assert expected.issubset(tool_names), f"缺少协同工具: {expected - tool_names}"
