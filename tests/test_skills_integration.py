@@ -60,6 +60,7 @@ def registry_with_all_skills() -> SkillRegistry:
 
 
 class TestCrossRoleOnboardAndLearn:
+    @pytest.mark.skip(reason="batch_onboard_users skill 已临时禁用")
     async def test_admin_onboard_then_student_enroll_and_complete(
         self, registry_with_all_skills: SkillRegistry
     ) -> None:

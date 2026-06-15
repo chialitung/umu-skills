@@ -70,7 +70,8 @@ class TestSkillRegistry:
         names = {s.name for s in registry.list_skills()}
         assert "create_course_with_scorm" in names
         assert "enroll_course" in names
-        assert "batch_onboard_users" in names
+        # batch_onboard_users 为临时测试 Skill，当前已禁用
+        assert "batch_onboard_users" not in names
 
         # Teacher skills
         assert "upload_scorm_resource" in names

@@ -281,6 +281,7 @@ class TestBuiltinSkillParameterFixes:
             ("student", "stu_enroll_course", {"enroll_id": "mock-enroll-id"}),
         ]
 
+    @pytest.mark.skip(reason="batch_onboard_users skill 已临时禁用")
     async def test_batch_onboard_users_uses_correct_parameters(self) -> None:
         responses = {
             ("admin", "adm_create_account"): {
@@ -332,6 +333,7 @@ class TestBuiltinSkillParameterFixes:
         assert student_call[1] == "stu_enroll_course"
         assert student_call[2] == {"enroll_id": "mock-enroll-id"}
 
+    @pytest.mark.skip(reason="batch_onboard_users skill 已临时禁用")
     async def test_batch_onboard_users_compatible_with_old_format(self) -> None:
         responses = {
             ("admin", "adm_create_account"): {

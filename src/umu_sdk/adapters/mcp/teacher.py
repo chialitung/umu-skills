@@ -36,7 +36,6 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from urllib.parse import urlencode
 from typing import Annotated, Any, AsyncIterator
 
 from mcp.server.fastmcp import FastMCP
