@@ -36,19 +36,109 @@ umu_skills/
 ## 安装
 
 ```bash
-# 基础安装（仅 SDK）
 pip install umu-skills
-
-# 带 MCP 服务器支持
-pip install umu-skills[mcp]
-
-# 开发环境安装
-pip install umu-skills[dev]
 ```
+
+> 如果你正在修改本仓库源码，使用开发模式安装：
+> ```bash
+> pip install -e ".[dev,mcp]"
+> ```
 
 ## 快速开始
 
-### 作为 Python SDK 使用
+### 3 分钟在 Claude Code 中使用 `/umu`（推荐）
+
+这是最快捷的使用方式。你不需要记住任何工具名，只需用自然语言告诉 AI 你想做什么。
+
+#### 1. 安装 Python 包
+
+```bash
+pip install umu-skills
+```
+
+#### 2. 一键配置 Claude Code
+
+运行安装脚本，它会自动完成三件事：
+
+- 确保 `umu-skills` 包已安装
+- 把 `/umu` Skill 复制到 Claude Code 全局 skills 目录
+- 在 `~/.claude/settings.json` 中配置好 `umu-teacher`、`umu-student`、`umu-admin` 三个 MCP server
+
+```bash
+python -m umu_sdk.skills.install
+```
+
+其他常用命令：
+
+```bash
+# 检查安装状态
+python -m umu_sdk.skills.install --check
+
+# 强制升级到最新版
+python -m umu_sdk.skills.install --upgrade
+```
+
+#### 3. 重启 Claude Code
+
+**必须重启**，新的 Skill 和 MCP server 配置才会生效。
+
+#### 4. 配置账号
+
+重启后，在对话中输入：
+
+```text
+/umu
+```
+
+如果某个角色还没有配置账号，Claude 会交互式询问用户名和密码。你可以配置以下角色：
+
+- **Teacher（讲师）**：创建课程、上传资源、管理小节
+- **Student（学员）**：报名课程、学习、查看进度
+- **Admin（管理员）**：账号管理、组织架构、课程审核、学习记录、数据查询
+
+只需配置你实际会用到的角色即可。
+
+账号信息会加密保存到：
+
+```text
+Windows: C:\Users\<用户名>\.claude\skills\umu\credentials.enc
+macOS/Linux: ~/.claude/skills/umu/credentials.enc
+```
+
+加密方式：
+
+- 凭证本身使用 **Fernet 对称加密**
+- Fernet 密钥由操作系统 keyring 保护（Windows DPAPI / macOS Keychain / Linux Secret Service）
+- keyring 不可用时自动回退到同目录的 `.fernet.key` 文件
+
+保存账号后，**再次重启 Claude Code**，MCP server 才能读取凭证并开始执行 UMU 操作。
+
+之后你可以随时通过 `/umu` 对话式管理账号：
+
+```text
+/umu 添加管理员账号
+/umu 修改我的讲师账号
+/umu 更新管理员密码
+/umu 删除 student 的账号信息
+```
+
+修改后同样需要重启 Claude Code。
+
+#### 5. 开始使用
+
+配置完成后，直接用自然语言描述你的需求：
+
+```text
+/umu 帮我创建一个课程，名字叫《新员工入职培训》
+/umu 获取平台上的用户清单
+/umu 给学员张三报名课程 aet504
+/umu 查询《销售技巧》课程的学习记录
+/umu 上传 SCORM 课件 /path/to/course.zip 并创建一个新课程绑定它
+```
+
+### 进阶：作为 Python SDK 使用
+
+如果你不想通过 AI 客户端，而是直接在自己的 Python 代码里调用 UMU 能力：
 
 ```python
 from umu_sdk import UMUClient
@@ -61,15 +151,18 @@ for course in courses.data:
     print(f"{course.id}: {course.title}")
 ```
 
-### 作为 MCP 服务器使用
+### 进阶：作为 MCP 服务器使用
+
+如果你使用 Claude Desktop、VSCode Cline 等其他 MCP 客户端，可以手动启动单个角色的 MCP server。
+
+设置环境变量并启动 Teacher MCP server：
 
 ```bash
-# 设置环境变量
 export UMU_BASE_URL=https://www.umu.cn
 export UMU_TEACHER_USERNAME=your_username
 export UMU_TEACHER_PASSWORD=your_password
 
-# 启动 MCP 服务器（无需将 Scripts 目录加入 PATH）
+# 使用 python -m 启动，无需将 Scripts 目录加入 PATH
 python -m umu_sdk.adapters.mcp.teacher
 ```
 
@@ -81,13 +174,11 @@ export UMU_ADMIN_PASSWORD=your_admin_password
 python -m umu_sdk.adapters.mcp.admin
 ```
 
-### 在 Claude Code 中配置
-
-添加到你的 Claude Code MCP 配置：
+在 Claude Code / Claude Desktop 中手动配置的示例：
 
 ```json
 {
-  "servers": {
+  "mcpServers": {
     "umu-teacher": {
       "type": "stdio",
       "command": "python",
@@ -97,87 +188,7 @@ python -m umu_sdk.adapters.mcp.admin
 }
 ```
 
-有关 Claude Desktop、VSCode Cline 等客户端的详细配置，可通过后文的 `/umu` Skill 安装命令自动完成。
-
-### 使用 `/umu` Skill（推荐）
-
-安装 `/umu` Skill，通过自然语言让 AI 自动识别并调用 Teacher、Student、Admin 工具：
-
-```bash
-# 一键安装/更新 Skill 与 MCP 配置
-python -m umu_sdk.skills.install
-
-# 检查安装状态
-python -m umu_sdk.skills.install --check
-
-# 强制升级到最新版
-python -m umu_sdk.skills.install --upgrade
-```
-
-这条命令会：
-- 安装/升级 `umu-skills` PyPI 包
-- 把 Skill 文件复制到 Claude Code 全局 skills 目录
-- 在 `.claude/settings.json` 中配置好 `umu-teacher`、`umu-student`、`umu-admin` 三个 MCP server（使用 `python -m` 启动，无需配置 PATH）
-
-安装完成后**重启 Claude Code**。
-
-#### 2. 配置账号
-
-首次输入 `/umu` 时，如果缺少账号，Claude 会交互式询问并自动加密保存到：
-
-```text
-Windows: C:\Users\<用户名>\.claude\skills\umu\credentials.enc
-macOS/Linux: ~/.claude/skills/umu/credentials.enc
-```
-
-你可以配置以下角色的账号和密码：
-
-- **Teacher（讲师）**：创建课程、上传资源、管理小节
-- **Student（学员）**：报名课程、学习、查看进度
-- **Admin（管理员）**：账号管理、组织架构、课程审核、学习记录、数据查询
-
-只需要配置你实际会用到的角色即可。
-
-加密方式：
-- 凭证本身使用 **Fernet 对称加密**
-- Fernet 密钥由操作系统 keyring 保护（Windows DPAPI / macOS Keychain / Linux Secret Service）
-- keyring 不可用时自动回退到同目录的 `.fernet.key` 文件
-
-保存账号后，**必须重启 Claude Code**，MCP server 才能读取凭证并开始执行 UMU 操作。
-
-你也可以随时通过 `/umu` 以对话方式新增或修改账号信息，例如：
-
-```text
-/umu 添加管理员账号
-/umu 修改我的讲师账号
-/umu 更新管理员密码
-/umu 删除 student 的账号信息
-```
-
-修改后同样需要重启 Claude Code。
-
-#### 3. 使用示例
-
-```text
-/umu 帮我创建一个课程，名字叫《新员工入职培训》
-/umu 获取平台上的用户清单
-/umu 给学员张三报名课程 aet504
-/umu 批量创建 10 个学员账号并为他们报名《销售技巧》课程
-/umu 上传 SCORM 课件 /path/to/course.zip 并创建一个新课程绑定它
-```
-
-#### 4. 修改账号信息
-
-你可以通过自然语言指令让 AI 更新保存的账号：
-
-```text
-/umu 修改我的讲师账号
-/umu 更新管理员密码
-/umu 把学员账号改成 xxx
-/umu 删除 student 的账号信息
-```
-
-修改后需要重启 Claude Code，让 MCP server 重新读取凭证。
+更推荐直接使用前文的一键安装命令 `python -m umu_sdk.skills.install`，它会自动完成三个 server 的配置。
 
 ## 可用工具
 
@@ -200,7 +211,7 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 | 讲师 | `adm_list_instructors` |
 | 授课记录 | `adm_list_teaching_records` |
 
-### 教师工具（55）
+### 教师工具（61）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -208,6 +219,7 @@ macOS/Linux: ~/.claude/skills/umu/credentials.enc
 | 会话 | `tch_create_session`, `tch_list_sessions`, `tch_destroy_session` |
 | 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext`, `tch_submit_course_for_audit` |
 | 课程列表 | `tch_list_created_courses`, `tch_list_cooperated_courses`, `tch_list_participated_courses` |
+| 课程协同 | `tch_list_course_collaborators`, `tch_search_collaborator_accounts`, `tch_invite_course_collaborator`, `tch_update_collaborator_role`, `tch_remove_course_collaborator`, `tch_transfer_course_owner` |
 | 课程分类 | `tch_get_categories` |
 | 环节 | `tch_create_scorm_section`, `tch_create_video_section`, `tch_create_article_section`, `tch_create_infographic_section`, `tch_create_document_section`, `tch_create_survey_section`, `tch_create_exam_section`, `tch_create_signin_section` |
 | 环节修改 | `tch_update_scorm_section`, `tch_update_video_section`, `tch_update_article_section`, `tch_update_infographic_section`, `tch_update_document_section`, `tch_update_survey_section`, `tch_update_exam_section`, `tch_update_signin_section` |
@@ -285,6 +297,7 @@ python -m umu_sdk.skills.server
 | `get_course_info` | teacher | 获取课程详情 |
 | `list_my_courses` | teacher | 列出讲师创建的课程 |
 | `submit_course_for_audit` | teacher | 将课程提交至企业知识库审核 |
+| `manage_course_collaborators` | teacher | 管理课程协同者（列出/邀请/调整/删除/转让） |
 | `enroll_course` | student | 学员报名课程 |
 | `get_course_progress` | student | 查询学员课程进度 |
 | `resolve_course_identifier` | student | 解析课程访问码/短域名/URL |
@@ -300,7 +313,6 @@ python -m umu_sdk.skills.server
 | `submit_exam` | student | 提交考试（JSON） |
 | `submit_exam_simple` | student | 使用简化配置提交考试 |
 | `complete_entire_course` | student | 自动完成整门课程 |
-| `batch_onboard_users` | admin + student | 批量创建学员账号并报名课程 |
 | `list_departments` | admin | 列出部门 |
 | `get_department_tree` | admin | 获取完整部门树 |
 | `get_department` | admin | 获取部门详情 |
@@ -338,7 +350,7 @@ python -m umu_sdk.skills.server
 | `enable_account` | admin | 启用账号 |
 | `update_account` | admin | 编辑账号信息（姓名、邮箱、角色、分组、工号等） |
 | `get_learning_records` | admin | 查询学习记录 |
-| `get_user_tasks` | admin | 查询用户任务 |
+| `get_user_tasks` | admin | 查询学习任务明细 |
 | `get_instructors` | admin | 查询讲师列表 |
 | `get_teaching_records` | admin | 查询授课记录 |
 
