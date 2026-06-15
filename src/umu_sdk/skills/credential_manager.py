@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """UMU Skills 凭证管理器.
 
 使用 Fernet 对称加密保存账号信息，并用操作系统 keyring（Windows DPAPI /

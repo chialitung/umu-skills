@@ -4,6 +4,16 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+> **⚠️ 免责声明**
+>
+> `umu-skills` 是一个**非官方、独立第三方**项目，与 UMU（优幕）及其关联公司不存在任何隶属、赞助或认可关系。
+>
+> 本项目通过分析 UMU 前端网页公开可见的接口行为实现，仅供学习、研究和自动化管理个人/企业自己拥有的 UMU 账号使用。
+>
+> 使用本工具可能违反 UMU 的服务条款，导致账号受限、功能变更或法律风险。**使用者需自行承担全部责任**。作者不对任何直接或间接后果负责。
+>
+> UMU 的接口随时可能变更，本项目不保证长期可用。
+
 UMU Skills 是一个 AI 技能框架，它将 UMU 学习平台的管理操作封装为可供 AI 助手调用的工具。它通过 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 与 Claude、Cursor、Cline 等 AI 客户端集成。
 
 ## 功能特性

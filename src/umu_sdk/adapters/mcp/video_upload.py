@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """音视频上传核心模块.
 
 封装"我的音视频"资源上传的完整流程，支持：

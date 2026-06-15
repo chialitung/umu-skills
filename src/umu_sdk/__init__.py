@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """UMU SDK - Python SDK for UMU LMS Platform.
 
 基于逆向分析构建的 Python SDK，提供课程、资源、用户等管理功能，

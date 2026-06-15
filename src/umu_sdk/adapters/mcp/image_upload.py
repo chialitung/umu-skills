@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """通用图片/媒体文件上传器.
 
 基于 cos_upload.py 中的 COS 签名逻辑，支持图片等小型媒体文件的上传。

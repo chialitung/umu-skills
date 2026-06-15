@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """Skill 注册表.
 
 负责发现、注册、查询 Skill，并支持从模块自动加载被 @skill 装饰的函数。

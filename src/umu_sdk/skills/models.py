@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """Skills orchestration layer models.
 
 定义技能编排层使用的 Pydantic 模型，包括子 MCP 服务器配置、

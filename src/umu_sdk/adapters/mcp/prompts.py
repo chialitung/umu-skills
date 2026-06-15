@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """MCP Prompts — 给 AI 的标准操作流程指引.
 
 这些 Prompt 不是强制流程，而是降低 AI 推理成本的参考模板。

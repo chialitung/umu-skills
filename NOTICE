@@ -1,0 +1,16 @@
+umu-skills
+Copyright 2026 umu-skills contributors
+
+This is an independent, unofficial, third-party project. It is not affiliated
+with, endorsed by, or sponsored by UMU (优幕） or its parent companies.
+
+The software interacts with public-facing UMU web endpoints by simulating
+browser requests based on observations made from the official UMU website. UMU
+may change its APIs, terms of service, or technical measures at any time.
+
+USE AT YOUR OWN RISK. The authors are not responsible for any account
+suspension, data loss, service disruption, legal dispute, or other consequence
+arising from the use of this software.
+
+"UMU" and any related marks are trademarks of their respective owners. This
+project does not claim any rights to those marks.

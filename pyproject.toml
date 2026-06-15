@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "umu-skills"
 version = "0.14.0"
-description = "UMU Skills - AI Skill Framework for UMU Learning Platform"
+description = "An unofficial, third-party AI Skill framework for UMU Learning Platform operations via MCP"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "UMU Skills Team"},
+    {name = "umu-skills contributors"},
 ]
 keywords = ["umu", "lms", "mcp", "ai", "skills", "education"]
 classifiers = [

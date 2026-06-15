@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """Admin MCP 账号管理相关 Pydantic 模型.
 
 本模块将账号清单接口的数据结构代码化，供后续数据处理、类型检查

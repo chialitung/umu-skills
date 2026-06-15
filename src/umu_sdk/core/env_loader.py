@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """.env 文件加载工具.
 
 提供不依赖第三方库的标准库实现，用于在 MCP server 启动或登录类 Tool

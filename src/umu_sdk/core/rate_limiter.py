@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """UMU API 调用频率限制器.
 
 用于控制客户端对 UMU 服务器的请求频率，避免高频调用导致服务器性能风险.

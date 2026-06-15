@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """Skills 编排层配置管理.
 
 支持从默认值、JSON 配置文件和环境变量加载子 MCP 服务器配置。

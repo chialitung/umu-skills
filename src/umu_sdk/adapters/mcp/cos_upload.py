@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """腾讯云 COS 上传核心模块.
 
 封装 SCORM 课程包上传的完整流程，支持：

@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """Skills 编排层的子 MCP 客户端.
 
 通过 stdio 子进程启动并连接 teacher/student/admin 等子 MCP Server，

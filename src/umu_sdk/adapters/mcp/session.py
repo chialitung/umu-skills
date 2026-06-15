@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """MCP 会话管理器 — 支持多用户会话隔离.
 
 每个会话拥有独立的 UMUClient 实例（含独立的 httpx.Client 和 Cookie Jar），

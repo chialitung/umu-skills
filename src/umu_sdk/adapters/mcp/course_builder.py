@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """课程构建器 — 封装创建课程和 SCORM 小节的 API 流程.
 
 基于 HAR 分析得到的实际 API 调用序列：

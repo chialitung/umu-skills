@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """课程管理端点.
 
 对应 UMU 系统中"我的课程"模块的 API 接口.

@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """UMU 统一技能编排 MCP Server.
 
 将多个子 MCP（teacher/student/admin）封装为高阶 Skill，

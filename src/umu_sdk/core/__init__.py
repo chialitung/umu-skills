@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """UMU Skills SDK Core.
 
 SDK 核心层 — HTTP 客户端、认证、加密、数据模型、错误处理.

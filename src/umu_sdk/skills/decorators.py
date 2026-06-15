@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """Skill 装饰器与执行上下文.
 
 提供 `@skill()` 装饰器用于声明高阶 Skill，以及 Skill 执行时使用的上下文。

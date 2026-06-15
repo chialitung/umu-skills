@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """加密凭证加载器.
 
 供 MCP server 启动时调用，支持多来源按优先级加载：

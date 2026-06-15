@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """UMU 管理员端 MCP Server.
 
 将 UMU 平台的管理员操作暴露为 MCP Tools，供 AI 自主编排账号管理、

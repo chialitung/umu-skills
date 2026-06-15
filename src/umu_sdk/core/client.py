@@ -1,3 +1,7 @@
+# umu-skills: unofficial UMU platform automation helpers
+# This file is part of an independent, third-party project and is not
+# affiliated with UMU. Use at your own risk.
+
 """UMU HTTP 客户端和主客户端.
 
 基于 httpx 构建，提供同步/异步请求支持、认证拦截、错误处理、环境验证.
