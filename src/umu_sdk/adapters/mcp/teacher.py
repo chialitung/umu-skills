@@ -7524,6 +7524,48 @@ async def tch_update_collaborator_role(
         return _err("UPDATE_COLLABORATOR_ROLE_FAILED", str(e))
 
 
+@mcp.tool()
+async def tch_remove_course_collaborator(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    cooperation_info_id: Annotated[str, Field(description="协同关系 ID，从 tch_list_course_collaborators 获取")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """删除课程的协同者."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        resp = client.post(
+            client.desktop_url("/api/cooperation/del"),
+            data={"cooperation_info_ids": str(cooperation_info_id)},
+        )
+        ok, data, err = _parse_collaboration_response(resp)
+        if not ok:
+            return _err("REMOVE_COLLABORATOR_FAILED", err or "删除协同者失败")
+
+        result = data.get("result") if isinstance(data, dict) else None
+        return _ok(
+            data={
+                "cooperation_info_id": cooperation_info_id,
+                "group_id": group_id,
+                "result": result,
+            },
+            next_action="proceed",
+            suggested_action="如需确认，可调用 tch_list_course_collaborators",
+        )
+    except Exception as e:
+        logger.exception("删除课程协同者失败")
+        return _err("REMOVE_COLLABORATOR_FAILED", str(e))
+
+
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
