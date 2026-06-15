@@ -7302,6 +7302,57 @@ async def tch_list_course_collaborators(
         return _err("LIST_COLLABORATORS_FAILED", str(e))
 
 
+@mcp.tool()
+async def tch_search_collaborator_accounts(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    keyword: Annotated[str, Field(description="查询关键词：邮箱、姓名、用户名或手机号")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """搜索可设置为课程协同者的账号.
+
+    仅返回角色为讲师、学习负责人、子管理员或管理员的账号。学员角色不会被返回。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        ok, accounts, err = _search_collaborator_account(client, group_id, keyword)
+        if not ok:
+            return _err("SEARCH_COLLABORATOR_FAILED", err or "搜索可协同账号失败")
+
+        normalized = [
+            {
+                "id": acc.get("id"),
+                "umu_id": acc.get("umu_id"),
+                "student_id": acc.get("student_id"),
+                "account": acc.get("account"),
+                "account_type": acc.get("account_type"),
+                "user_name": acc.get("user_name"),
+                "email": acc.get("email"),
+                "phone": acc.get("phone"),
+                "login_name": acc.get("login_name"),
+            }
+            for acc in accounts
+        ]
+
+        return _ok(
+            data={"accounts": normalized, "count": len(normalized)},
+            next_action="proceed",
+            suggested_action="使用 account/umu_id/id 调用 tch_invite_course_collaborator",
+        )
+    except Exception as e:
+        logger.exception("搜索可协同账号失败")
+        return _err("SEARCH_COLLABORATOR_FAILED", str(e))
+
+
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
