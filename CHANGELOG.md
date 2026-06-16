@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-16
+
+### Added
+- `/umu` Skill 新增语义自动触发开关：默认关闭，仅响应显式 `/umu` 命令；开启后基于“需要在 UMU 在线学习平台上完成具体操作”的完整意图自动触发
+- 语义触发模式下支持用户自定义平台别名，例如“敏学社”可作为 UMU 的替代词触发 Skill
+- `python -m umu_sdk.skills.install` 新增 `alias add/remove/list` 子命令，用于管理平台别名
+
+### Changed
+- 优化 `/umu` Skill 的 `description` 与 `trigger` 规则，移除通用教育关键词触发，仅保留 `UMU` 及平台别名作为触发锚点
+- `README.md` 更新安装与使用说明，反映语义触发开关与别名管理功能
+
 ## [0.14.0] - 2026-06-15
 
 ### Added
