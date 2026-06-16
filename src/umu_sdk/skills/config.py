@@ -36,6 +36,7 @@ def _apply_env_overrides(config: SkillsConfig) -> SkillsConfig:
     支持的环境变量：
     - UMU_SKILLS_SERVERS：逗号分隔的启用服务器名称，如 "teacher,student"
     - UMU_SKILLS_TIMEOUT：调用子 MCP 工具的超时秒数
+    - UMU_SKILLS_SEMANTIC_TRIGGER：是否启用语义自动触发（1/true/yes/on 为开启）
     """
     servers_env = os.getenv("UMU_SKILLS_SERVERS")
     if servers_env:
@@ -49,6 +50,10 @@ def _apply_env_overrides(config: SkillsConfig) -> SkillsConfig:
             config.read_timeout_seconds = float(timeout_env)
         except ValueError:
             pass
+
+    semantic_env = os.getenv("UMU_SKILLS_SEMANTIC_TRIGGER")
+    if semantic_env is not None:
+        config.semantic_trigger_enabled = _env_override_bool(semantic_env) or False
 
     return config
 

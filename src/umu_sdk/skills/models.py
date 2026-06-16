@@ -43,6 +43,10 @@ class SkillsConfig(BaseModel):
         default=60.0,
         description="调用子 MCP 工具时的默认超时（秒）",
     )
+    semantic_trigger_enabled: bool = Field(
+        default=False,
+        description="是否启用语义自动触发（关闭时仅响应显式 /umu 命令）",
+    )
 
     @classmethod
     def default(cls) -> SkillsConfig:
@@ -53,6 +57,7 @@ class SkillsConfig(BaseModel):
                 ServerConfig(name="student", command="umu-skills-student"),
                 ServerConfig(name="admin", command="umu-skills-admin"),
             ],
+            semantic_trigger_enabled=False,
         )
 
 

@@ -34,7 +34,7 @@
     {
       "id": 6,
       "prompt": "帮我看看我在 UMU 课程 aet504 的学习进度",
-      "expected_output": "即使没有 /umu，Claude 也应触发 skill，识别为 Student 角色，调用 stu_get_course_structure 或 stu_get_learning_progress。",
+      "expected_output": "prompt 中没有 /umu，但用户明确请求在 UMU 平台查询具体课程的学习进度，Claude 应基于完整意图触发 skill，调用 stu_get_course_structure 或 stu_get_learning_progress。",
       "files": []
     }
   ]

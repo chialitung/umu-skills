@@ -64,3 +64,43 @@ class TestSkillsConfig:
             env={"KEY": "VALUE"},
         )
         assert config.env == {"KEY": "VALUE"}
+
+
+class TestSemanticTriggerConfig:
+    def test_default_config_semantic_trigger_disabled(self) -> None:
+        """默认配置中 semantic_trigger_enabled 应为 False."""
+        config = get_config(use_env_overrides=False)
+        assert config.semantic_trigger_enabled is False
+
+    def test_load_config_with_semantic_trigger(self) -> None:
+        """从字典加载配置时支持 semantic_trigger_enabled 字段."""
+        data = {
+            "servers": [{"name": "teacher", "command": "umu-skills-teacher"}],
+            "semantic_trigger_enabled": True,
+        }
+        config = load_config_from_dict(data)
+        assert config.semantic_trigger_enabled is True
+
+    def test_env_override_semantic_trigger_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """UMU_SKILLS_SEMANTIC_TRIGGER 环境变量为 true 时开启语义触发."""
+        monkeypatch.setenv("UMU_SKILLS_SEMANTIC_TRIGGER", "true")
+        config = get_config(use_env_overrides=True)
+        assert config.semantic_trigger_enabled is True
+
+    def test_env_override_semantic_trigger_variants(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """测试各种布尔字符串变体."""
+        for value in ("1", "true", "yes", "on", "TRUE", "True"):
+            monkeypatch.setenv("UMU_SKILLS_SEMANTIC_TRIGGER", value)
+            config = get_config(use_env_overrides=True)
+            assert config.semantic_trigger_enabled is True, f"failed for {value}"
+
+        for value in ("0", "false", "no", "off", "FALSE", "False"):
+            monkeypatch.setenv("UMU_SKILLS_SEMANTIC_TRIGGER", value)
+            config = get_config(use_env_overrides=True)
+            assert config.semantic_trigger_enabled is False, f"failed for {value}"
+
+    def test_env_override_semantic_trigger_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """环境变量未设置时保持默认值."""
+        monkeypatch.delenv("UMU_SKILLS_SEMANTIC_TRIGGER", raising=False)
+        config = get_config(use_env_overrides=True)
+        assert config.semantic_trigger_enabled is False

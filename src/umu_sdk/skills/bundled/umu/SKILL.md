@@ -1,13 +1,13 @@
 ---
 name: umu
 description: |
-  当用户输入 /umu 斜杠命令，或请求操作 UMU（优幕）在线学习平台时触发。
+  <!-- BEGIN_DESCRIPTION -->
+  当用户输入 /umu 斜杠命令时触发。
   自动识别意图属于 Teacher（讲师）、Student（学员）还是 Admin（管理员）角色，
   并调用对应的 umu-teacher、umu-student、umu-admin MCP server 工具完成任务。
   覆盖课程创建、资源管理、小节编辑、学员报名、学习进度查询、考试/问卷/签到、
   账号管理、组织架构查询等全部 UMU 平台操作场景。
-  如果用户提到 UMU、优幕、课程、学员、讲师、账号、报名、进度、考试、问卷、签到、
-  SCORM、部门、群组等关键词，即使他们没有说 "/umu"，也要使用本 skill。
+  <!-- END_DESCRIPTION -->
 ---
 
 # /umu — UMU 平台操作助手
@@ -16,19 +16,13 @@ description: |
 
 ## 触发条件
 
+<!-- BEGIN_TRIGGER -->
 以下情况必须调用本 skill：
 
 1. 用户输入 `/umu`。
-2. 用户请求与 UMU 平台相关的任何操作，例如：
-   - "帮我创建一个课程"
-   - "获取平台用户清单"
-   - "学员报名课程"
-   - "查看学习进度"
-   - "批量创建账号"
-   - "上传 SCORM 课件"
-   - "禁用某个账号"
-   - "查询部门列表"
-3. 用户提到 UMU、优幕、课程、学员、讲师、账号、报名、进度、考试、问卷、签到、SCORM、部门、群组等关键词。
+
+2. 用户明确请求与 UMU 平台相关的操作且包含 `/umu` 命令。
+<!-- END_TRIGGER -->
 
 ## 前置条件
 
@@ -110,6 +104,82 @@ python -m umu_sdk.skills.install --upgrade
 4. 提示用户重启 Claude Code。
 
 > **注意**：保存或删除账号后，必须重启 Claude Code 才能让 MCP server 重新读取凭证。
+
+## Skill 设置
+
+用户可以通过 `/umu` 对话方式管理 skill 本身的行为，无需手动编辑配置文件。
+
+### 语义触发开关
+
+`semantic_trigger_enabled` 控制 Claude 是否能在日常对话中通过语义识别自动调用本 skill：
+
+- **关闭（默认）**：只有用户输入 `/umu` 时才触发。
+- **开启**：用户明确表达需要在 UMU 在线学习平台上完成具体操作时自动触发。
+
+**注意**：开启后不会仅因“课程”“学员”“考试”等通用教育词汇就触发，必须基于“在 UMU 平台上完成具体操作”的完整意图。
+
+当用户表达以下意图时，直接调用安装脚本切换开关，**不需要询问账号密码**：
+
+- "/umu 打开语义触发"
+- "/umu 启用语义触发"
+- "/umu 开启语义识别"
+- "/umu 关闭语义触发"
+- "/umu 禁用语义触发"
+- "/umu  semantic trigger on/off"（英文也可识别）
+
+处理流程：
+
+1. 判断用户要开启还是关闭。
+2. 运行对应命令：
+   - 开启：`python -m umu_sdk.skills.install --semantic-trigger`
+   - 关闭：`python -m umu_sdk.skills.install --no-semantic-trigger`
+3. 读取命令输出或 `~/.claude/skills/umu/config.json` 确认状态。
+4. 向用户汇报当前状态，并**提醒必须重启 Claude Code** 才能生效。
+
+示例对话：
+
+> 用户：/umu 打开语义触发
+> Claude：正在启用语义自动触发...
+> Claude：语义自动触发已开启。请重启 Claude Code，之后表达需要在 UMU 平台上完成具体操作时我会自动调用 /umu skill。
+
+> 用户：/umu 关闭语义触发
+> Claude：正在禁用语义自动触发...
+> Claude：语义自动触发已关闭。之后只有输入 `/umu` 时我才会调用 skill。
+
+### 平台别名管理
+
+用户可以通过 `/umu` 对话为 UMU 平台添加自定义别名。别名仅在语义触发开启时生效。
+
+可识别的用户意图示例：
+
+- "/umu 添加别名 敏学社"
+- "/umu 我使用的学习平台叫敏学社"
+- "/umu 我的平台叫优幕学堂"
+- "/umu 删除别名 敏学社"
+- "/umu 列出所有别名"
+
+处理流程：
+
+1. 判断用户要添加、删除还是列出别名；添加时去除"我使用的学习平台叫""我的平台叫"等前缀，提取真正的别名。
+2. 运行对应命令：
+   - 添加：`python -m umu_sdk.skills.install alias add <别名>`
+   - 删除：`python -m umu_sdk.skills.install alias remove <别名>`
+   - 列出：`python -m umu_sdk.skills.install alias list`
+3. 读取命令输出确认结果。
+4. 向用户汇报当前别名列表，并**提醒必须重启 Claude Code** 才能生效。
+
+示例对话：
+
+> 用户：/umu 我使用的学习平台叫敏学社
+> Claude：正在添加别名"敏学社"...
+> Claude：别名"敏学社"已添加。当前别名列表：敏学社。
+> Claude：请重启 Claude Code，之后提到"敏学社"且表达平台操作意图时，我会自动调用 /umu skill。
+
+**约束**：
+
+- 别名数量上限 10 个。
+- 单个别名长度上限 50 个字符。
+- 别名只能包含中文、英文、数字、空格、连字符、下划线和点号。
 
 ## 执行流程
 

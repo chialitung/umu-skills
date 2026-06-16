@@ -7,8 +7,6 @@ from contextlib import ExitStack, contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 @contextmanager
 def _patch_teacher_auth():
