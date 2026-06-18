@@ -57,6 +57,11 @@ CLAUDE.md
 # Claude Code 运行时配置与 skill 定义（不属于 SDK 交付物）
 .claude/
 
+# Manus 风格规划文件（本地任务计划/研究发现/进度日志，不属于 SDK 交付物）
+task_plan.md
+findings.md
+progress.md
+
 # CodeGraph 索引
 .codegraph/
 
