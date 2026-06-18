@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-18
+
+### Added
+- 为多个不支持服务端搜索的 MCP 列表工具增加客户端模糊匹配能力：
+  - Admin：`adm_list_departments`、`adm_list_classes`、`adm_list_groups` 新增 `fuzzy_name`、`top_k`、`similarity_threshold` 参数
+  - Teacher：`tch_list_sections` 新增 `fuzzy_title`；`tch_get_categories` 新增 `fuzzy_name`，同时匹配 `name` 与 `path`
+  - Student：`stu_get_my_courses`、`stu_list_participated_courses` 新增 `fuzzy_title`
+- `adm_list_groups` 新增 `fetch_all` 全量获取能力，提供 `fuzzy_name` 时自动启用
+- `src/umu_sdk/adapters/mcp/utils.py` 新增通用模糊匹配工具函数：`compute_similarity`、`fuzzy_filter_items`、`fuzzy_filter_items_multi_key`
+- 新增 `tests/test_fuzzy_matching.py` 覆盖相似度计算与单/多字段过滤
+
+### Changed
+- 更新 `/umu` Skill 文档（`SKILL.md`）与工具参考（`references/tools.md`），增加模糊匹配使用原则与参数说明
+- `README.md` 工具列表与数量标题已同步检查
+
 ## [0.15.0] - 2026-06-16
 
 ### Added
