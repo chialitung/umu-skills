@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-06-18
+
+### Changed
+- `README.md` 组织架构工具表中补充说明 `adm_update_department` 支持设置部门负责人
+- `/umu` Skill 文档新增"设置/调整部门负责人"工作流示例
+
 ## [0.16.0] - 2026-06-18
 
 ### Added
