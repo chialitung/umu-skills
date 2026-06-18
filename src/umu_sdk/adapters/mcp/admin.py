@@ -35,7 +35,12 @@ from pydantic import Field
 
 from ...core.client import UMUClient
 from ...core.credential_loader import CredentialSource, load_credentials_with_source
-from .utils import format_login_summary, get_login_identity, report_pagination_progress
+from .utils import (
+    format_login_summary,
+    fuzzy_filter_items,
+    get_login_identity,
+    report_pagination_progress,
+)
 from ...core.admin_models import (
     AdminAccount,
     AdminAccountRaw,
@@ -1789,6 +1794,27 @@ async def adm_update_account(
 
 @mcp.tool()
 async def adm_list_departments(
+    fuzzy_name: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的部门名称模糊匹配关键词。提供时会从全量部门中筛选"
+            "最匹配的候选，并返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -1836,6 +1862,15 @@ async def adm_list_departments(
                     "level": int(dept.get("level", 1) or 1),
                     "member_count": int(dept.get("member_count", 0) or 0),
                 }
+            )
+
+        if fuzzy_name and fuzzy_name.strip():
+            departments = fuzzy_filter_items(
+                departments,
+                fuzzy_name,
+                key="department_name",
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
             )
 
         return _ok(
@@ -3106,6 +3141,35 @@ async def adm_list_groups(
         int,
         Field(default=20, ge=1, le=100, description="每页数量（1-100），默认20"),
     ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，"
+            "自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    fuzzy_name: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的分组名称模糊匹配关键词。提供时会自动获取全量列表"
+            "并筛选最匹配的候选，返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -3130,21 +3194,20 @@ async def adm_list_groups(
             suggested_action="调用 adm_login 登录",
         )
 
-    try:
+    effective_fetch_all = fetch_all or bool(fuzzy_name and fuzzy_name.strip())
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict], dict]:
+        """获取单页数据，返回(分组列表, 分页信息)."""
         resp = client.get(
             client.desktop_url("/ajax/enterprise/getGroupList"),
             params={
-                "page": str(page),
-                "size": str(page_size),
+                "page": str(p),
+                "size": str(sz),
             },
         )
 
         if resp.get("status") is not True and resp.get("error_code") != 0:
-            return _err(
-                error_code="LIST_GROUPS_FAILED",
-                error_message=resp.get("error", "获取分组列表失败"),
-                suggested_action="检查管理员权限或稍后重试",
-            )
+            raise RuntimeError(resp.get("error", "获取分组列表失败"))
 
         group_list = resp.get("data", {}).get("list", [])
         groups = []
@@ -3158,19 +3221,81 @@ async def adm_list_groups(
             )
 
         page_info = resp.get("data", {}).get("page_info", {})
+        return groups, page_info
 
-        return _ok(
-            data={
-                "groups": groups,
-                "pagination": {
-                    "total": int(page_info.get("list_total_num", 0) or 0),
-                    "current_page": int(page_info.get("current_page", page) or page),
-                    "page_size": int(page_info.get("size", page_size) or page_size),
+    try:
+        if effective_fetch_all:
+            all_groups: list[dict] = []
+            current_page = 1
+            batch_size = 20
+            total_all = 0
+
+            while True:
+                groups, page_info = _fetch_page(current_page, batch_size)
+                all_groups.extend(groups)
+                total_all = int(page_info.get("list_total_num", 0) or total_all)
+
+                report_pagination_progress(
+                    "adm_list_groups",
+                    current_page,
+                    len(all_groups),
+                    total_all,
+                    20,
+                    is_complete=len(all_groups) >= total_all or not groups,
+                )
+
+                if len(all_groups) >= total_all or not groups:
+                    break
+                current_page += 1
+                if current_page > 50:
+                    report_pagination_progress(
+                        "adm_list_groups",
+                        current_page,
+                        len(all_groups),
+                        total_all,
+                        20,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            result_groups = all_groups
+            if fuzzy_name and fuzzy_name.strip():
+                result_groups = fuzzy_filter_items(
+                    all_groups,
+                    fuzzy_name,
+                    key="group_name",
+                    top_k=top_k,
+                    similarity_threshold=similarity_threshold,
+                )
+
+            return _ok(
+                data={
+                    "groups": result_groups,
+                    "total": len(result_groups),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(result_groups) if result_groups else 0,
+                    },
                 },
-            },
-            next_action="proceed",
-            suggested_action="使用 group_id 在 adm_create_account 中指定分组",
-        )
+                next_action="proceed",
+                suggested_action="使用 group_id 在 adm_create_account 中指定分组",
+            )
+        else:
+            groups, page_info = _fetch_page(page, page_size)
+            return _ok(
+                data={
+                    "groups": groups,
+                    "pagination": {
+                        "total": int(page_info.get("list_total_num", 0) or 0),
+                        "current_page": int(page_info.get("current_page", page) or page),
+                        "page_size": int(page_info.get("size", page_size) or page_size),
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 group_id 在 adm_create_account 中指定分组",
+            )
     except Exception as e:
         return _err(
             error_code="LIST_GROUPS_ERROR",
@@ -5265,6 +5390,27 @@ async def adm_list_classes(
             "自动遍历所有分页并合并结果。",
         ),
     ] = False,
+    fuzzy_name: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的班级名称模糊匹配关键词。提供时会自动获取全量列表"
+            "并筛选最匹配的候选，返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -5296,6 +5442,8 @@ async def adm_list_classes(
             suggested_action="调用 adm_login 登录",
         )
 
+    effective_fetch_all = fetch_all or bool(fuzzy_name and fuzzy_name.strip())
+
     def _fetch_page(p: int, sz: int) -> tuple[list[dict], int]:
         """获取单页数据，返回(班级列表, 总数量)."""
         params: dict[str, str] = {
@@ -5325,7 +5473,7 @@ async def adm_list_classes(
         return classes, total_all
 
     try:
-        if fetch_all:
+        if effective_fetch_all:
             all_classes: list[dict] = []
             current_page = 1
             batch_size = 20
@@ -5360,14 +5508,24 @@ async def adm_list_classes(
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
+            result_classes = all_classes
+            if fuzzy_name and fuzzy_name.strip():
+                result_classes = fuzzy_filter_items(
+                    all_classes,
+                    fuzzy_name,
+                    key="name",
+                    top_k=top_k,
+                    similarity_threshold=similarity_threshold,
+                )
+
             return _ok(
                 data={
-                    "classes": all_classes,
-                    "total": len(all_classes),
+                    "classes": result_classes,
+                    "total": len(result_classes),
                     "pagination": {
                         "total_all": total_all,
                         "current_page": 1,
-                        "page_size": len(all_classes) if all_classes else 0,
+                        "page_size": len(result_classes) if result_classes else 0,
                     },
                 },
                 next_action="proceed",

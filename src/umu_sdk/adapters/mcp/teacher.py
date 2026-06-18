@@ -47,7 +47,13 @@ from pydantic import Field
 
 from ...core.client import UMUClient
 from ...core.credential_loader import CredentialSource, load_credentials_with_source
-from .utils import format_login_summary, get_login_identity, report_pagination_progress
+from .utils import (
+    format_login_summary,
+    fuzzy_filter_items,
+    fuzzy_filter_items_multi_key,
+    get_login_identity,
+    report_pagination_progress,
+)
 from .cos_upload import (
     ScormUploader,
     UploadResult,
@@ -5795,6 +5801,27 @@ async def tch_delete_section(
 @mcp.tool()
 async def tch_list_sections(
     group_id: Annotated[str, Field(description="课程 ID")],
+    fuzzy_title: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的小节标题模糊匹配关键词。提供时会从课程全部小节中"
+            "筛选最匹配的候选，并返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -5827,6 +5854,15 @@ async def tch_list_sections(
     try:
         builder = CourseBuilder(client)
         sections = builder.list_sections(group_id)
+
+        if fuzzy_title and fuzzy_title.strip():
+            sections = fuzzy_filter_items(
+                sections,
+                fuzzy_title,
+                key="title",
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+            )
 
         return _ok(
             data={
@@ -5895,6 +5931,27 @@ async def tch_get_section(
 
 @mcp.tool()
 async def tch_get_categories(
+    fuzzy_name: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的分类名称模糊匹配关键词。提供时会从全部分类中"
+            "筛选最匹配的候选，并返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -5937,6 +5994,15 @@ async def tch_get_categories(
 
         for root in tree:
             walk(root, [])
+
+        if fuzzy_name and fuzzy_name.strip():
+            flat_list = fuzzy_filter_items_multi_key(
+                flat_list,
+                fuzzy_name,
+                keys=["name", "path"],
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+            )
 
         return _ok(
             data={

@@ -33,7 +33,12 @@ from pydantic import Field
 
 from ...core.client import UMUClient
 from ...core.credential_loader import CredentialSource, load_credentials_with_source
-from .utils import format_login_summary, get_login_identity, report_pagination_progress
+from .utils import (
+    format_login_summary,
+    fuzzy_filter_items,
+    get_login_identity,
+    report_pagination_progress,
+)
 from . import prompts
 from .batch import AccountImporter, AccountSource, BatchExecutor
 from .session import SessionManager
@@ -858,6 +863,27 @@ async def stu_get_my_courses(
         bool,
         Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
     ] = False,
+    fuzzy_title: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的课程标题模糊匹配关键词。提供时会自动获取全量列表"
+            "并筛选最匹配的候选，返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -919,8 +945,10 @@ async def stu_get_my_courses(
 
         raise RuntimeError(f"无法获取课程列表: {last_error}")
 
+    effective_fetch_all = fetch_all or bool(fuzzy_title and fuzzy_title.strip())
+
     try:
-        if fetch_all:
+        if effective_fetch_all:
             batch_size = 50
             all_courses: list[dict[str, Any]] = []
             total_all = 0
@@ -965,12 +993,22 @@ async def stu_get_my_courses(
 
                 current_page += 1
 
+            result_courses = all_courses
+            if fuzzy_title and fuzzy_title.strip():
+                result_courses = fuzzy_filter_items(
+                    all_courses,
+                    fuzzy_title,
+                    key="title",
+                    top_k=top_k,
+                    similarity_threshold=similarity_threshold,
+                )
+
             return _ok(
                 data={
-                    "total": total_all,
+                    "total": len(result_courses),
                     "page": current_page,
                     "page_size": batch_size,
-                    "courses": all_courses,
+                    "courses": result_courses,
                 },
                 next_action="proceed",
                 suggested_action="选择要学习的课程，调用 stu_get_course_structure 获取详情",
@@ -3748,6 +3786,27 @@ async def stu_list_participated_courses(
         bool,
         Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
     ] = False,
+    fuzzy_title: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的课程标题模糊匹配关键词。提供时会自动获取全量列表"
+            "并筛选最匹配的候选，返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(default=None, description="可选的会话 ID"),
@@ -3812,8 +3871,10 @@ async def stu_list_participated_courses(
         total_all = int(page_info.get("list_total_num", 0) or 0)
         return formatted_list, total_all
 
+    effective_fetch_all = fetch_all or bool(fuzzy_title and fuzzy_title.strip())
+
     try:
-        if fetch_all:
+        if effective_fetch_all:
             batch_size = 50
             all_items: list[dict[str, Any]] = []
             total_all = 0
@@ -3855,9 +3916,19 @@ async def stu_list_participated_courses(
 
                 current_page += 1
 
+            result_items = all_items
+            if fuzzy_title and fuzzy_title.strip():
+                result_items = fuzzy_filter_items(
+                    all_items,
+                    fuzzy_title,
+                    key="title",
+                    top_k=top_k,
+                    similarity_threshold=similarity_threshold,
+                )
+
             return _ok(
                 data={
-                    "courses": all_items,
+                    "courses": result_items,
                     "filter": {
                         "learn_status": learn_status,
                         "learn_status_label": status_map.get(learn_status, "unknown"),
