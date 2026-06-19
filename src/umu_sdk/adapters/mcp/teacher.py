@@ -8476,6 +8476,317 @@ async def tch_cancel_all_assigned_permissions(
         return _err("CANCEL_ASSIGNED_PERMISSIONS_FAILED", str(e))
 
 
+@mcp.tool()
+async def tch_get_program_access_permission(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取学习项目当前的访问权限设置.
+
+    返回当前学习项目的 access_permission（0=关闭，2=企业内公开，3=指定账户/班级/部门/分组），
+    以及该学习项目可设置的所有权限选项。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        selected_int, options, detail = _get_obj_access_permission(client, program_id, "program")
+        permission_text = _permission_text(selected_int) if selected_int >= 0 else "未知"
+
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "access_permission": selected_int,
+                "permission_text": permission_text,
+                "permission_options": options,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取学习项目访问权限失败")
+        return _err("GET_PROGRAM_ACCESS_PERMISSION_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_set_program_access_permission(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    access_permission: Annotated[
+        int,
+        Field(description="权限：0=关闭，2=企业内公开，3=指定账户", ge=0, le=3),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """设置学习项目的整体访问权限.
+
+    access_permission 取值：
+      0 = 关闭（不可见）
+      2 = 企业内公开
+      3 = 指定账户/班级/部门/分组可见
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        detail = _set_obj_access_permission(
+            client, program_id, "program", access_permission, update_session_permission=True
+        )
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "access_permission": access_permission,
+                "permission_text": _permission_text(access_permission),
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action=(
+                "access_permission=3 时，请继续调用 tch_add_program_access_accounts 添加可见对象"
+                if access_permission == 3 else ""
+            ),
+        )
+    except Exception as e:
+        logger.exception("设置学习项目访问权限失败")
+        return _err("SET_PROGRAM_ACCESS_PERMISSION_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_get_program_access_list(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    page: Annotated[int, Field(default=1, description="页码", ge=1)] = 1,
+    size: Annotated[int, Field(default=20, description="每页数量", ge=1, le=100)] = 20,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取学习项目当前已授权的访问列表.
+
+    当学习项目 access_permission 为 3 时，返回已授权的账户/班级/部门/分组列表。
+    返回结果中的 account_type 字段标识对象类型：user/class/department/group。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        items, page_info = _get_obj_access_list(client, program_id, "program", page, size)
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "page": page,
+                "size": size,
+                "page_info": page_info,
+                "list": items,
+                "total": page_info.get("list_total_num", len(items)),
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取学习项目访问列表失败")
+        return _err("GET_PROGRAM_ACCESS_LIST_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_search_program_access_accounts(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    keyword: Annotated[str, Field(description="搜索关键词：账户邮箱、姓名、班级名称、部门名称或分组名称，支持模糊匹配")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """搜索可授权访问学习项目的账户、班级、部门或分组.
+
+    返回结果中 account_type 为 user 表示账户，class 表示班级，
+    department 表示部门，group 表示分组。
+    建议优先使用完整邮箱搜索账户，以提高匹配准确度。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        ok, accounts, err = _search_access_permission_account(client, program_id, "program", keyword)
+        if not ok:
+            return _err("SEARCH_PROGRAM_ACCESS_ACCOUNTS_FAILED", err or "搜索可授权账户失败")
+
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "keyword": keyword,
+                "accounts": [_format_access_account(acc) for acc in accounts],
+                "total": len(accounts),
+            },
+            next_action="proceed",
+            suggested_action="请从结果中选择目标账户/班级，调用 tch_add_program_access_accounts 添加权限",
+        )
+    except Exception as e:
+        logger.exception("搜索学习项目可授权账户失败")
+        return _err("SEARCH_PROGRAM_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_add_program_access_accounts(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要添加的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id（可调用 tch_search_program_access_accounts 获取）",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """为学习项目添加指定账户/班级/部门/分组可见权限.
+
+    前置条件：学习项目 access_permission 需为 3（指定账户可见）。
+    如当前不是该状态，工具会先自动调用 setprogrampermission 设置为 3，再添加对象。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    if not accounts:
+        return _err(
+            "NO_ACCOUNTS_PROVIDED",
+            "未提供要添加的账户/班级",
+            suggested_action="请先调用 tch_search_program_access_accounts 查询目标",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _add_obj_access_accounts(client, program_id, "program", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "added": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="可调用 tch_search_program_access_accounts 或查看 UMU 后台确认权限已生效",
+        )
+    except Exception as e:
+        logger.exception("添加学习项目指定账户失败")
+        return _err("ADD_PROGRAM_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_remove_program_access_accounts(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要移除的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """移除学习项目的指定账户/班级/部门/分组访问权限."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    if not accounts:
+        return _err(
+            "NO_ACCOUNTS_PROVIDED",
+            "未提供要移除的账户/班级",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _remove_obj_access_accounts(client, program_id, "program", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "removed": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("移除学习项目指定账户失败")
+        return _err("REMOVE_PROGRAM_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_cancel_all_program_permissions(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """取消学习项目的所有指定访问权限.
+
+    调用后会清空学习项目的指定账户/班级列表，常用于将学习项目还原为企业内公开前的清理。
+    如需同时设置为企业内公开，请在调用后继续调用 tch_set_program_access_permission。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        detail = _cancel_all_assigned_permissions(client, program_id, "program")
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="如需还原为企业内公开，请调用 tch_set_program_access_permission(program_id, access_permission=2)",
+        )
+    except Exception as e:
+        logger.exception("取消学习项目指定权限失败")
+        return _err("CANCEL_PROGRAM_ACCESS_PERMISSIONS_FAILED", str(e))
+
+
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
@@ -8512,6 +8823,10 @@ def main() -> None:
     print("            tch_get_course_access_list, tch_search_access_accounts,")
     print("            tch_add_course_access_accounts, tch_remove_course_access_accounts,")
     print("            tch_cancel_all_assigned_permissions,")
+    print("  学习项目权限: tch_set_program_access_permission, tch_get_program_access_permission,")
+    print("                tch_get_program_access_list, tch_search_program_access_accounts,")
+    print("                tch_add_program_access_accounts, tch_remove_program_access_accounts,")
+    print("                tch_cancel_all_program_permissions,")
     print("  小节: tch_create_scorm_section, tch_create_document_section,")
     print("        tch_create_video_section, tch_create_article_section,")
     print("        tch_create_infographic_section, tch_create_survey_section,")

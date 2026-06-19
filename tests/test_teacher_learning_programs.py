@@ -9,7 +9,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from umu_sdk.adapters.mcp.teacher import tch_list_learning_programs
+from umu_sdk.adapters.mcp.teacher import (
+    tch_add_program_access_accounts,
+    tch_cancel_all_program_permissions,
+    tch_get_program_access_list,
+    tch_get_program_access_permission,
+    tch_list_learning_programs,
+    tch_remove_program_access_accounts,
+    tch_search_program_access_accounts,
+    tch_set_program_access_permission,
+)
 
 
 @pytest.fixture
@@ -85,3 +94,87 @@ class TestTchListLearningPrograms:
             result = json.loads(await tch_list_learning_programs(scope="unknown"))
         assert result["success"] is False
         assert result["error_code"] == "INVALID_SCOPE"
+
+
+class TestTchProgramAccessPermission:
+    async def test_get_program_access_permission(self, mock_client):
+        mock_client.get.return_value = {
+            "status": True,
+            "error_code": 0,
+            "data": {"permission_option": ["2", "3", "0"], "selected_option": "3"},
+        }
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_get_program_access_permission("359923"))
+        assert result["success"] is True
+        assert result["data"]["access_permission"] == 3
+
+    async def test_set_program_access_permission(self, mock_client):
+        mock_client.post.return_value = {
+            "status": True,
+            "error_code": 0,
+            "data": {"program_id": "359923", "access_permission": "2"},
+        }
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_set_program_access_permission("359923", 2))
+        assert result["success"] is True
+        assert result["data"]["access_permission"] == 2
+        assert result["data"]["permission_text"] == "企业内公开"
+
+    async def test_get_program_access_list(self, mock_client):
+        mock_client.get.return_value = {
+            "status": True,
+            "error_code": 0,
+            "data": {
+                "page_info": {"list_total_num": 1, "current_page": 1, "size": 20},
+                "list": [{"id": "1", "account": "u1", "account_type": "user", "is_exist": 1}],
+            },
+        }
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_get_program_access_list("359923"))
+        assert result["success"] is True
+        assert len(result["data"]["list"]) == 1
+
+    async def test_search_program_access_accounts(self, mock_client):
+        mock_client.post.return_value = {
+            "status": True,
+            "error_code": 0,
+            "data": [{"id": "1", "account": "u1", "account_type": "user", "is_exist": 1}],
+        }
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_search_program_access_accounts("359923", "u1"))
+        assert result["success"] is True
+        assert result["data"]["total"] == 1
+
+    async def test_add_program_access_accounts(self, mock_client):
+        mock_client.post.return_value = {
+            "status": True,
+            "error_code": 0,
+            "data": {"total_num": 1, "success_num": 1, "fail_num": 0},
+        }
+        accounts = [{"account": "u1", "account_type": "user", "id": "1"}]
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_add_program_access_accounts("359923", accounts))
+        assert result["success"] is True
+        assert result["data"]["added"] == 1
+
+    async def test_remove_program_access_accounts(self, mock_client):
+        mock_client.post.return_value = {
+            "status": True,
+            "error_code": 0,
+            "data": {"total_num": 1, "success_num": 1, "fail_num": 0},
+        }
+        accounts = [{"account": "u1", "account_type": "user", "id": "1"}]
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_remove_program_access_accounts("359923", accounts))
+        assert result["success"] is True
+        assert result["data"]["removed"] == 1
+
+    async def test_cancel_all_program_permissions(self, mock_client):
+        mock_client.post.return_value = {
+            "status": True,
+            "error_code": 0,
+            "data": {"status": 1},
+        }
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_cancel_all_program_permissions("359923"))
+        assert result["success"] is True
