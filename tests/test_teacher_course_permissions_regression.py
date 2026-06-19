@@ -129,3 +129,4 @@ class TestCourseAccessPermissionRegression:
         with _auth_patch(mock_client):
             result = json.loads(await tch_cancel_all_assigned_permissions("123"))
         assert result["success"] is True
+

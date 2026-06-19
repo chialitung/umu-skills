@@ -40,7 +40,6 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import Annotated, Any, AsyncIterator
 
 from mcp.server.fastmcp import FastMCP
@@ -8309,162 +8308,6 @@ async def tch_cancel_all_assigned_permissions(
         return _err("CANCEL_ASSIGNED_PERMISSIONS_FAILED", str(e))
 
 
-def _format_auto_close_tips(close_time: str) -> str:
-    """将关闭时间格式化为 UMU 前端展示文本.
-
-    支持的输入格式示例：
-    - 2026-06-30T10:00:00
-    - 2026-06-30 10:00:00
-    - 2026-06-30T10:00
-    - 2026-06-30 10:00
-    - 2026/06/30 10:00
-    - 2026年06月30日10点
-
-    输出固定为：课程开启自动关闭时间，将在YYYY年M月D日H点关闭
-    """
-    close_time = close_time.strip()
-    formats = [
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-        "%Y-%m-%d %H:%M",
-        "%Y/%m/%d %H:%M",
-        "%Y年%m月%d日%H点",
-    ]
-    parsed: datetime | None = None
-    for fmt in formats:
-        try:
-            parsed = datetime.strptime(close_time, fmt)
-            break
-        except ValueError:
-            continue
-    if parsed is None:
-        raise ValueError(
-            f"无法解析关闭时间: {close_time}，支持的格式如 2026-06-30 10:00"
-        )
-    formatted = f"{parsed.year}年{parsed.month}月{parsed.day}日{parsed.hour}点关闭"
-    return f"课程开启自动关闭时间，将在{formatted}"
-
-
-@mcp.tool()
-async def tch_set_course_auto_close(
-    group_id: Annotated[str, Field(description="课程 ID")],
-    close_time: Annotated[
-        str,
-        Field(
-            description="自动关闭时间，支持格式如 2026-06-30 10:00、2026-06-30T10:00:00、2026年6月30日10点"
-        ),
-    ],
-    custom_tips: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="自定义提示文本；若提供则直接作为 accessPermissionTips，忽略 close_time 的默认格式化",
-        ),
-    ] = None,
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
-        ),
-    ] = None,
-) -> str:
-    """设置课程的定时自动关闭提示.
-
-    该接口通过保存 group_setup.accessPermissionTips 来告知 UMU 在指定时间后自动关闭课程。
-    关闭时间会被格式化为 UMU 前端展示文本，如：
-    "课程开启自动关闭时间，将在2026年6月30日10点关闭"。
-    """
-    client = _get_client(session_id)
-    auth_err = _require_auth(client)
-    if auth_err:
-        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
-
-    try:
-        tips = custom_tips.strip() if custom_tips else _format_auto_close_tips(close_time)
-    except ValueError as e:
-        return _err("INVALID_CLOSE_TIME", str(e), next_action="needs_user_input")
-
-    try:
-        group_setup = {
-            "accessPermissionTips": tips,
-            "access_permission_tips": tips,
-            "enable_mini_program": 0,
-            "learn_within_mini_program": 0,
-        }
-        resp = client.post(
-            client.desktop_url("/api/group/savesetup"),
-            data={
-                "group_id": str(group_id),
-                "group_setup": json.dumps(group_setup, ensure_ascii=False),
-            },
-        )
-        ok, data, err = _parse_collaboration_response(resp)
-        if not ok:
-            return _err("SET_COURSE_AUTO_CLOSE_FAILED", err or "设置课程定时自动关闭失败")
-
-        return _ok(
-            data={
-                "group_id": str(group_id),
-                "access_permission_tips": tips,
-                "detail": data,
-            },
-            next_action="proceed",
-        )
-    except Exception as e:
-        logger.exception("设置课程定时自动关闭失败")
-        return _err("SET_COURSE_AUTO_CLOSE_FAILED", str(e))
-
-
-@mcp.tool()
-async def tch_cancel_course_auto_close(
-    group_id: Annotated[str, Field(description="课程 ID")],
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
-        ),
-    ] = None,
-) -> str:
-    """取消课程的定时自动关闭."""
-    client = _get_client(session_id)
-    auth_err = _require_auth(client)
-    if auth_err:
-        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
-
-    try:
-        group_setup = {
-            "accessPermissionTips": "",
-            "access_permission_tips": "",
-            "enable_mini_program": 0,
-            "learn_within_mini_program": 0,
-        }
-        resp = client.post(
-            client.desktop_url("/api/group/savesetup"),
-            data={
-                "group_id": str(group_id),
-                "group_setup": json.dumps(group_setup, ensure_ascii=False),
-            },
-        )
-        ok, data, err = _parse_collaboration_response(resp)
-        if not ok:
-            return _err("CANCEL_COURSE_AUTO_CLOSE_FAILED", err or "取消课程定时自动关闭失败")
-
-        return _ok(
-            data={
-                "group_id": str(group_id),
-                "access_permission_tips": "",
-                "detail": data,
-            },
-            next_action="proceed",
-        )
-    except Exception as e:
-        logger.exception("取消课程定时自动关闭失败")
-        return _err("CANCEL_COURSE_AUTO_CLOSE_FAILED", str(e))
-
-
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
@@ -8501,7 +8344,6 @@ def main() -> None:
     print("            tch_get_course_access_list, tch_search_access_accounts,")
     print("            tch_add_course_access_accounts, tch_remove_course_access_accounts,")
     print("            tch_cancel_all_assigned_permissions,")
-    print("            tch_set_course_auto_close, tch_cancel_course_auto_close")
     print("  小节: tch_create_scorm_section, tch_create_document_section,")
     print("        tch_create_video_section, tch_create_article_section,")
     print("        tch_create_infographic_section, tch_create_survey_section,")
