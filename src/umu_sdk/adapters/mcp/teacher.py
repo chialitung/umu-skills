@@ -40,6 +40,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated, Any, AsyncIterator
 
 from mcp.server.fastmcp import FastMCP
@@ -7704,6 +7705,767 @@ async def tch_transfer_course_owner(
 
 
 # ---------------------------------------------------------------------------
+# Tools: 课程访问权限
+# ---------------------------------------------------------------------------
+
+_PERMISSION_TEXT_MAP: dict[int, str] = {
+    0: "关闭",
+    1: "公开",
+    2: "企业内公开",
+    3: "指定账户",
+}
+
+
+def _permission_text(access_permission: int) -> str:
+    """将权限数值转换为中文描述."""
+    return _PERMISSION_TEXT_MAP.get(access_permission, f"未知({access_permission})")
+
+
+def _search_access_permission_account(
+    client: UMUClient,
+    obj_id: str,
+    obj_type: str,
+    keyword: str,
+) -> tuple[bool, list[dict[str, Any]], str]:
+    """搜索可授权访问的账户/班级/部门/分组.
+
+    对应 UMU 接口 POST /api/manage/accessaccountmatchv2，
+    search_source=access_permission 用于课程/项目访问权限场景。
+
+    Args:
+        obj_id: 课程 ID 或学习项目 ID。
+        obj_type: "group" 表示课程，"program" 表示学习项目。
+        keyword: 搜索关键词。
+
+    Returns:
+        (success, accounts, error_message)
+    """
+    data: dict[str, Any] = {
+        "accounts": keyword,
+        "search_source": "access_permission",
+        "is_suggestion": "1",
+    }
+    if obj_type == "group":
+        data["group_id"] = obj_id
+        data["is_sug"] = "1"
+    elif obj_type == "program":
+        data["program_id"] = obj_id
+    else:
+        return False, [], f"不支持的 obj_type: {obj_type}"
+
+    resp = client.post(
+        client.desktop_url("/api/manage/accessaccountmatchv2"),
+        data=data,
+    )
+    ok, result, err = _parse_collaboration_response(resp)
+    if not ok:
+        return False, [], err
+    accounts = [item for item in (result or []) if item.get("is_exist") == 1]
+    return True, accounts, ""
+
+
+def _set_obj_access_permission(
+    client: UMUClient,
+    obj_id: str,
+    obj_type: str,
+    access_permission: int,
+    update_session_permission: bool = True,
+) -> dict[str, Any]:
+    """设置对象的整体访问权限.
+
+    Args:
+        obj_id: 课程/项目 ID。
+        obj_type: "group" 或 "program"。
+        access_permission: 0/2/3。
+        update_session_permission: 是否同步更新小节权限。
+
+    Returns:
+        API 返回的 data 字段。
+    """
+    if obj_type == "group":
+        endpoint = "/api/group/setgrouppermission"
+        id_key = "group_id"
+    elif obj_type == "program":
+        endpoint = "/api/program/setprogrampermission"
+        id_key = "program_id"
+    else:
+        raise ValueError(f"不支持的 obj_type: {obj_type}")
+
+    resp = client.post(
+        client.desktop_url(endpoint),
+        data={
+            id_key: str(obj_id),
+            "access_permission": str(access_permission),
+            "update_session_permission": "1" if update_session_permission else "0",
+        },
+    )
+    ok, data, err = _parse_collaboration_response(resp)
+    if not ok:
+        raise RuntimeError(err or "设置访问权限失败")
+    return data or {}
+
+
+def _get_obj_access_permission(
+    client: UMUClient,
+    obj_id: str,
+    obj_type: str,
+) -> tuple[int, list[Any], dict[str, Any]]:
+    """获取对象当前的访问权限设置.
+
+    Returns:
+        (selected_int, permission_options, detail)
+    """
+    resp = client.get(
+        client.desktop_url("/api/group/getAccessPermissionOption"),
+        params={
+            "obj_id": str(obj_id),
+            "obj_type": obj_type,
+        },
+    )
+    ok, data, err = _parse_collaboration_response(resp)
+    if not ok:
+        raise RuntimeError(err or "获取访问权限失败")
+
+    selected = data.get("selected_option", "") if isinstance(data, dict) else ""
+    try:
+        selected_int = int(selected)
+    except (ValueError, TypeError):
+        selected_int = -1
+
+    options = data.get("permission_option", []) if isinstance(data, dict) else []
+    return selected_int, options, data or {}
+
+
+def _get_obj_access_list(
+    client: UMUClient,
+    obj_id: str,
+    obj_type: str,
+    page: int,
+    size: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """获取对象当前已授权的访问列表."""
+    resp = client.get(
+        client.desktop_url("/api/manage/getcourseaccesslist"),
+        params={
+            "obj_id": str(obj_id),
+            "obj_type": obj_type,
+            "page": page,
+            "size": size,
+        },
+    )
+    ok, data, err = _parse_collaboration_response(resp)
+    if not ok:
+        raise RuntimeError(err or "获取访问列表失败")
+
+    page_info = data.get("page_info", {}) if isinstance(data, dict) else {}
+    items = data.get("list", []) if isinstance(data, dict) else []
+    return [_format_access_account(item) for item in items], page_info
+
+
+def _add_obj_access_accounts(
+    client: UMUClient,
+    obj_id: str,
+    obj_type: str,
+    accounts: list[dict[str, Any]],
+    update_session_permission: bool = True,
+) -> dict[str, Any]:
+    """为对象添加指定账户/班级/部门/分组可见权限."""
+    payloads = [_build_access_account_payload(acc, 1) for acc in accounts]
+    resp = client.post(
+        client.desktop_url("/api/manage/updateaccessuser"),
+        data={
+            "obj_id": str(obj_id),
+            "obj_type": obj_type,
+            "update_session_permission": "1" if update_session_permission else "0",
+            "accounts": json.dumps(payloads, ensure_ascii=False),
+        },
+    )
+    ok, data, err = _parse_collaboration_response(resp)
+    if not ok:
+        raise RuntimeError(err or "添加指定账户失败")
+    return data or {}
+
+
+def _remove_obj_access_accounts(
+    client: UMUClient,
+    obj_id: str,
+    obj_type: str,
+    accounts: list[dict[str, Any]],
+    update_session_permission: bool = True,
+) -> dict[str, Any]:
+    """移除对象的指定账户/班级/部门/分组访问权限."""
+    payloads = [_build_access_account_payload(acc, 2) for acc in accounts]
+    resp = client.post(
+        client.desktop_url("/api/manage/updateaccessuser"),
+        data={
+            "obj_id": str(obj_id),
+            "obj_type": obj_type,
+            "update_session_permission": "1" if update_session_permission else "0",
+            "accounts": json.dumps(payloads, ensure_ascii=False),
+        },
+    )
+    ok, data, err = _parse_collaboration_response(resp)
+    if not ok:
+        raise RuntimeError(err or "移除指定账户失败")
+    return data or {}
+
+
+def _cancel_all_assigned_permissions(
+    client: UMUClient,
+    obj_id: str,
+    obj_type: str,
+) -> dict[str, Any]:
+    """取消对象的所有指定访问权限."""
+    resp = client.post(
+        client.desktop_url("/uapi/v1/access-permission/cancel-all-assigned-permission"),
+        data={
+            "obj_id": str(obj_id),
+            "obj_type": obj_type,
+        },
+    )
+    ok, data, err = _parse_collaboration_response(resp)
+    if not ok:
+        raise RuntimeError(err or "取消指定权限失败")
+    return data or {}
+
+
+def _build_access_account_payload(
+    account: dict[str, Any],
+    action_type: int,
+) -> dict[str, Any]:
+    """构造 updateaccessuser 的单个账户元素.
+
+    Args:
+        account: 账户/班级/部门/分组信息，需包含 account、account_type、id。
+                 - user：使用 id
+                 - class：还需包含 class_id（如缺失则回退到 id）
+                 - department：还需包含 department_id（如缺失则回退到 id）
+                 - group：还需包含 user_group_id（如缺失则回退到 id）
+        action_type: 1=添加权限，2=删除权限。
+
+    Returns:
+        API 所需 payload 字典。
+    """
+    account_type = account.get("account_type", "user")
+    payload: dict[str, Any] = {
+        "type": action_type,
+        "account": account.get("account", ""),
+        "account_type": account_type,
+        "id": str(account.get("id", "")),
+    }
+    if account_type == "class":
+        payload["class_id"] = str(account.get("class_id", account.get("id", "")))
+    elif account_type == "department":
+        payload["department_id"] = str(account.get("department_id", account.get("id", "")))
+    elif account_type == "group":
+        payload["user_group_id"] = str(account.get("user_group_id", account.get("id", "")))
+    return payload
+
+
+def _format_access_account(account: dict[str, Any]) -> dict[str, Any]:
+    """统一格式化 accessaccountmatchv2 返回的账户/班级/部门/分组信息."""
+    account_type = account.get("account_type", "user")
+    formatted: dict[str, Any] = {
+        "id": str(account.get("id", "")),
+        "account": account.get("account", ""),
+        "account_type": account_type,
+        "is_exist": account.get("is_exist", 0),
+    }
+    if account_type == "user":
+        formatted["user_name"] = account.get("user_name", "")
+        formatted["email"] = account.get("email", "")
+        formatted["phone"] = account.get("phone", "")
+        formatted["umu_id"] = str(account.get("umu_id", "") or account.get("id", ""))
+        formatted["student_id"] = str(account.get("student_id", ""))
+    elif account_type == "class":
+        formatted["class_name"] = account.get("class_name", account.get("account", ""))
+        formatted["class_id"] = str(account.get("class_id", account.get("id", "")))
+    elif account_type == "department":
+        formatted["department_name"] = account.get("department_name", account.get("account", ""))
+        formatted["department_id"] = str(account.get("department_id", account.get("id", "")))
+        formatted["user_num"] = account.get("user_num", "")
+    elif account_type == "group":
+        formatted["group_name"] = account.get("group_name", account.get("account", ""))
+        formatted["user_group_id"] = str(account.get("user_group_id", account.get("id", "")))
+        formatted["user_num"] = account.get("user_num", "")
+    return formatted
+
+
+@mcp.tool()
+async def tch_set_course_access_permission(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    access_permission: Annotated[
+        int,
+        Field(
+            description="课程访问权限：0=关闭（任何人不可见），2=企业内公开，3=指定账户/班级/部门/分组可见",
+            ge=0,
+            le=3,
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """设置课程的整体访问权限.
+
+    支持三种状态：
+    - 0：关闭，任何人均不可访问
+    - 2：企业内公开，企业内成员均可访问
+    - 3：指定账户/班级/部门/分组可见，需要再调用 tch_add_course_access_accounts 添加可见对象
+
+    设置时会同步更新课程下所有小节的权限（update_session_permission=1）。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        detail = _set_obj_access_permission(
+            client, group_id, "group", access_permission, update_session_permission=True
+        )
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "access_permission": access_permission,
+                "permission_text": _permission_text(access_permission),
+                "update_session_permission": True,
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action=(
+                "access_permission=3 时，请继续调用 tch_add_course_access_accounts 添加可见账户"
+                if access_permission == 3 else ""
+            ),
+        )
+    except Exception as e:
+        logger.exception("设置课程访问权限失败")
+        return _err("SET_COURSE_ACCESS_PERMISSION_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_get_course_access_permission(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取课程当前的访问权限设置.
+
+    返回当前课程的 access_permission（0=关闭，2=企业内公开，3=指定账户/班级/部门/分组），
+    以及该课程可设置的所有权限选项。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        selected_int, options, detail = _get_obj_access_permission(client, group_id, "group")
+        permission_text = _permission_text(selected_int) if selected_int >= 0 else "未知"
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "access_permission": selected_int,
+                "permission_text": permission_text,
+                "permission_options": options,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取课程访问权限失败")
+        return _err("GET_COURSE_ACCESS_PERMISSION_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_get_course_access_list(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    page: Annotated[int, Field(default=1, description="页码", ge=1)] = 1,
+    size: Annotated[int, Field(default=20, description="每页数量", ge=1, le=100)] = 20,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取课程当前已授权的访问列表.
+
+    当课程 access_permission 为 3 时，返回已授权的账户/班级/部门/分组列表。
+    返回结果中的 account_type 字段标识对象类型：user/class/department/group。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        items, page_info = _get_obj_access_list(client, group_id, "group", page, size)
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "page": page,
+                "size": size,
+                "page_info": page_info,
+                "list": items,
+                "total": page_info.get("list_total_num", len(items)),
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取课程访问列表失败")
+        return _err("GET_COURSE_ACCESS_LIST_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_search_access_accounts(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    keyword: Annotated[str, Field(description="搜索关键词：账户邮箱、姓名、班级名称、部门名称或分组名称，支持模糊匹配")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """搜索可授权访问课程的账户、班级、部门或分组.
+
+    返回结果中 account_type 为 user 表示账户，class 表示班级，
+    department 表示部门，group 表示分组。
+    建议优先使用完整邮箱搜索账户，以提高匹配准确度。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        ok, accounts, err = _search_access_permission_account(client, group_id, "group", keyword)
+        if not ok:
+            return _err("SEARCH_ACCESS_ACCOUNTS_FAILED", err or "搜索可授权账户失败")
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "keyword": keyword,
+                "accounts": [_format_access_account(acc) for acc in accounts],
+                "total": len(accounts),
+            },
+            next_action="proceed",
+            suggested_action="请从结果中选择目标账户/班级，调用 tch_add_course_access_accounts 添加权限",
+        )
+    except Exception as e:
+        logger.exception("搜索可授权账户失败")
+        return _err("SEARCH_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_add_course_access_accounts(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要添加的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id（可调用 tch_search_access_accounts 获取）",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """为课程设置指定账户/班级/部门/分组可见权限.
+
+    前置条件：课程 access_permission 需为 3（指定账户可见）。
+    如当前不是该状态，工具会先自动调用 setgrouppermission 设置为 3，再添加对象。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    if not accounts:
+        return _err(
+            "NO_ACCOUNTS_PROVIDED",
+            "未提供要添加的账户/班级",
+            suggested_action="请先调用 tch_search_access_accounts 查询目标",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _add_obj_access_accounts(client, group_id, "group", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "added": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="可调用 tch_search_access_accounts 或查看 UMU 后台确认权限已生效",
+        )
+    except Exception as e:
+        logger.exception("添加课程指定账户失败")
+        return _err("ADD_COURSE_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_remove_course_access_accounts(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要移除的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """移除课程的指定账户/班级/部门/分组访问权限."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    if not accounts:
+        return _err(
+            "NO_ACCOUNTS_PROVIDED",
+            "未提供要移除的账户/班级",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _remove_obj_access_accounts(client, group_id, "group", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "removed": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("移除课程指定账户失败")
+        return _err("REMOVE_COURSE_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_cancel_all_assigned_permissions(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """取消课程的所有指定访问权限.
+
+    调用后会清空课程的指定账户/班级列表，常用于将课程还原为企业内公开前的清理。
+    如需同时设置为企业内公开，请在调用后继续调用 tch_set_course_access_permission。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        detail = _cancel_all_assigned_permissions(client, group_id, "group")
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="如需还原为企业内公开，请调用 tch_set_course_access_permission(group_id, access_permission=2)",
+        )
+    except Exception as e:
+        logger.exception("取消课程指定权限失败")
+        return _err("CANCEL_ASSIGNED_PERMISSIONS_FAILED", str(e))
+
+
+def _format_auto_close_tips(close_time: str) -> str:
+    """将关闭时间格式化为 UMU 前端展示文本.
+
+    支持的输入格式示例：
+    - 2026-06-30T10:00:00
+    - 2026-06-30 10:00:00
+    - 2026-06-30T10:00
+    - 2026-06-30 10:00
+    - 2026/06/30 10:00
+    - 2026年06月30日10点
+
+    输出固定为：课程开启自动关闭时间，将在YYYY年M月D日H点关闭
+    """
+    close_time = close_time.strip()
+    formats = [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M",
+        "%Y年%m月%d日%H点",
+    ]
+    parsed: datetime | None = None
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(close_time, fmt)
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        raise ValueError(
+            f"无法解析关闭时间: {close_time}，支持的格式如 2026-06-30 10:00"
+        )
+    formatted = f"{parsed.year}年{parsed.month}月{parsed.day}日{parsed.hour}点关闭"
+    return f"课程开启自动关闭时间，将在{formatted}"
+
+
+@mcp.tool()
+async def tch_set_course_auto_close(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    close_time: Annotated[
+        str,
+        Field(
+            description="自动关闭时间，支持格式如 2026-06-30 10:00、2026-06-30T10:00:00、2026年6月30日10点"
+        ),
+    ],
+    custom_tips: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="自定义提示文本；若提供则直接作为 accessPermissionTips，忽略 close_time 的默认格式化",
+        ),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """设置课程的定时自动关闭提示.
+
+    该接口通过保存 group_setup.accessPermissionTips 来告知 UMU 在指定时间后自动关闭课程。
+    关闭时间会被格式化为 UMU 前端展示文本，如：
+    "课程开启自动关闭时间，将在2026年6月30日10点关闭"。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        tips = custom_tips.strip() if custom_tips else _format_auto_close_tips(close_time)
+    except ValueError as e:
+        return _err("INVALID_CLOSE_TIME", str(e), next_action="needs_user_input")
+
+    try:
+        group_setup = {
+            "accessPermissionTips": tips,
+            "access_permission_tips": tips,
+            "enable_mini_program": 0,
+            "learn_within_mini_program": 0,
+        }
+        resp = client.post(
+            client.desktop_url("/api/group/savesetup"),
+            data={
+                "group_id": str(group_id),
+                "group_setup": json.dumps(group_setup, ensure_ascii=False),
+            },
+        )
+        ok, data, err = _parse_collaboration_response(resp)
+        if not ok:
+            return _err("SET_COURSE_AUTO_CLOSE_FAILED", err or "设置课程定时自动关闭失败")
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "access_permission_tips": tips,
+                "detail": data,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("设置课程定时自动关闭失败")
+        return _err("SET_COURSE_AUTO_CLOSE_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_cancel_course_auto_close(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """取消课程的定时自动关闭."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        group_setup = {
+            "accessPermissionTips": "",
+            "access_permission_tips": "",
+            "enable_mini_program": 0,
+            "learn_within_mini_program": 0,
+        }
+        resp = client.post(
+            client.desktop_url("/api/group/savesetup"),
+            data={
+                "group_id": str(group_id),
+                "group_setup": json.dumps(group_setup, ensure_ascii=False),
+            },
+        )
+        ok, data, err = _parse_collaboration_response(resp)
+        if not ok:
+            return _err("CANCEL_COURSE_AUTO_CLOSE_FAILED", err or "取消课程定时自动关闭失败")
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "access_permission_tips": "",
+                "detail": data,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("取消课程定时自动关闭失败")
+        return _err("CANCEL_COURSE_AUTO_CLOSE_FAILED", str(e))
+
+
+# ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 
@@ -7735,6 +8497,11 @@ def main() -> None:
     print("        tch_update_course_basic, tch_update_course_type,")
     print("        tch_update_course_category, tch_update_course_schedule,")
     print("        tch_update_course_images, tch_update_course_richtext,")
+    print("  课程权限: tch_set_course_access_permission, tch_get_course_access_permission,")
+    print("            tch_get_course_access_list, tch_search_access_accounts,")
+    print("            tch_add_course_access_accounts, tch_remove_course_access_accounts,")
+    print("            tch_cancel_all_assigned_permissions,")
+    print("            tch_set_course_auto_close, tch_cancel_course_auto_close")
     print("  小节: tch_create_scorm_section, tch_create_document_section,")
     print("        tch_create_video_section, tch_create_article_section,")
     print("        tch_create_infographic_section, tch_create_survey_section,")
