@@ -56,6 +56,7 @@ logger = logging.getLogger("umu.mcp.skills")
 # ---------------------------------------------------------------------------
 _mcp_client: MCPClientManager | None = None
 _skill_registry: SkillRegistry | None = None
+_session_state: dict[str, Any] = {}
 
 
 @asynccontextmanager
@@ -68,7 +69,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     3. 加载内置 Skill 并校验所需服务器是否可用。
     关闭时释放所有子进程资源。
     """
-    global _mcp_client, _skill_registry
+    global _mcp_client, _skill_registry, _session_state
 
     base_url = os.getenv("UMU_BASE_URL", "https://www.umu.cn")
     logger.info("UMU Skills Orchestrator 启动中，目标: %s", base_url)
@@ -92,6 +93,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     # 加载 Skill
     _skill_registry = SkillRegistry()
     _skill_registry.load_builtin_skills()
+    _skill_registry.load_skill_package("umu_sdk.skills.slash")
 
     missing = _skill_registry.validate_servers(available_servers)
     if missing:
@@ -102,9 +104,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
     logger.info("UMU Skills Orchestrator 已启动，加载 %d 个 Skill", len(_skill_registry.list_skills()))
 
+    # 初始化会话状态
+    _session_state = {"last_role": None, "remembered_role": None}
+
     yield {
         "mcp_client": _mcp_client,
         "skill_registry": _skill_registry,
+        "session_state": _session_state,
     }
 
     # 清理
@@ -112,6 +118,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
         await _mcp_client.stop()
         _mcp_client = None
     _skill_registry = None
+    _session_state = {}
     logger.info("UMU Skills Orchestrator 已关闭")
 
 
@@ -283,6 +290,7 @@ async def skill_run(name: str, arguments: dict[str, Any]) -> str:
         mcp=_mcp_client,
         skill_name=name,
         logger=logger,
+        session_state=_session_state,
     )
 
     try:

@@ -5,7 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.17.0] - 2026-06-19
+
+### Added
+- 新增角色解析与智能路由框架：
+  - `src/umu_sdk/skills/role_resolver.py`：根据用户意图、会话上下文、已配置角色与子 MCP 可用性选择最佳执行角色，支持 admin ⊇ teacher ⊇ student 的能力层级 fallback
+  - `src/umu_sdk/skills/intent_capability_map.py`：基于关键词的意图分类（teacher/student/admin）
+  - `SkillContext` 增加 `session_state`，`app_lifespan` 初始化并持久化 `last_role` / `remembered_role`
+- 新增 `/umu` 斜杠命令智能路由 Skill（`src/umu_sdk/skills/slash/umu.py` + `_runner.py`）：
+  - 自动识别创建课程、列出课程、报名、查看进度、企业课程、学习项目等意图
+  - 多角色可用时交互式请求确认
+  - 高权限账号可自动登录低权限子 MCP 完成跨角色操作
+- 新增显式角色斜杠入口（`src/umu_sdk/skills/slash/umu_admin.py`、`umu_teacher.py`、`umu_student.py`）：
+  - `/umua` / `/umuadmin`：默认使用 admin 角色
+  - `/umut` / `/umuteacher`：默认使用 teacher 角色
+  - `/umus` / `/umustudent`：默认使用 student 角色
+- 新增测试：`tests/test_role_resolver.py`、`tests/test_intent_capability_map.py`、`tests/test_umu_slash.py`、`tests/test_slash_role_entries.py`
+
+### Changed
+- 消除 Admin/Teacher 重复建设的课程与学习项目访问权限能力：
+  - Admin MCP server 删除 14 个与 Teacher 重复的原子工具（`adm_set_course_access_permission`、`adm_get_course_access_permission`、`adm_get_course_access_list`、`adm_search_access_accounts`、`adm_add_course_access_accounts`、`adm_remove_course_access_accounts`、`adm_cancel_all_assigned_permissions`、`adm_set_program_access_permission`、`adm_get_program_access_permission`、`adm_get_program_access_list`、`adm_search_program_access_accounts`、`adm_add_program_access_accounts`、`adm_remove_program_access_accounts`、`adm_cancel_all_program_permissions`）
+  - 提取共享 helper `src/umu_sdk/adapters/mcp/shared_access_permissions.py` 与工厂 `src/umu_sdk/adapters/mcp/shared_session_tools.py`，供 Admin/Teacher/Student 复用
+  - Skill 层合并重复 Skill：统一使用 `course_permissions.py` 与 `program_permissions.py` 中的 canonical Skill，删除 `admin_course_permissions.py` 与 `teacher_course_permissions.py`
+  - Orchestrator 对已删除的 `adm_*` 原子工具保留向后兼容重定向，调用 `skill_call_atomic_tool(server="admin", tool="adm_*")` 时自动转发到 Teacher canonical 工具并附加 `deprecated` 提示
+- `SkillRegistry` 新增 `load_skill_package()` 通用加载方法，用于加载 `slash/` 包
+- 发布就绪检查脚本 `.github/scripts/check_release_readiness.py` 改用 FastMCP `list_tools()` 获取实际注册工具名，并同时扫描 `skills/builtin` 与 `skills/slash` 目录统计 Skill 数量
+- `README.md` 同步 Skill 数量至 105，新增斜杠命令使用说明与别名对照
+
+### Removed
+- `src/umu_sdk/skills/builtin/admin_course_permissions.py`
+- `src/umu_sdk/skills/builtin/teacher_course_permissions.py`
 
 ## [0.16.1] - 2026-06-18
 

@@ -6,10 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from umu_sdk.skills.builtin.teacher_learning_programs import (
-    list_owned_learning_programs,
-    set_program_access_permission,
-)
+from umu_sdk.skills.builtin.program_permissions import set_program_access_permission
+from umu_sdk.skills.builtin.teacher_learning_programs import list_owned_learning_programs
 
 
 @pytest.fixture

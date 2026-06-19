@@ -8,8 +8,8 @@ import pytest
 
 from umu_sdk.skills.builtin.admin_learning_programs_personal import (
     list_owned_learning_programs_admin,
-    set_program_access_permission_admin,
 )
+from umu_sdk.skills.builtin.program_permissions import set_program_access_permission
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ class TestAdminLearningProgramSkills:
         assert call.kwargs["tool"] == "adm_list_personal_learning_programs"
         assert call.kwargs["arguments"]["scope"] == "owned"
 
-    async def test_set_program_access_permission_admin(self, ctx):
+    async def test_set_program_access_permission(self, ctx):
         ctx.call_tool.return_value = {
             "success": True,
             "data": {"program_id": "359923", "access_permission": 2},
@@ -45,8 +45,9 @@ class TestAdminLearningProgramSkills:
             "suggested_action": "",
             "next_action": "proceed",
         }
-        result = await set_program_access_permission_admin(ctx, "359923", 2)
+        result = await set_program_access_permission(ctx, "359923", 2)
         assert result["success"] is True
         call = ctx.call_tool.call_args
-        assert call.kwargs["tool"] == "adm_set_program_access_permission"
+        assert call.kwargs["server"] == "teacher"
+        assert call.kwargs["tool"] == "tch_set_program_access_permission"
         assert call.kwargs["arguments"]["access_permission"] == 2

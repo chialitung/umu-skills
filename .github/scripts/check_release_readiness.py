@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import importlib
 import re
 import sys
 from pathlib import Path
@@ -60,30 +62,52 @@ def get_changelog_latest_version() -> str:
 
 
 def extract_mcp_tool_names(file_path: Path) -> set[str]:
-    """从 MCP server 文件中提取 @mcp.tool() 装饰的工具名集合."""
+    """从 MCP server 文件中提取实际注册的工具名集合.
+
+    通过导入模块并调用 FastMCP.list_tools() 获取准确列表，可覆盖工厂函数
+    动态注册的工具（如 *_login、*_create_session 等）。
+    """
     if not file_path.exists():
         fail(f"{file_path} 不存在")
-    text = file_path.read_text(encoding="utf-8")
-    # 匹配 @mcp.tool() 后（允许中间有其他装饰器）的 async def name(
-    pattern = r"@mcp\.tool\([^)]*\)\s*(?:@[^\n]+\s*)*async def\s+(\w+)\s*\("
-    return set(re.findall(pattern, text))
+
+    # 将文件路径转换为模块导入路径，例如
+    # src/umu_sdk/adapters/mcp/admin.py -> umu_sdk.adapters.mcp.admin
+    rel = file_path.relative_to(ROOT / "src")
+    module_name = ".".join(rel.with_suffix("").parts)
+
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as e:
+        fail(f"导入 {module_name} 失败: {e}")
+
+    mcp = getattr(module, "mcp", None)
+    if mcp is None:
+        fail(f"{module_name} 中未找到 mcp 实例")
+
+    try:
+        tools = asyncio.run(mcp.list_tools())
+    except Exception as e:
+        fail(f"列出 {module_name} 工具失败: {e}")
+
+    return {tool.name for tool in tools}
 
 
 def extract_skill_names() -> set[str]:
-    """从 builtin skills 目录中提取 @skill(name=...) 声明的 Skill 名集合."""
-    skill_dir = ROOT / "src" / "umu_sdk" / "skills" / "builtin"
-    if not skill_dir.exists():
-        fail("skills/builtin 目录不存在")
+    """从 builtin 与 slash skills 目录中提取 @skill(name=...) 声明的 Skill 名集合."""
     names: set[str] = set()
-    for py_file in skill_dir.glob("*.py"):
-        if py_file.name == "__init__.py":
-            continue
-        text = py_file.read_text(encoding="utf-8")
-        for match in re.finditer(
-            r"@skill\(\s*name\s*=\s*\"([^\"]+)\"",
-            text,
-        ):
-            names.add(match.group(1))
+    for package in ("builtin", "slash"):
+        skill_dir = ROOT / "src" / "umu_sdk" / "skills" / package
+        if not skill_dir.exists():
+            fail(f"skills/{package} 目录不存在")
+        for py_file in skill_dir.glob("*.py"):
+            if py_file.name == "__init__.py":
+                continue
+            text = py_file.read_text(encoding="utf-8")
+            for match in re.finditer(
+                r"@skill\(\s*name\s*=\s*\"([^\"]+)\"",
+                text,
+            ):
+                names.add(match.group(1))
     return names
 
 
@@ -149,8 +173,8 @@ def extract_readme_skill_count_and_names() -> tuple[int, set[str]]:
     count = int(heading_match.group(1))
 
     section = extract_readme_section(text, re.escape(heading_match.group(0)))
-    # 表格行第一列通常是 `skill_name`
-    names = set(re.findall(r"\|\s*`([a-z_][a-z0-9_]*)`\s*\|", section))
+    # 表格行第一列通常是 `skill_name`，slash skill 名可能包含短横线
+    names = set(re.findall(r"\|\s*`([a-z_][a-z0-9_-]*)`\s*\|", section))
     return count, names
 
 
