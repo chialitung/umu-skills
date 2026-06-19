@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-06-19
+
+### Fixed
+- 修复 Release workflow (`.github/workflows/release.yml`) 在运行发布就绪检查前未安装项目依赖的问题，导致导入 `umu_sdk.adapters.mcp.*` 失败。
+- 发布就绪检查脚本现在会自动将 `src/` 加入 `sys.path`，支持在未安装 editable 包的环境中运行。
+
 ## [0.17.0] - 2026-06-19
 
 ### Added

@@ -23,6 +23,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
+# Allow running the script before the package is installed (e.g. in CI).
+SRC_ROOT = ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
 
 def fail(message: str) -> None:
     """打印错误并退出."""
