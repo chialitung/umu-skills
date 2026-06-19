@@ -46,7 +46,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
-from ...core.credential_loader import CredentialSource, load_credentials_with_source
+from ...core.credential_loader import load_credentials_with_source
 from .utils import (
     format_login_summary,
     fuzzy_filter_items,
@@ -82,6 +82,14 @@ from .shared_access_permissions import (
     _remove_obj_access_accounts,
     _search_access_permission_account,
     _set_obj_access_permission,
+)
+from .shared_session_tools import (
+    SessionToolConfig,
+    make_check_auth_tool,
+    make_create_session_tool,
+    make_destroy_session_tool,
+    make_list_sessions_tool,
+    make_login_tool,
 )
 
 # ---------------------------------------------------------------------------
@@ -641,6 +649,20 @@ def _err(
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
+_TEACHER_SESSION_CONFIG = SessionToolConfig(
+    role="tch",
+    role_label="讲师",
+    tool_domain_hint="讲师端资源管理相关 Tool",
+    login_success_suffix="现在可以调用讲师端资源管理相关 Tool",
+    check_auth_success_suffix="讲师端 Tool",
+    create_session_suggested_action="使用此 session_id 调用 tch_login 登录",
+    create_session_with_password=False,
+    isoformat_timestamps=True,
+    session_manager_not_init_code="SESSION_MANAGER_NOT_INIT",
+    create_session_failed_code="SESSION_CREATE_FAILED",
+)
+
+
 # ---------------------------------------------------------------------------
 # 辅助函数
 # ---------------------------------------------------------------------------
@@ -943,179 +965,61 @@ def _find_unique_account(
 # Tools: 认证
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
-async def tch_login(
-    username: Annotated[str, Field(description="用户名/邮箱/手机号")],
-    password: Annotated[str, Field(description="明文密码，服务端会自动加密")],
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，在指定会话中登录；如果不提供，在默认会话中登录。",
-        ),
-    ] = None,
-) -> str:
-    """使用用户名密码登录 UMU 平台（讲师账号）."""
-    client = _get_client(session_id)
-    try:
-        token = client.login(username, password)
-        # 更新会话用户名与来源
-        if session_id and _session_manager:
-            s = _session_manager.get_session_sync(session_id)
-            if s:
-                s.username = username
-                s.credential_source = CredentialSource.EXPLICIT.value
-        # 登录后获取用户/企业身份信息
-        identity = get_login_identity(client)
-        return _ok(
-            data={
-                "token": token,
-                "session_id": session_id,
-                "credential_source": CredentialSource.EXPLICIT.value,
-                **identity,
-            },
-            next_action="proceed",
-            suggested_action=(
-                f"已登录到企业「{identity.get('enterprise_name') or identity.get('enterprise_id', '')}」，"
-                "现在可以调用讲师端资源管理相关 Tool"
-            ),
-        )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_FAILED",
-            error_message=str(e),
-            suggested_action="检查用户名密码是否正确，或稍后重试",
-        )
+
+mcp.tool()(
+    make_login_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_client=_get_client,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def tch_check_auth(
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，检查指定会话的认证状态；如果不提供，检查默认会话。",
-        ),
-    ] = None,
-) -> str:
-    """检查当前是否已认证."""
-    client = _get_client(session_id)
-    try:
-        is_auth = client.auth.is_authenticated()
-        token = client.auth.get_token()
-        if is_auth and token:
-            return _ok(
-                data={"is_authenticated": True, "token_preview": token[:20] + "..."},
-                next_action="proceed",
-                suggested_action="当前已登录，可以正常调用讲师端 Tool",
-            )
-        else:
-            return _err(
-                error_code="NOT_AUTHENTICATED",
-                error_message="当前未登录或 Token 已过期",
-                suggested_action="调用 tch_login 重新登录",
-            )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_CHECK_FAILED",
-            error_message=str(e),
-            suggested_action="调用 tch_login 重新登录",
-        )
+mcp.tool()(
+    make_check_auth_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_client=_get_client,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
 # ---------------------------------------------------------------------------
 # Tools: 会话管理
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
-async def tch_create_session(
-    username: Annotated[
-        str | None,
-        Field(default=None, description="可选的预设用户名"),
-    ] = None,
-) -> str:
-    """创建新的独立会话."""
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INIT",
-            error_message="会话管理器未初始化",
-            suggested_action="请检查 MCP 服务是否正确启动",
-        )
-    try:
-        session = await _session_manager.create_session()
-        if username:
-            session.username = username
-        return _ok(
-            data={
-                "session_id": session.session_id,
-                "created_at": session.created_at.isoformat(),
-                "username": session.username,
-            },
-            next_action="proceed",
-            suggested_action="使用此 session_id 调用 tch_login 登录",
-        )
-    except Exception as e:
-        return _err(
-            error_code="SESSION_CREATE_FAILED",
-            error_message=str(e),
-            suggested_action="请稍后重试",
-        )
+
+mcp.tool()(
+    make_create_session_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def tch_list_sessions() -> str:
-    """列出所有活跃会话."""
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INIT",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        sessions = _session_manager.list_sessions()
-        return _ok(
-            data={
-                "count": len(sessions),
-                "sessions": [
-                    {
-                        "session_id": s.session_id,
-                        "username": s.username,
-                        "created_at": s.created_at.isoformat(),
-                        "last_used_at": s.last_used_at.isoformat(),
-                    }
-                    for s in sessions
-                ],
-            },
-            next_action="proceed",
-        )
-    except Exception as e:
-        return _err(
-            error_code="LIST_SESSIONS_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_list_sessions_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def tch_destroy_session(
-    session_id: Annotated[str, Field(description="要销毁的会话 ID")],
-) -> str:
-    """销毁指定会话."""
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INIT",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        _session_manager.destroy_session(session_id)
-        return _ok(
-            data={"session_id": session_id, "destroyed": True},
-            next_action="proceed",
-            suggested_action="会话已销毁，如需继续操作请创建新会话",
-        )
-    except Exception as e:
-        return _err(
-            error_code="DESTROY_SESSION_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_destroy_session_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
 # ---------------------------------------------------------------------------

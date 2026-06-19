@@ -35,7 +35,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
-from ...core.credential_loader import CredentialSource, load_credentials_with_source
+from ...core.credential_loader import load_credentials_with_source
 from .utils import (
     format_login_summary,
     fuzzy_filter_items,
@@ -80,6 +80,14 @@ from .shared_access_permissions import (
     _remove_obj_access_accounts,
     _search_access_permission_account,
     _set_obj_access_permission,
+)
+from .shared_session_tools import (
+    SessionToolConfig,
+    make_check_auth_tool,
+    make_create_session_tool,
+    make_destroy_session_tool,
+    make_list_sessions_tool,
+    make_login_tool,
 )
 from . import prompts
 
@@ -270,102 +278,42 @@ def _err(
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
+_ADMIN_SESSION_CONFIG = SessionToolConfig(
+    role="adm",
+    role_label="管理员",
+    tool_domain_hint="管理员端相关 Tool",
+    login_success_suffix="现在可以调用管理员端相关 Tool",
+    check_auth_success_suffix="管理相关 Tool",
+    create_session_suggested_action="保存 session_id，后续调用 tool 时传入此参数",
+    create_session_with_password=True,
+    include_is_authenticated_in_session=True,
+)
+
+
 # ---------------------------------------------------------------------------
 # Tools: 认证
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-async def adm_login(
-    username: Annotated[str, Field(description="用户名/邮箱/手机号")],
-    password: Annotated[str, Field(description="明文密码，服务端会自动加密")],
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，在指定会话中登录；如果不提供，在默认会话中登录。",
-        ),
-    ] = None,
-) -> str:
-    """使用管理员账号登录 UMU 平台.
-
-    触发条件：当用户需要登录或当前认证已过期时调用。
-    前置依赖：无。
-    副作用：会设置认证 Token，后续 Tool 可以使用相同 session_id 复用此 Token。
-    """
-    client = _get_client(session_id)
-    try:
-        token = client.login(username, password)
-        # 更新会话用户名与来源
-        if session_id and _session_manager:
-            s = _session_manager.get_session_sync(session_id)
-            if s:
-                s.username = username
-                s.credential_source = CredentialSource.EXPLICIT.value
-        # 登录后获取用户/企业身份信息
-        identity = get_login_identity(client)
-        return _ok(
-            data={
-                "token": token,
-                "session_id": session_id,
-                "credential_source": CredentialSource.EXPLICIT.value,
-                **identity,
-            },
-            next_action="proceed",
-            suggested_action=(
-                f"已登录到企业「{identity.get('enterprise_name') or identity.get('enterprise_id', '')}」，"
-                "现在可以调用管理员端相关 Tool"
-            ),
-        )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_FAILED",
-            error_message=str(e),
-            suggested_action="检查用户名密码是否正确，或稍后重试",
-        )
+mcp.tool()(
+    make_login_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_client=_get_client,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def adm_check_auth(
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，检查指定会话的认证状态；如果不提供，检查默认会话。",
-        ),
-    ] = None,
-) -> str:
-    """检查当前是否已认证.
-
-    触发条件：在执行管理操作前，确认当前登录状态。
-    前置依赖：无。
-    副作用：无。
-    """
-    client = _get_client(session_id)
-    try:
-        is_auth = client.auth.is_authenticated()
-        token = client.auth.get_token()
-        if is_auth and token:
-            return _ok(
-                data={
-                    "is_authenticated": True,
-                    "token_preview": token[:20] + "...",
-                },
-                next_action="proceed",
-                suggested_action="当前已登录，可以正常调用管理相关 Tool",
-            )
-        else:
-            return _err(
-                error_code="NOT_AUTHENTICATED",
-                error_message="当前未登录或 Token 已过期",
-                suggested_action="调用 adm_login 重新登录",
-            )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_CHECK_FAILED",
-            error_message=str(e),
-            suggested_action="调用 adm_login 重新登录",
-        )
+mcp.tool()(
+    make_check_auth_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_client=_get_client,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
 @mcp.tool()
@@ -414,121 +362,34 @@ async def adm_get_user_info(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-async def adm_create_session(
-    username: Annotated[
-        str | None,
-        Field(default=None, description="可选用户名，如果提供则尝试自动登录"),
-    ] = None,
-    password: Annotated[
-        str | None,
-        Field(default=None, description="可选密码"),
-    ] = None,
-) -> str:
-    """创建新的独立会话.
-
-    触发条件：当需要为不同用户创建隔离的登录环境时调用。
-    前置依赖：无。
-    副作用：创建独立会话，拥有独立的 Cookie 和 Token。
-
-    每个会话拥有独立的 UMUClient 实例（含独立的 httpx.Client），
-    确保多用户并发使用时登录状态互不干扰。
-    """
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INITIALIZED",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        session = await _session_manager.create_session(username, password)
-        return _ok(
-            data={
-                "session_id": session.session_id,
-                "username": session.username,
-                "is_authenticated": session.client.auth.is_authenticated(),
-                "created_at": session.created_at,
-            },
-            next_action="proceed",
-            suggested_action="保存 session_id，后续调用 tool 时传入此参数",
-        )
-    except Exception as e:
-        return _err(
-            error_code="CREATE_SESSION_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_create_session_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def adm_list_sessions() -> str:
-    """列出所有活跃会话.
-
-    触发条件：需要查看当前有哪些会话在使用中。
-    前置依赖：无。
-    副作用：无（只读查询）。
-    """
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INITIALIZED",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        sessions = await _session_manager.list_sessions()
-        return _ok(
-            data={
-                "count": len(sessions),
-                "sessions": [
-                    {
-                        "session_id": s.session_id,
-                        "username": s.username,
-                        "is_authenticated": s.is_authenticated,
-                        "created_at": s.created_at,
-                        "last_used_at": s.last_used_at,
-                    }
-                    for s in sessions
-                ],
-            },
-            next_action="proceed",
-        )
-    except Exception as e:
-        return _err(
-            error_code="LIST_SESSIONS_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_list_sessions_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def adm_destroy_session(
-    session_id: Annotated[str, Field(description="要销毁的会话 ID")],
-) -> str:
-    """销毁指定会话.
-
-    触发条件：会话不再需要使用，或需要释放资源时调用。
-    前置依赖：无。
-    副作用：关闭会话的客户端连接，释放资源。
-    """
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INITIALIZED",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        success = await _session_manager.destroy_session(session_id)
-        if success:
-            return _ok(
-                data={"session_id": session_id, "destroyed": True},
-                next_action="proceed",
-            )
-        else:
-            return _err(
-                error_code="SESSION_NOT_FOUND",
-                error_message=f"会话不存在: {session_id}",
-            )
-    except Exception as e:
-        return _err(
-            error_code="DESTROY_SESSION_FAILED",
-            error_message=str(e),
-        )
-
+mcp.tool()(
+    make_destroy_session_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 # ---------------------------------------------------------------------------
 # Tools: 账号管理
