@@ -694,8 +694,6 @@ def _verify_resource_registered(
     Returns:
         True 如果确认注册成功，False 如果无法确认
     """
-    import time
-
     for attempt in range(max_attempts):
         try:
             # 方式 1: 通过 getresourceinfo 验证

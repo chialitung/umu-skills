@@ -426,7 +426,6 @@ python -m umu_sdk.skills.server
 | `get_user_tasks` | admin | 查询学习任务明细 |
 | `get_instructors` | admin | 查询讲师列表 |
 | `get_teaching_records` | admin | 查询授课记录 |
-| `get_teaching_records` | admin | 查询授课记录 |
 
 自定义 Skill 示例（`src/umu_sdk/skills/builtin/`）：
 
