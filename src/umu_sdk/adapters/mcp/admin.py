@@ -26,6 +26,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Annotated, Any, AsyncIterator
@@ -7374,6 +7376,166 @@ async def adm_list_learning_programs(
         )
 
 
+# ---------------------------------------------------------------------------
+# Tools: 个人视角学习项目列表查询
+# ---------------------------------------------------------------------------
+
+def _program_list_url_and_params(
+    scope: str,
+    keywords: str,
+    page: int,
+    page_size: int,
+) -> tuple[str, dict[str, str]]:
+    """根据 scope 返回学习项目列表的端点和参数."""
+    base_params: dict[str, str] = {
+        "t": str(int(time.time() * 1000)),
+        "page": str(page),
+        "size": str(page_size),
+    }
+    if scope == "owned":
+        url = "/api/program/getlist"
+        base_params["owner"] = "1"
+        base_params["type"] = "1"
+    elif scope == "cooperated":
+        url = "/api/program/getcooperateprogramlist"
+    elif scope == "enrolled":
+        url = "/api/program/getmyparticipatedprogramlist"
+    else:
+        raise ValueError(f"不支持的 scope: {scope}")
+
+    if keywords:
+        base_params["keywords"] = keywords
+
+    return url, base_params
+
+
+def _format_program_list_item(item: dict[str, Any]) -> dict[str, Any]:
+    """统一格式化 /api/program/getlist 返回的项目字段."""
+    creator = item.get("creator", {}) or {}
+    return {
+        "program_id": str(item.get("program_id", "")),
+        "program_title": item.get("program_title", ""),
+        "desc": item.get("desc", ""),
+        "access_code": item.get("access_code", ""),
+        "share_url": item.get("share_url", ""),
+        "share_pc_url": item.get("share_pc_url", ""),
+        "head_img": item.get("head_img", ""),
+        "bg_img": item.get("setup", {}).get("bg_img", ""),
+        "create_time": item.get("create_time", ""),
+        "update_time": item.get("update_time", ""),
+        "creator_umu_id": str(creator.get("umu_id", "")),
+        "creator_name": creator.get("user_name", item.get("creater_name", "")),
+        "group_num": item.get("group_num", 0),
+        "module_num": item.get("module_num", 0),
+        "is_creator": item.get("is_creator", 0),
+    }
+
+
+@mcp.tool()
+async def adm_list_personal_learning_programs(
+    scope: Annotated[
+        str,
+        Field(description="列表视角：owned=我拥有的, cooperated=协同给我的, enrolled=我报名的"),
+    ],
+    keywords: Annotated[str | None, Field(default=None, description="按标题/访问码模糊搜索")] = None,
+    page: Annotated[int, Field(default=1, ge=1, description="页码")] = 1,
+    page_size: Annotated[int, Field(default=20, ge=1, le=100, description="每页数量")] = 20,
+    fetch_all: Annotated[bool, Field(default=False, description="是否自动获取全量数据")] = False,
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """查询当前管理员作为普通用户的学习项目清单."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        url, base_params = _program_list_url_and_params(scope, keywords or "", page, page_size)
+    except ValueError as e:
+        return _err(error_code="INVALID_SCOPE", error_message=str(e), next_action="needs_user_input")
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        params = {**base_params, "page": str(p), "size": str(sz)}
+        resp = client.get(client.desktop_url(url), params=params)
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
+
+        data = resp.get("data", {})
+        page_info = data.get("page_info", {})
+        program_list = data.get("list", [])
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return [_format_program_list_item(item) for item in program_list], total_all
+
+    try:
+        if fetch_all:
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+            batch_size = 20
+
+            while True:
+                items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(items)
+
+                report_pagination_progress(
+                    "adm_list_personal_learning_programs",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                    is_complete=len(all_items) >= total_all or not items,
+                )
+
+                if len(all_items) >= total_all or not items:
+                    break
+                current_page += 1
+                if current_page > 50:
+                    report_pagination_progress(
+                        "adm_list_personal_learning_programs",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            return _ok(
+                data={
+                    "scope": scope,
+                    "programs": all_items,
+                    "total": len(all_items),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(all_items) if all_items else 0,
+                    },
+                },
+                next_action="proceed",
+            )
+
+        items, _ = _fetch_page(page, page_size)
+        return _ok(
+            data={
+                "scope": scope,
+                "programs": items,
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                },
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取学习项目列表失败")
+        return _err("LIST_LEARNING_PROGRAMS_FAILED", str(e))
+
+
 async def _resolve_instructor_tag_names(
     client: UMUClient,
     names: str,
@@ -8749,6 +8911,382 @@ async def adm_cancel_all_assigned_permissions(
     except Exception as e:
         logger.exception("取消课程指定权限失败")
         return _err("CANCEL_ASSIGNED_PERMISSIONS_FAILED", str(e))
+
+
+# ---------------------------------------------------------------------------
+# Tools: 学习项目访问权限管理
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def adm_get_program_access_permission(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取学习项目当前的访问权限设置.
+
+    返回当前学习项目的 access_permission（0=关闭，2=企业内公开，3=指定账户/班级/部门/分组），
+    以及该学习项目可设置的所有权限选项。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        selected_int, options, detail = _get_obj_access_permission(client, program_id, "program")
+        permission_text = _permission_text(selected_int) if selected_int >= 0 else "未知"
+
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "access_permission": selected_int,
+                "permission_text": permission_text,
+                "permission_options": options,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取学习项目访问权限失败")
+        return _err(
+            error_code="GET_PROGRAM_ACCESS_PERMISSION_FAILED",
+            error_message=str(e),
+            suggested_action="检查 program_id 是否有效后重试",
+        )
+
+
+@mcp.tool()
+async def adm_set_program_access_permission(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    access_permission: Annotated[
+        int,
+        Field(description="权限：0=关闭，2=企业内公开，3=指定账户", ge=0, le=3),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """设置学习项目的整体访问权限.
+
+    access_permission 取值：
+      0 = 关闭（不可见）
+      2 = 企业内公开
+      3 = 指定账户/班级/部门/分组可见
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        detail = _set_obj_access_permission(
+            client, program_id, "program", access_permission, update_session_permission=True
+        )
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "access_permission": access_permission,
+                "permission_text": _permission_text(access_permission),
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action=(
+                "access_permission=3 时，请继续调用 adm_add_program_access_accounts 添加可见对象"
+                if access_permission == 3 else ""
+            ),
+        )
+    except Exception as e:
+        logger.exception("设置学习项目访问权限失败")
+        return _err(
+            error_code="SET_PROGRAM_ACCESS_PERMISSION_FAILED",
+            error_message=str(e),
+            suggested_action="检查 program_id 和网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_get_program_access_list(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    page: Annotated[int, Field(default=1, description="页码", ge=1)] = 1,
+    size: Annotated[int, Field(default=20, description="每页数量", ge=1, le=100)] = 20,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取学习项目当前已授权的访问列表.
+
+    当学习项目 access_permission 为 3 时，返回已授权的账户/班级/部门/分组列表。
+    返回结果中的 account_type 字段标识对象类型：user/class/department/group。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        items, page_info = _get_obj_access_list(client, program_id, "program", page, size)
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "page": page,
+                "size": size,
+                "page_info": page_info,
+                "list": items,
+                "total": page_info.get("list_total_num", len(items)),
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取学习项目访问列表失败")
+        return _err(
+            error_code="GET_PROGRAM_ACCESS_LIST_FAILED",
+            error_message=str(e),
+            suggested_action="检查 program_id 后重试",
+        )
+
+
+@mcp.tool()
+async def adm_search_program_access_accounts(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    keyword: Annotated[str, Field(description="搜索关键词：账户邮箱、姓名、班级名称、部门名称或分组名称，支持模糊匹配")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """搜索可授权访问学习项目的账户、班级、部门或分组.
+
+    返回结果中 account_type 为 user 表示账户，class 表示班级，
+    department 表示部门，group 表示分组。
+    建议优先使用完整邮箱搜索账户，以提高匹配准确度。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        ok, accounts, err = _search_access_permission_account(client, program_id, "program", keyword)
+        if not ok:
+            return _err(
+                error_code="SEARCH_PROGRAM_ACCESS_ACCOUNTS_FAILED",
+                error_message=err or "搜索可授权账户失败",
+                suggested_action="更换关键词后重试",
+            )
+
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "keyword": keyword,
+                "accounts": [_format_access_account(acc) for acc in accounts],
+                "total": len(accounts),
+            },
+            next_action="proceed",
+            suggested_action="请从结果中选择目标账户/班级，调用 adm_add_program_access_accounts 添加权限",
+        )
+    except Exception as e:
+        logger.exception("搜索学习项目可授权账户失败")
+        return _err(
+            error_code="SEARCH_PROGRAM_ACCESS_ACCOUNTS_FAILED",
+            error_message=str(e),
+            suggested_action="检查网络连接后重试",
+        )
+
+
+@mcp.tool()
+async def adm_add_program_access_accounts(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要添加的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id（可调用 adm_search_program_access_accounts 获取）",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """为学习项目添加指定账户/班级/部门/分组可见权限.
+
+    前置条件：学习项目 access_permission 需为 3（指定账户可见）。
+    如当前不是该状态，工具会先自动调用 setprogrampermission 设置为 3，再添加对象。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    if not accounts:
+        return _err(
+            error_code="NO_ACCOUNTS_PROVIDED",
+            error_message="未提供要添加的账户/班级",
+            suggested_action="请先调用 adm_search_program_access_accounts 查询目标",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _add_obj_access_accounts(client, program_id, "program", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "added": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="可调用 adm_search_program_access_accounts 或查看 UMU 后台确认权限已生效",
+        )
+    except Exception as e:
+        logger.exception("添加学习项目指定账户失败")
+        return _err(
+            error_code="ADD_PROGRAM_ACCESS_ACCOUNTS_FAILED",
+            error_message=str(e),
+            suggested_action="检查 account 参数格式后重试",
+        )
+
+
+@mcp.tool()
+async def adm_remove_program_access_accounts(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要移除的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """移除学习项目的指定账户/班级/部门/分组访问权限."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    if not accounts:
+        return _err(
+            error_code="NO_ACCOUNTS_PROVIDED",
+            error_message="未提供要移除的账户/班级",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _remove_obj_access_accounts(client, program_id, "program", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "removed": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("移除学习项目指定账户失败")
+        return _err(
+            error_code="REMOVE_PROGRAM_ACCESS_ACCOUNTS_FAILED",
+            error_message=str(e),
+            suggested_action="检查 account 参数格式后重试",
+        )
+
+
+@mcp.tool()
+async def adm_cancel_all_program_permissions(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """取消学习项目的所有指定访问权限.
+
+    调用后会清空学习项目的指定账户/班级列表，常用于将学习项目还原为企业内公开前的清理。
+    如需同时设置为企业内公开，请在调用后继续调用 adm_set_program_access_permission。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        detail = _cancel_all_assigned_permissions(client, program_id, "program")
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="如需还原为企业内公开，请调用 adm_set_program_access_permission(program_id, access_permission=2)",
+        )
+    except Exception as e:
+        logger.exception("取消学习项目指定权限失败")
+        return _err(
+            error_code="CANCEL_PROGRAM_ACCESS_PERMISSIONS_FAILED",
+            error_message=str(e),
+            suggested_action="检查 program_id 后重试",
+        )
 
 
 def _format_auto_close_tips(close_time: str) -> str:
