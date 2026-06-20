@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-06-20
+
+### Added
+- 新增腾讯 WorkBuddy 集成支持：
+  - 新增 `python -m umu_sdk.skills.workbuddy.install` 一键安装脚本，自动探测 WorkBuddy 配置目录并注册 `umu-skills` orchestrator。
+  - 新增 `src/umu_sdk/skills/workbuddy/bundled/umu/` WorkBuddy 技能包（`skill.yaml` + `prompt.md`）。
+  - 安装脚本支持 `--check`、`--upgrade`、`--workbuddy-dir` 参数。
+  - WorkBuddy 集成复用现有的 Claude Code 加密凭证存储（`~/.claude/skills/umu/credentials.enc`），无需重复录入账号。
+- 新增 console script：`umu-skills-install-workbuddy`。
+
+### Changed
+- `README.md` 新增“在腾讯 WorkBuddy 中使用”章节。
+- `pyproject.toml` 版本号更新为 `0.20.0`，并配置 hatchling 打包 WorkBuddy 技能包资源文件。
+
 ## [0.19.0] - 2026-06-20
 
 ### Added

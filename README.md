@@ -232,6 +232,82 @@ python -m umu_sdk.adapters.mcp.admin
 
 更推荐直接使用前文的一键安装命令 `python -m umu_sdk.skills.install`，它会自动完成三个 server 的配置。
 
+### 在腾讯 WorkBuddy 中使用
+
+如果你使用腾讯 [WorkBuddy](https://workbuddy.qq.com/) AI 桌面助手，可以通过一条命令完成集成：
+
+#### 1. 安装 Python 包
+
+```bash
+pip install umu-skills
+```
+
+#### 2. 一键配置 WorkBuddy
+
+```bash
+python -m umu_sdk.skills.workbuddy.install
+```
+
+安装脚本会自动完成以下操作：
+
+- 检测 WorkBuddy 配置目录（支持 Windows / macOS / Linux）
+- 在 WorkBuddy 的 `mcp_servers.json` 中注册 `umu-skills` orchestrator
+- 将 WorkBuddy 版 UMU skill 包复制到配置目录
+- 初始化/复用 Claude Code 的加密凭证目录（`~/.claude/skills/umu/credentials.enc`）
+
+如果自动检测失败，手动指定 WorkBuddy 配置目录：
+
+```bash
+# Windows 示例
+python -m umu_sdk.skills.workbuddy.install --workbuddy-dir "C:\Users\xxx\AppData\Roaming\WorkBuddy"
+
+# macOS 示例
+python -m umu_sdk.skills.workbuddy.install --workbuddy-dir ~/Library/Application\ Support/WorkBuddy
+
+# Linux 示例
+python -m umu_sdk.skills.workbuddy.install --workbuddy-dir ~/.config/WorkBuddy
+```
+
+其他常用命令：
+
+```bash
+# 检查安装状态
+python -m umu_sdk.skills.workbuddy.install --check
+
+# 强制升级到最新版
+python -m umu_sdk.skills.workbuddy.install --upgrade
+```
+
+#### 3. 导入技能包并重启 WorkBuddy
+
+安装完成后，在 WorkBuddy 中导入 `<WorkBuddy 配置目录>/skills/umu` 下的技能包（通常通过 技能市场 → 本地导入 或 设置 → Skills），然后重启 WorkBuddy。
+
+#### 4. 配置账号
+
+首次使用 UMU 操作时，WorkBuddy 会引导你配置账号。账号信息会加密保存到：
+
+```text
+Windows: C:\Users\<用户名>\.claude\skills\umu\credentials.enc
+macOS/Linux: ~/.claude/skills/umu/credentials.enc
+```
+
+该文件与 Claude Code 共用，如果你已经在 Claude Code 中配置过账号，WorkBuddy 会直接复用，无需重复录入。
+
+保存账号后，**重启 WorkBuddy**，MCP server 才能读取凭证并开始执行 UMU 操作。
+
+#### 5. 开始使用
+
+配置完成后，直接用自然语言描述你的需求：
+
+```text
+帮我在 UMU 上创建一个课程，名字叫《新员工入职培训》
+给学员张三报名课程 aet504
+查询《销售技巧》课程的学习记录
+导出上个月销售部的学习完成情况
+```
+
+WorkBuddy 会通过 `umu-skills` orchestrator 自动调用合适的 Skill 完成操作。
+
 ## 可用工具
 
 ### 管理员工具（53）

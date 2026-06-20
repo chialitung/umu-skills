@@ -1,0 +1,5 @@
+name: umu
+description: UMU（优幕）学习平台操作助手 — 通过自然语言操作 UMU 在线学习平台
+version: 0.20.0
+author: umu-skills contributors
+prompt_file: prompt.md
