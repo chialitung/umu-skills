@@ -65,6 +65,7 @@ from .document_upload import (
     validate_document_path,
 )
 from .image_upload import ImageUploader
+from .program_builder import ProgramBuilder
 from .session import SessionManager
 from .video_upload import (
     VideoUploader,
@@ -7364,6 +7365,159 @@ async def tch_list_learning_programs(
     except Exception as e:
         logger.exception("获取学习项目列表失败")
         return _err("LIST_LEARNING_PROGRAMS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_create_learning_program(
+    title: Annotated[str, Field(description="学习项目标题")],
+    desc_plain: Annotated[str, Field(default="", description="纯文本介绍")] = "",
+    desc_richtext: Annotated[str, Field(default="", description="富文本介绍（HTML）")] = "",
+    cover_image_path: Annotated[str | None, Field(default=None, description="本地封面图路径")] = None,
+    bg_image_path: Annotated[str | None, Field(default=None, description="本地背景图路径")] = None,
+    tags: Annotated[list[str] | None, Field(default=None, description="标签列表")] = None,
+    category_ids: Annotated[list[str] | None, Field(default=None, description="分类 ID 列表")] = None,
+    category_names: Annotated[
+        list[str] | None,
+        Field(default=None, description="分类名称列表，与 category_ids 二选一，名称优先"),
+    ] = None,
+    start_time: Annotated[str, Field(default="", description="开始时间戳字符串")] = "",
+    end_time: Annotated[str, Field(default="", description="结束时间戳字符串")] = "",
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """创建学习项目（不含课程）.
+
+    返回包含 program_id 的 JSON，可用于后续添加课程。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.create_program(
+            title=title,
+            desc_plain=desc_plain,
+            desc_richtext=desc_richtext,
+            cover_path=cover_image_path or "",
+            bg_path=bg_image_path or "",
+            tags=tags,
+            category_ids=category_ids,
+            category_names=category_names,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="可调用 tch_add_courses_to_learning_program 添加课程",
+        )
+    except Exception as e:
+        logger.exception("创建学习项目失败")
+        return _err("CREATE_LEARNING_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_add_courses_to_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    modules: Annotated[
+        list[dict[str, Any]],
+        Field(description='模块列表，每项包含 module_title 与 course_ids，例如 [{"module_title": "阶段一", "course_ids": ["7329920"]}]'),
+    ],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """将课程按模块添加到学习项目.
+
+    若 module_id 为空且提供 module_title，则自动创建新模块。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.add_courses(program_id=program_id, modules=modules)
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="失败课程可单独重试",
+        )
+    except Exception as e:
+        logger.exception("添加课程到学习项目失败")
+        return _err("ADD_COURSES_TO_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_configure_program_certificate(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    theme_id: Annotated[str, Field(default="", description="证书模板 ID，不填则使用第一个可用模板")] = "",
+    text: Annotated[str, Field(default="", description="证书正文")] = "",
+    teacher_name: Annotated[str, Field(default="", description="讲师姓名")] = "",
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """配置学习项目证书."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.configure_certificate(program_id, theme_id, text, teacher_name)
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("配置证书失败")
+        return _err("CONFIGURE_CERTIFICATE_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_set_program_points_status(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    enabled: Annotated[bool, Field(description="是否开启积分")],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """开启或关闭学习项目积分."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.set_points_status(program_id, enabled)
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("设置积分状态失败")
+        return _err("SET_POINTS_STATUS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_search_courses_for_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    keywords: Annotated[str, Field(default="", description="搜索关键词")] = "",
+    creater_name: Annotated[str, Field(default="", description="按创建人筛选")] = "",
+    page: Annotated[int, Field(default=1, ge=1, description="页码")] = 1,
+    page_size: Annotated[int, Field(default=10, ge=1, le=100, description="每页数量")] = 10,
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """搜索可加入学习项目的课程."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        items, total = builder.search_courses(program_id, keywords, creater_name, page, page_size)
+        return _ok(
+            data={
+                "courses": items,
+                "total": total,
+                "pagination": {"current_page": page, "page_size": page_size},
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("搜索课程失败")
+        return _err("SEARCH_COURSES_FOR_PROGRAM_FAILED", str(e))
 
 
 @mcp.tool()
