@@ -225,3 +225,74 @@ class TestCollaborationToolsPresent:
             "tch_transfer_course_owner",
         }
         assert expected.issubset(tool_names), f"缺少协同工具: {expected - tool_names}"
+
+
+class TestTchListCourseLearningTasks:
+    async def test_single_page_maps_params_and_returns_students(self) -> None:
+        from umu_sdk.adapters.mcp.teacher import tch_list_course_learning_tasks
+
+        api_response = {
+            "status": True,
+            "errno": 0,
+            "error_code": 0,
+            "error": "success",
+            "data": {
+                "data_count": {
+                    "total_num": 2,
+                    "complete_num": 1,
+                    "uncomplete_num": 1,
+                    "complete_rate": 0.5,
+                    "exist_learning_task": 1,
+                },
+                "table_body": {
+                    "page_info": {
+                        "list_total_num": 2,
+                        "total_page_num": 1,
+                        "current_page": 1,
+                        "size": 20,
+                    },
+                    "list": [
+                        {
+                            "student_id": "s1",
+                            "umu_id": "u1",
+                            "user_name": "Alice",
+                            "avatar": "https://example.com/a.jpg",
+                            "task_count": 2,
+                            "task_done_count": 2,
+                            "complete_num": 2,
+                            "complete_rate": 1,
+                            "is_assign": 1,
+                            "assign_time": 0,
+                            "last_assign_time": 1000,
+                            "complete_time": 2000,
+                            "first_learning_time": 500,
+                            "last_learning_time": 2000,
+                            "due_time": 3000,
+                        },
+                    ],
+                },
+            },
+        }
+
+        with _patch_teacher_auth(require_auth=True) as client:
+            client.get.return_value = api_response
+            result = json.loads(
+                await tch_list_course_learning_tasks(
+                    group_id="g123",
+                    status_filter="completed",
+                    include_disabled=False,
+                    page=1,
+                    page_size=20,
+                )
+            )
+
+        assert result["success"] is True
+        assert result["data"]["summary"]["completed"] == 1
+        assert len(result["data"]["students"]) == 1
+        assert result["data"]["students"][0]["user_name"] == "Alice"
+        # 验证参数映射
+        call_args = client.get.call_args
+        params = call_args.kwargs["params"]
+        assert params["group_id"] == "g123"
+        assert params["type"] == "1"
+        assert params["filter_disabled_user"] == "1"
