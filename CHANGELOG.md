@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-06-20
+
+### Added
+- 新增 Teacher MCP 课程学员管理名单能力：
+  - `tch_list_course_participants`：查询指定课程的学员参与者名单，支持按全部/必修完成/必修未完成筛选，返回每位学员每个小节的完成状态/积分/得分明细。
+  - `tch_list_course_learning_durations`：查询指定课程的学员学习时长名单，支持按全部/必修完成/必修未完成筛选，返回每位学员每个小节的学习时长/首次/末次学习时间明细。
+- 新增对应 Skill：`list_course_participants`、`list_course_learning_durations`。
+- 新增 `tch_list_course_learning_tasks` 原子工具与 `list_course_learning_tasks` Skill，用于查询课程的学习任务分配学员清单。
+
+### Changed
+- `README.md` 教师工具数量标题更新为 79，内置 Skill 数量标题更新为 108。
+
 ## [0.17.1] - 2026-06-19
 
 ### Fixed
