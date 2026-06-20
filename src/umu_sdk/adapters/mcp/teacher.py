@@ -7647,6 +7647,373 @@ async def tch_list_course_learning_tasks(
 
 
 @mcp.tool()
+async def tch_list_course_participants(
+    group_id: Annotated[str, Field(description="课程 ID（group_id）")],
+    status_filter: Annotated[
+        str,
+        Field(
+            default="all",
+            description="学员完成状态筛选：all=全部, completed=必修完成, uncompleted=必修未完成",
+        ),
+    ] = "all",
+    include_disabled: Annotated[
+        bool,
+        Field(default=True, description="是否包含已禁用账号，默认包含"),
+    ] = True,
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询指定课程的学员参与者名单.
+
+    返回课程的参训学员列表，支持按必修完成状态筛选和是否显示禁用账号。
+    返回结果包含每位学员每个必修/选修小节的完成状态、积分、得分等明细。
+    讲师及以上权限角色可调用。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+            next_action="retry",
+        )
+
+    status_map = {"all": "0", "completed": "1", "uncompleted": "2"}
+    if status_filter not in status_map:
+        return _err(
+            error_code="INVALID_STATUS_FILTER",
+            error_message=f"status_filter 必须是 all/completed/uncompleted 之一，收到: {status_filter}",
+            suggested_action="请使用 all、completed 或 uncompleted",
+            next_action="needs_user_input",
+        )
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int, dict[str, Any], dict[str, Any]]:
+        resp = client.get(
+            client.desktop_url("/api/studentManage/getstudentlist"),
+            params={
+                "t": str(int(time.time() * 1000)),
+                "group_id": group_id,
+                "type": status_map[status_filter],
+                "filter_disabled_user": "0" if include_disabled else "1",
+                "is_enroll": "0",
+                "is_require": "0",
+                "only_enterprise_on_job": "0",
+                "student_only": "0",
+                "page": str(p),
+                "size": str(sz),
+                "sort_field": "1",
+                "sort_type": "2",
+                "v": "1",
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取课程学员参与者名单失败"))
+
+        data = resp.get("data", {})
+        page_info = data.get("table_body", {}).get("page_info", {})
+        student_list = data.get("table_body", {}).get("list", [])
+
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return student_list, total_all, data.get("data_count", {}), page_info
+
+    def _build_summary(data_count: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "total": data_count.get("total_num", 0),
+            "completed": data_count.get("complete_num", 0),
+            "uncompleted": data_count.get("uncomplete_num", 0),
+            "completion_rate": data_count.get("complete_rate", 0),
+        }
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_students: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+            latest_data_count: dict[str, Any] = {}
+
+            while True:
+                page_items, total_all, data_count, _ = _fetch_page(current_page, batch_size)
+                all_students.extend(page_items)
+                latest_data_count = data_count
+
+                report_pagination_progress(
+                    "tch_list_course_participants",
+                    current_page,
+                    len(all_students),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_students) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_course_participants",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_course_participants",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            summary = _build_summary(latest_data_count)
+            return _ok(
+                data={
+                    "summary": summary,
+                    "students": all_students,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="如需查看学员学习时长，可调用 tch_list_course_learning_durations",
+            )
+
+        students, _, data_count, page_info = _fetch_page(page, page_size)
+        summary = _build_summary(data_count)
+        return _ok(
+            data={
+                "summary": summary,
+                "students": students,
+                "pagination": {
+                    "total": int(page_info.get("list_total_num", 0) or 0),
+                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
+                    "current_page": int(page_info.get("current_page", page)),
+                    "page_size": int(page_info.get("size", page_size)),
+                },
+            },
+            next_action="proceed",
+            suggested_action="如需获取全量数据，可设置 fetch_all=True",
+        )
+    except Exception as e:
+        logger.exception("获取课程学员参与者名单失败")
+        return _err(
+            error_code="LIST_COURSE_PARTICIPANTS_ERROR",
+            error_message=str(e),
+            suggested_action="请检查 group_id 是否正确，或稍后重试",
+        )
+
+
+@mcp.tool()
+async def tch_list_course_learning_durations(
+    group_id: Annotated[str, Field(description="课程 ID（group_id）")],
+    status_filter: Annotated[
+        str,
+        Field(
+            default="all",
+            description="学员完成状态筛选：all=全部, completed=必修完成, uncompleted=必修未完成",
+        ),
+    ] = "all",
+    include_disabled: Annotated[
+        bool,
+        Field(default=True, description="是否包含已禁用账号，默认包含"),
+    ] = True,
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询指定课程的学员学习时长名单.
+
+    返回课程的参训学员学习时长列表，支持按必修完成状态筛选和是否显示禁用账号。
+    返回结果包含每位学员的课程总学习时长，以及每个必修/选修小节的学习时长、首次/末次学习时间等明细。
+    讲师及以上权限角色可调用。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+            next_action="retry",
+        )
+
+    status_map = {"all": "0", "completed": "1", "uncompleted": "2"}
+    if status_filter not in status_map:
+        return _err(
+            error_code="INVALID_STATUS_FILTER",
+            error_message=f"status_filter 必须是 all/completed/uncompleted 之一，收到: {status_filter}",
+            suggested_action="请使用 all、completed 或 uncompleted",
+            next_action="needs_user_input",
+        )
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int, dict[str, Any], dict[str, Any]]:
+        resp = client.get(
+            client.desktop_url("/api/studentManage/grouplearningtimelist"),
+            params={
+                "t": str(int(time.time() * 1000)),
+                "group_id": group_id,
+                "type": status_map[status_filter],
+                "filter_disabled_user": "0" if include_disabled else "1",
+                "is_enroll": "0",
+                "is_require": "0",
+                "only_enterprise_on_job": "0",
+                "student_only": "0",
+                "page": str(p),
+                "size": str(sz),
+                "sort_field": "1",
+                "sort_type": "2",
+                "v": "2",
+            },
+        )
+
+        if resp.get("status") is not True and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取课程学员学习时长名单失败"))
+
+        data = resp.get("data", {})
+        page_info = data.get("table_body", {}).get("page_info", {})
+        student_list = data.get("table_body", {}).get("list", [])
+
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return student_list, total_all, data.get("data_count", {}), page_info
+
+    def _build_summary(data_count: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "total": data_count.get("total_num", 0),
+            "completed": data_count.get("complete_num", 0),
+            "uncompleted": data_count.get("uncomplete_num", 0),
+            "completion_rate": data_count.get("complete_rate", 0),
+            "avg_vlt": data_count.get("avg_vlt", ""),
+        }
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_students: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+            latest_data_count: dict[str, Any] = {}
+
+            while True:
+                page_items, total_all, data_count, _ = _fetch_page(current_page, batch_size)
+                all_students.extend(page_items)
+                latest_data_count = data_count
+
+                report_pagination_progress(
+                    "tch_list_course_learning_durations",
+                    current_page,
+                    len(all_students),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_students) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_course_learning_durations",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_course_learning_durations",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            summary = _build_summary(latest_data_count)
+            return _ok(
+                data={
+                    "summary": summary,
+                    "students": all_students,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="如需查看学员完成状态，可调用 tch_list_course_participants",
+            )
+
+        students, _, data_count, page_info = _fetch_page(page, page_size)
+        summary = _build_summary(data_count)
+        return _ok(
+            data={
+                "summary": summary,
+                "students": students,
+                "pagination": {
+                    "total": int(page_info.get("list_total_num", 0) or 0),
+                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
+                    "current_page": int(page_info.get("current_page", page)),
+                    "page_size": int(page_info.get("size", page_size)),
+                },
+            },
+            next_action="proceed",
+            suggested_action="如需获取全量数据，可设置 fetch_all=True",
+        )
+    except Exception as e:
+        logger.exception("获取课程学员学习时长名单失败")
+        return _err(
+            error_code="LIST_COURSE_LEARNING_DURATIONS_ERROR",
+            error_message=str(e),
+            suggested_action="请检查 group_id 是否正确，或稍后重试",
+        )
+
+
+@mcp.tool()
 async def tch_search_collaborator_accounts(
     group_id: Annotated[str, Field(description="课程 ID")],
     keyword: Annotated[str, Field(description="查询关键词：邮箱、姓名、用户名或手机号")],

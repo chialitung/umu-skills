@@ -183,6 +183,104 @@ async def list_course_learning_tasks(
 
 
 @skill(
+    name="list_course_participants",
+    description="查询指定课程的学员参与者名单，支持按全部/必修完成/必修未完成筛选，可选择是否包含已禁用账号，返回每位学员每个小节的完成状态明细",
+    required_servers=["teacher"],
+    return_description="学员参与者名单及完成统计",
+)
+async def list_course_participants(
+    ctx: SkillContext,
+    group_id: str,
+    status_filter: str = "all",
+    include_disabled: bool = True,
+    page: int = 1,
+    page_size: int = 20,
+    fetch_all: bool = False,
+) -> dict[str, Any]:
+    """查询指定课程的学员参与者名单."""
+    result = await ctx.call_tool(
+        server="teacher",
+        tool="tch_list_course_participants",
+        arguments={
+            "group_id": group_id,
+            "status_filter": status_filter,
+            "include_disabled": include_disabled,
+            "page": page,
+            "page_size": page_size,
+            "fetch_all": fetch_all,
+        },
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "LIST_COURSE_PARTICIPANTS_FAILED",
+            "error_message": result.get("error_message") or "获取课程学员参与者名单失败",
+            "suggested_action": result.get("suggested_action") or "请确认 group_id 正确且讲师已登录",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="list_course_learning_durations",
+    description="查询指定课程的学员学习时长名单，支持按全部/必修完成/必修未完成筛选，可选择是否包含已禁用账号，返回每位学员每个小节的学习时长明细",
+    required_servers=["teacher"],
+    return_description="学员学习时长名单及统计",
+)
+async def list_course_learning_durations(
+    ctx: SkillContext,
+    group_id: str,
+    status_filter: str = "all",
+    include_disabled: bool = True,
+    page: int = 1,
+    page_size: int = 20,
+    fetch_all: bool = False,
+) -> dict[str, Any]:
+    """查询指定课程的学员学习时长名单."""
+    result = await ctx.call_tool(
+        server="teacher",
+        tool="tch_list_course_learning_durations",
+        arguments={
+            "group_id": group_id,
+            "status_filter": status_filter,
+            "include_disabled": include_disabled,
+            "page": page,
+            "page_size": page_size,
+            "fetch_all": fetch_all,
+        },
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "LIST_COURSE_LEARNING_DURATIONS_FAILED",
+            "error_message": result.get("error_message") or "获取课程学员学习时长名单失败",
+            "suggested_action": result.get("suggested_action") or "请确认 group_id 正确且讲师已登录",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
     name="submit_course_for_audit",
     description="将课程提交至企业知识库进行审核，管理员审核通过后可被推荐和搜索",
     required_servers=["teacher"],
@@ -226,5 +324,7 @@ __all__ = [
     "get_course_info",
     "list_my_courses",
     "list_course_learning_tasks",
+    "list_course_participants",
+    "list_course_learning_durations",
     "submit_course_for_audit",
 ]
