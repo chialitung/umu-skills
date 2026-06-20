@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-06-20
+
+### Fixed
+- 修复 `core/client.py` HTTP 重试逻辑：`_handle_http_error` 在重试判断之前抛出异常，导致 429/502/503/504 等可重试错误无法重试的问题。
+- 修复 `core/client.py` 重试循环中 `except Exception` 过于宽泛的问题，改为捕获 `httpx.RequestError` 和 `OSError`。
+- 修复 `adapters/mcp/student.py` 中 `async def` 工具函数使用 `time.sleep` 阻塞 asyncio 事件循环的问题，全部替换为 `await asyncio.sleep`。
+- 修复 `adapters/mcp/student.py` 中 `stu_batch_complete_course` 内部闭包通过 `nonlocal` 共享修改答案字典导致的并发竞态问题。
+- 修复 `adapters/mcp/session.py` 中 `get_session_sync` 检测到 TTL 过期时仅返回 `None` 而不清理会话的内存泄漏问题。
+- 修复 `core/auth.py` 中 `get_token` 在 token 已过期时仍返回过期 token 的问题。
+- 修复 `core/env_loader.py` 中 `.env` 引号值无法正确处理行内注释的问题。
+- 修复 `adapters/mcp/student.py` 中 `print()` 输出到 stdout 破坏 MCP stdio JSON-RPC 通信的问题。
+- 修复 `core/encrypt.py` 中 `encrypt_password` 对空/None 密码缺少校验的问题。
+- 修复 `admin.py/teacher.py/student.py/course_builder.py` 中 `resp.get("status") is not True` 可能将字符串 `"true"` 误判为失败的问题。
+
 ## [0.18.0] - 2026-06-20
 
 ### Added

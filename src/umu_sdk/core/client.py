@@ -195,10 +195,9 @@ class UMUClient:
 
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
-                self._handle_http_error(status, e.response)
                 last_error = e
 
-                # 可重试错误
+                # 可重试错误：先判断是否需要重试，重试耗尽后再转换为 UMUError
                 if status in (429, 502, 503, 504) and attempt < self.retries - 1:
                     import time
 
@@ -212,9 +211,10 @@ class UMUClient:
                     time.sleep(wait_time)
                     continue
 
+                self._handle_http_error(status, e.response)
                 break
 
-            except Exception as e:
+            except (httpx.RequestError, OSError) as e:
                 last_error = e
                 if attempt < self.retries - 1:
                     import time

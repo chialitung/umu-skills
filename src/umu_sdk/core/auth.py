@@ -126,7 +126,12 @@ class AuthManager:
 
     def get_token(self) -> str | None:
         """获取当前 Token."""
-        if self._token and time.time() >= self._token_expires_at - 60:
+        if not self._token:
+            return None
+        if time.time() >= self._token_expires_at:
+            logger.warning("Token 已过期")
+            return None
+        if time.time() >= self._token_expires_at - 60:
             logger.warning("Token 即将过期")
         return self._token
 

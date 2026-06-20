@@ -432,7 +432,7 @@ def _get_user_name_by_id(client: UMUClient, umu_id: str) -> str:
                 "group_operator": "intersection",
             },
         )
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             return ""
 
         user_list = resp.get("data", {}).get("list", [])
@@ -498,7 +498,7 @@ def _find_user_by_email(client: UMUClient, email: str) -> dict[str, Any] | None:
                 "group_operator": "intersection",
             },
         )
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             return None
 
         user_list = resp.get("data", {}).get("list", [])
@@ -736,7 +736,7 @@ async def _resolve_group_names(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             msg = resp.get("error", "")
             raise RuntimeError(f"查询分组列表失败: {msg}" if msg else "查询分组列表失败")
 
@@ -1485,7 +1485,7 @@ async def adm_update_account(
                 client.desktop_url("/ajax/enterprise/updateUser"),
                 data=profile_data,
             )
-            if resp.get("status") is not True and resp.get("error_code") != 0:
+            if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
                 return _err(
                     error_code="UPDATE_USER_FAILED",
                     error_message=resp.get("error", "更新用户信息失败"),
@@ -3071,7 +3071,7 @@ async def adm_list_groups(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取分组列表失败"))
 
         group_list = resp.get("data", {}).get("list", [])
@@ -3591,7 +3591,7 @@ async def adm_get_group(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             return _err(
                 error_code="GET_GROUP_FAILED",
                 error_message=resp.get("error", "获取分组详情失败"),
@@ -4286,7 +4286,7 @@ async def adm_list_accounts(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取账号列表失败"))
 
         user_list = resp.get("data", {}).get("list", [])
@@ -5740,7 +5740,7 @@ async def adm_get_scheduled_disables(
                 },
             )
 
-            if resp.get("status") is not True and resp.get("error_code") != 0:
+            if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
                 continue
 
             user_list = resp.get("data", {}).get("list", [])
@@ -6234,7 +6234,7 @@ async def adm_list_courses(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取课程列表失败"))
 
         course_list = resp.get("data", {}).get("list", [])
@@ -6468,7 +6468,7 @@ async def adm_list_course_audit_records(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取课程审核列表失败"))
 
         record_list = resp.get("data", {}).get("list", [])
@@ -6659,7 +6659,7 @@ async def adm_audit_course(
             data=payload,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "课程审核操作失败"))
 
         action_text = {1: "通过", 2: "拒绝", 3: "撤销提交"}[audit_status_code]
@@ -7149,7 +7149,7 @@ async def adm_list_learning_programs(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
 
         program_list = resp.get("data", {}).get("list", [])
@@ -7324,7 +7324,7 @@ async def adm_list_personal_learning_programs(
     def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         params = {**base_params, "page": str(p), "size": str(sz)}
         resp = client.get(client.desktop_url(url), params=params)
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
 
         data = resp.get("data", {})

@@ -701,7 +701,7 @@ def _find_document_by_name_size(
                 "status_str": "in_use,transcoding,wait_transcoding",
             },
         )
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             return None
 
         for item in resp.get("data", {}).get("list", []):
@@ -1204,7 +1204,7 @@ async def tch_list_resources(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取资源列表失败"))
 
         data = resp.get("data", {})
@@ -1634,7 +1634,7 @@ async def tch_list_documents(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取文档列表失败"))
 
         data = resp.get("data", {})
@@ -2307,7 +2307,7 @@ async def tch_list_audio_videos(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取音视频列表失败"))
 
         data = resp.get("data", {})
@@ -6756,7 +6756,7 @@ async def tch_list_created_courses(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取已创建课程列表失败"))
 
         data = resp.get("data", {})
@@ -6917,7 +6917,7 @@ async def tch_list_cooperated_courses(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取协同课程列表失败"))
 
         data = resp.get("data", {})
@@ -7077,7 +7077,7 @@ async def tch_list_participated_courses(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取已参与课程列表失败"))
 
         data = resp.get("data", {})
@@ -7291,7 +7291,7 @@ async def tch_list_learning_programs(
     def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         params = {**base_params, "page": str(p), "size": str(sz)}
         resp = client.get(client.desktop_url(url), params=params)
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
 
         data = resp.get("data", {})
@@ -7522,7 +7522,7 @@ async def tch_list_course_learning_tasks(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取学习任务学员清单失败"))
 
         data = resp.get("data", {})
@@ -7725,7 +7725,7 @@ async def tch_list_course_participants(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取课程学员参与者名单失败"))
 
         data = resp.get("data", {})
@@ -7908,7 +7908,7 @@ async def tch_list_course_learning_durations(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取课程学员学习时长名单失败"))
 
         data = resp.get("data", {})

@@ -331,7 +331,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"保存课程失败: {resp.get('error', resp.get('error_message', 'unknown'))}"
             )
@@ -378,7 +378,7 @@ class CourseBuilder:
             params={"group_id": group_id},
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"获取课程信息失败: {resp.get('errMsg', resp.get('error', 'unknown'))}"
             )
@@ -514,7 +514,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"获取小节列表失败: {resp.get('errMsg', resp.get('error', 'unknown'))}"
             )
@@ -1032,7 +1032,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             err_msg = resp.get("errMsg") or resp.get("error", "unknown")
             raise RuntimeError(f"保存课程失败: {err_msg}")
 
@@ -1179,7 +1179,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"更新富文本失败: {resp.get('error', 'unknown')}"
             )
@@ -1218,7 +1218,7 @@ class CourseBuilder:
             timeout=60.0,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"创建富文本失败: {resp.get('error', 'unknown')}"
             )
@@ -1637,7 +1637,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 错误响应: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -1827,7 +1827,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 错误响应: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -2023,7 +2023,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 错误响应: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -2162,7 +2162,7 @@ class CourseBuilder:
             params={"session_id": session_id},
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"获取小节数据失败: {resp.get('error', resp.get('error_message', 'unknown'))}"
             )
@@ -2299,7 +2299,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 错误响应: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -2527,7 +2527,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 错误响应: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -3011,7 +3011,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"获取小节列表失败: {resp.get('errMsg', resp.get('error', 'unknown'))}"
             )
@@ -3143,7 +3143,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"获取小节列表失败: {resp.get('errMsg', resp.get('error', 'unknown'))}"
             )
@@ -3185,7 +3185,7 @@ class CourseBuilder:
             params={"session_id": session_id, "signindata": "0"},
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"获取小节详情失败: {resp.get('errMsg', resp.get('error', 'unknown'))}"
             )
@@ -3311,7 +3311,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 更新错误: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -3560,7 +3560,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 更新错误: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -3662,7 +3662,7 @@ class CourseBuilder:
             params={"session_id": session_id},
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"获取小节数据失败: {resp.get('error', resp.get('error_message', 'unknown'))}"
             )
@@ -3863,7 +3863,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 更新错误: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -4053,7 +4053,7 @@ class CourseBuilder:
         )
 
         # imgtextupd 响应通常无 text 内容，检查 HTTP 状态即可
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "imgtextupd 错误: %s", json.dumps(resp, ensure_ascii=False)
             )
@@ -4101,7 +4101,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.warning(
                 "getimgtextlist 失败: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -4135,7 +4135,7 @@ class CourseBuilder:
                     "parent_type": "4",
                 },
             )
-            if resp.get("status") is not True and resp.get("error_code") != 0:
+            if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
                 logger.warning(
                     "图文资源绑定失败: %s",
                     json.dumps(resp, ensure_ascii=False),
@@ -4158,7 +4158,7 @@ class CourseBuilder:
                     "parent_type": "4",
                 },
             )
-            if resp.get("status") is not True and resp.get("error_code") != 0:
+            if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
                 logger.warning(
                     "封面资源绑定失败: %s",
                     json.dumps(resp, ensure_ascii=False),
@@ -4265,7 +4265,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"创建图文小节失败: {resp.get('error', resp.get('error_message', 'unknown'))}"
             )
@@ -4352,7 +4352,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 错误: %s", json.dumps(resp, ensure_ascii=False)
             )
@@ -4884,7 +4884,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 错误响应: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -5458,7 +5458,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "saveExam 错误响应: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -5815,7 +5815,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "saveExam 错误响应: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -6400,7 +6400,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 编辑错误响应: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -6421,7 +6421,7 @@ class CourseBuilder:
                             "force_edit": "1",
                         },
                     )
-                    if del_resp.get("status") is not True:
+                    if del_resp.get("status") not in (True, "true"):
                         logger.warning(
                             "删除题目失败: qid=%s, resp=%s",
                             dqid,
@@ -6522,7 +6522,7 @@ class CourseBuilder:
             params={"session_id": session_id},
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"获取小节数据失败: {resp.get('error', resp.get('error_message', 'unknown'))}"
             )
@@ -6633,7 +6633,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error(
                 "savesession 更新错误: %s",
                 json.dumps(resp, ensure_ascii=False),
@@ -6736,7 +6736,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(
                 f"{status_text}小节失败: {resp.get('error', resp.get('error_message', 'unknown'))}"
             )
@@ -7102,7 +7102,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error("创建签到小节失败: %s", resp.get("error", "unknown"))
             raise RuntimeError(f"创建签到小节失败: {resp.get('error', 'unknown')}")
 
@@ -7474,7 +7474,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             logger.error("更新签到小节失败: %s", resp.get("error", "unknown"))
             raise RuntimeError(f"更新签到小节失败: {resp.get('error', 'unknown')}")
 
@@ -7524,7 +7524,7 @@ class CourseBuilder:
             },
         )
 
-        if resp.get("status") is not True:
+        if resp.get("status") not in (True, "true"):
             raise RuntimeError(
                 f"删除小节失败: {resp.get('error', 'unknown')}"
             )

@@ -21,9 +21,12 @@ Environment Variables:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import re
+import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncIterator
@@ -50,6 +53,32 @@ from .shared_session_tools import (
     make_list_sessions_tool,
     make_login_tool,
 )
+
+# ---------------------------------------------------------------------------
+# 日志配置
+# ---------------------------------------------------------------------------
+def _setup_logging() -> None:
+    """配置结构化日志."""
+    level_name = os.getenv("MCP_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(level)
+
+    fmt = os.getenv(
+        "MCP_LOG_FORMAT",
+        "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    )
+    handler.setFormatter(logging.Formatter(fmt))
+
+    root = logging.getLogger("umu.mcp.student")
+    root.setLevel(level)
+    root.handlers = [handler]
+
+
+_setup_logging()
+logger = logging.getLogger("umu.mcp.student")
+
 
 # ---------------------------------------------------------------------------
 # 全局实例（由 lifespan 管理）
@@ -90,13 +119,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
             default_session.credential_source = source.value
             identity = get_login_identity(_umu_client)
             summary = format_login_summary(username, source.value, identity)
-            print(f"[MCP Student] 默认会话已自动登录: {summary}")
+            logger.info("[MCP Student] 默认会话已自动登录: %s", summary)
         except Exception as e:
-            print(f"[MCP Student] 默认会话自动登录失败: {e}")
+            logger.warning("[MCP Student] 默认会话自动登录失败: %s", e)
     else:
-        print("[MCP Student] 未配置学生账号凭据，请调用 stu_login 或 stu_create_session")
+        logger.info("[MCP Student] 未配置学生账号凭据，请调用 stu_login 或 stu_create_session")
 
-    print(f"[MCP Student] UMU 学员端服务已启动，目标: {base_url}")
+    logger.info("[MCP Student] UMU 学员端服务已启动，目标: %s", base_url)
 
     yield {"client": _umu_client, "session_manager": _session_manager}
 
@@ -105,7 +134,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
         _session_manager.close_all()
         _session_manager = None
     _umu_client = None
-    print("[MCP Student] UMU 学员端服务已关闭")
+    logger.info("[MCP Student] UMU 学员端服务已关闭")
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +407,7 @@ def _check_needs_enroll(client: UMUClient, group_id: str, s_key: str = "") -> tu
     return False, None
 
 
-def _makeweikestatus_sequence(
+async def _makeweikestatus_sequence(
     client: UMUClient, element_id: str | int, extras: dict[str, dict] | None = None
 ) -> dict[str, Any]:
     """执行 makeweikestatus 状态机序列.
@@ -406,8 +435,8 @@ def _makeweikestatus_sequence(
             results.append({"action": action, "status": "ok"})
         except Exception as e:
             results.append({"action": action, "status": "failed", "error": str(e)})
-            print(f"[makeweikestatus] {action} 失败: {e}")
-        time.sleep(0.3)
+            logger.warning(f"[makeweikestatus] {action} 失败: {e}")
+        await asyncio.sleep(0.3)
 
     failed = [r for r in results if r["status"] == "failed"]
     return {
@@ -1074,7 +1103,7 @@ async def stu_browse_lesson(
             extras["playing"] = {"left_time": str(duration_seconds)}
             extras["achieve"] = {"left_time": str(duration_seconds), "vlt_status": "1"}
 
-        _makeweikestatus_sequence(client, element_id, extras)
+        await _makeweikestatus_sequence(client, element_id, extras)
         return _ok(
             data={"element_id": element_id, "action": "browse_completed"},
             next_action="proceed",
@@ -1697,7 +1726,7 @@ async def stu_submit_questionnaire(
             )
 
         # 3. 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={"element_id": element_id, "submit_id": submit_id},
@@ -1859,7 +1888,7 @@ async def stu_submit_questionnaire_with_config(
             )
 
         # 7. 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={
@@ -1912,7 +1941,7 @@ async def stu_check_in(
                 {"q": json.dumps(q_payload, ensure_ascii=False)},
             )
         except Exception as e:
-            print(f"[stu_check_in] insertAnswer 失败（非致命）: {e}")
+            logger.warning(f"[stu_check_in] insertAnswer 失败（非致命）: {e}")
 
         # 调用 insertWxAnswer（备选）
         try:
@@ -1925,10 +1954,10 @@ async def stu_check_in(
                 },
             )
         except Exception as e:
-            print(f"[stu_check_in] insertWxAnswer 失败（非致命）: {e}")
+            logger.warning(f"[stu_check_in] insertWxAnswer 失败（非致命）: {e}")
 
         # 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={"element_id": element_id, "action": "checkin_completed"},
@@ -2010,10 +2039,10 @@ async def stu_check_in_with_rating(
                 {"q": json.dumps(q_payload, ensure_ascii=False)},
             )
         except Exception as e:
-            print(f"[stu_check_in_with_rating] insertAnswer 失败（非致命）: {e}")
+            logger.warning(f"[stu_check_in_with_rating] insertAnswer 失败（非致命）: {e}")
 
         # 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={"element_id": element_id, "rating": rating},
@@ -2364,8 +2393,8 @@ async def stu_submit_exam_with_config(
                     },
                 )
             except Exception as e:
-                print(f"[stu_submit_exam_with_config] saveAnswer 失败（非致命）: {e}")
-            time.sleep(0.3)
+                logger.warning(f"[stu_submit_exam_with_config] saveAnswer 失败（非致命）: {e}")
+            await asyncio.sleep(0.3)
 
         # 10. 提交考试
         r = client.post(
@@ -2390,7 +2419,7 @@ async def stu_submit_exam_with_config(
             )
 
         # 11. 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={
@@ -2746,7 +2775,7 @@ async def stu_complete_course(
                         error_message=f"课程需要报名但报名失败: {r.get('message', '未知错误')}",
                         data={"details": details},
                     )
-                time.sleep(1)
+                await asyncio.sleep(1)
             except Exception as e:
                 details.append({"action": "enroll", "success": False, "error": str(e)})
                 return _err(
@@ -2874,7 +2903,7 @@ async def stu_complete_course(
 
             try:
                 if etype in (11, 13, 15):  # 视频/文章/图文
-                    _makeweikestatus_sequence(client, eid)
+                    await _makeweikestatus_sequence(client, eid)
                     lesson_detail["action"] = "browse"
                     lesson_detail["success"] = True
                     completed += 1
@@ -2886,7 +2915,7 @@ async def stu_complete_course(
                     if vlt_min:
                         extras["playing"] = {"left_time": str(vlt_min)}
                         extras["achieve"] = {"left_time": str(vlt_min), "vlt_status": "1"}
-                    _makeweikestatus_sequence(client, eid, extras)
+                    await _makeweikestatus_sequence(client, eid, extras)
                     lesson_detail["action"] = "browse"
                     lesson_detail["success"] = True
                     completed += 1
@@ -2905,7 +2934,7 @@ async def stu_complete_course(
                         client.mobile_url("/ajax/insertAnswer"),
                         {"q": json.dumps(q_payload, ensure_ascii=False)},
                     )
-                    _makeweikestatus_sequence(client, eid)
+                    await _makeweikestatus_sequence(client, eid)
                     lesson_detail["action"] = "checkin_with_rating" if advance == "1" else "checkin"
                     lesson_detail["success"] = True
                     completed += 1
@@ -2960,7 +2989,7 @@ async def stu_complete_course(
                         if r.get("error_code") != 0:
                             raise RuntimeError(f"提交问卷失败: {r.get('message', '')}")
 
-                        _makeweikestatus_sequence(client, eid)
+                        await _makeweikestatus_sequence(client, eid)
                         lesson_detail["success"] = True
                         completed += 1
                     elif not skip_questionnaire:
@@ -3034,7 +3063,7 @@ async def stu_complete_course(
                                 )
                             except Exception:
                                 pass
-                            time.sleep(0.3)
+                            await asyncio.sleep(0.3)
 
                         # 提交考试
                         r = client.post(
@@ -3053,7 +3082,7 @@ async def stu_complete_course(
                         ).lower():
                             raise RuntimeError(f"提交考试失败: {r.get('message', '')}")
 
-                        _makeweikestatus_sequence(client, eid)
+                        await _makeweikestatus_sequence(client, eid)
                         lesson_detail["success"] = True
                         completed += 1
                     elif not skip_exam:
@@ -3067,7 +3096,7 @@ async def stu_complete_course(
                 lesson_detail["error"] = str(e)
 
             details.append(lesson_detail)
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
 
         # 检查最终进度
         try:
@@ -3258,7 +3287,9 @@ async def stu_batch_complete_course(
     # 定义批量任务函数
     async def complete_course_task(client: UMUClient, course_id: str) -> dict[str, Any]:
         """单个账号的课程完成逻辑."""
-        nonlocal q_answers_map, e_answers_map
+        # 复制外部 map，避免并发任务共享修改同一字典
+        local_q_answers_map = dict(q_answers_map) if q_answers_map else {}
+        local_e_answers_map = dict(e_answers_map) if e_answers_map else {}
         details: list[dict[str, Any]] = []
         completed = 0
         total = 0
@@ -3276,7 +3307,7 @@ async def stu_batch_complete_course(
                         {"enroll_id": str(enroll_id)},
                     )
                     details.append({"action": "enroll", "success": r.get("error_code") == 0})
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                 except Exception as e:
                     details.append({"action": "enroll", "success": False, "error": str(e)})
 
@@ -3313,9 +3344,7 @@ async def stu_batch_complete_course(
                             try:
                                 idx = int(idx_str)
                                 if idx in q_index_to_id:
-                                    if q_answers_map is None:
-                                        q_answers_map = {}
-                                    q_answers_map[q_index_to_id[idx]] = cfg
+                                    local_q_answers_map[q_index_to_id[idx]] = cfg
                             except ValueError:
                                 pass
                 except json.JSONDecodeError:
@@ -3328,9 +3357,7 @@ async def stu_batch_complete_course(
                             try:
                                 idx = int(idx_str)
                                 if idx in e_index_to_id:
-                                    if e_answers_map is None:
-                                        e_answers_map = {}
-                                    e_answers_map[e_index_to_id[idx]] = cfg
+                                    local_e_answers_map[e_index_to_id[idx]] = cfg
                             except ValueError:
                                 pass
                 except json.JSONDecodeError:
@@ -3361,7 +3388,7 @@ async def stu_batch_complete_course(
                 cfg, cfg_source = _resolve_lesson_answers_config(
                     lesson_idx, eid, etype,
                     lesson_answers_map,
-                    q_answers_map, e_answers_map,
+                    local_q_answers_map, local_e_answers_map,
                     questionnaire_answers, exam_answers,
                 )
 
@@ -3377,7 +3404,7 @@ async def stu_batch_complete_course(
 
                 try:
                     if etype in (11, 13, 15):  # 视频/文章/图文
-                        _makeweikestatus_sequence(client, eid)
+                        await _makeweikestatus_sequence(client, eid)
                         lesson_detail["action"] = "browse"
                         lesson_detail["success"] = True
                         completed += 1
@@ -3389,7 +3416,7 @@ async def stu_batch_complete_course(
                         if vlt_min:
                             extras["playing"] = {"left_time": str(vlt_min)}
                             extras["achieve"] = {"left_time": str(vlt_min), "vlt_status": "1"}
-                        _makeweikestatus_sequence(client, eid, extras)
+                        await _makeweikestatus_sequence(client, eid, extras)
                         lesson_detail["action"] = "browse"
                         lesson_detail["success"] = True
                         completed += 1
@@ -3408,7 +3435,7 @@ async def stu_batch_complete_course(
                             client.mobile_url("/ajax/insertAnswer"),
                             {"q": json.dumps(q_payload, ensure_ascii=False)},
                         )
-                        _makeweikestatus_sequence(client, eid)
+                        await _makeweikestatus_sequence(client, eid)
                         if advance == "1":
                             lesson_detail["action"] = "checkin_with_rating"
                         else:
@@ -3466,7 +3493,7 @@ async def stu_batch_complete_course(
                             if r.get("error_code") != 0:
                                 raise RuntimeError(f"提交问卷失败: {r.get('message', '')}")
 
-                            _makeweikestatus_sequence(client, eid)
+                            await _makeweikestatus_sequence(client, eid)
                             lesson_detail["success"] = True
                             completed += 1
 
@@ -3549,7 +3576,7 @@ async def stu_batch_complete_course(
                                     )
                                 except Exception:
                                     pass
-                                time.sleep(0.3)
+                                await asyncio.sleep(0.3)
 
                             # 提交考试
                             r = client.post(
@@ -3570,7 +3597,7 @@ async def stu_batch_complete_course(
                                     f"提交考试失败: {r.get('message', '')}"
                                 )
 
-                            _makeweikestatus_sequence(client, eid)
+                            await _makeweikestatus_sequence(client, eid)
                             lesson_detail["success"] = True
                             completed += 1
 
@@ -3585,7 +3612,7 @@ async def stu_batch_complete_course(
                     lesson_detail["error"] = str(e)
 
                 details.append(lesson_detail)
-                time.sleep(0.5)  # 小节间延迟
+                await asyncio.sleep(0.5)  # 小节间延迟
 
             return {
                 "completed_lessons": completed,
@@ -3724,7 +3751,7 @@ async def stu_list_participated_courses(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取已参与课程列表失败"))
 
         data = resp.get("data", {})
@@ -3872,39 +3899,39 @@ def main() -> None:
     """MCP 服务入口."""
     import asyncio
 
-    print("=" * 60)
-    print("UMU 学员端 MCP Server")
-    print("=" * 60)
-    print()
-    print("支持的传输方式:")
-    print("  - stdio:  标准输入输出（推荐用于本地 AI 助手）")
-    print()
-    print("环境变量:")
-    print("  UMU_BASE_URL         - UMU 基础 URL（默认: https://www.umu.cn）")
-    print("  UMU_STUDENT_USERNAME - 学生登录用户名")
-    print("  UMU_STUDENT_PASSWORD - 学生登录密码")
-    print()
-    print("可用 Tools:")
-    print("  认证: stu_login, stu_check_auth")
-    print("  会话: stu_create_session, stu_list_sessions, stu_destroy_session")
-    print("  解析: stu_resolve_course_url")
-    print("  查结构: stu_get_my_courses, stu_list_participated_courses,")
-    print("          stu_get_course_structure, stu_get_learning_progress")
-    print("  操作: stu_enroll_course, stu_browse_lesson,")
-    print("        stu_get_questionnaire_questions, stu_submit_questionnaire,")
-    print("        stu_check_in, stu_check_in_with_rating,")
-    print("        stu_start_exam, stu_submit_exam")
-    print("  批量: stu_batch_import_accounts, stu_batch_complete_course")
-    print("  完成: stu_complete_course")
-    print("  验证: stu_get_lesson_status")
-    print("  讲师端: 请使用 umu-mcp-teacher")
-    print()
-    print("可用 Prompts:")
-    print("  - stu_course_completion_workflow")
-    print("  - stu_lesson_type_guide")
-    print("  - stu_error_recovery_guide")
-    print("  - stu_exam_workflow_guide")
-    print()
+    print("=" * 60, file=sys.stderr)
+    print("UMU 学员端 MCP Server", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    print(file=sys.stderr)
+    print("支持的传输方式:", file=sys.stderr)
+    print("  - stdio:  标准输入输出（推荐用于本地 AI 助手）", file=sys.stderr)
+    print(file=sys.stderr)
+    print("环境变量:", file=sys.stderr)
+    print("  UMU_BASE_URL         - UMU 基础 URL（默认: https://www.umu.cn）", file=sys.stderr)
+    print("  UMU_STUDENT_USERNAME - 学生登录用户名", file=sys.stderr)
+    print("  UMU_STUDENT_PASSWORD - 学生登录密码", file=sys.stderr)
+    print(file=sys.stderr)
+    print("可用 Tools:", file=sys.stderr)
+    print("  认证: stu_login, stu_check_auth", file=sys.stderr)
+    print("  会话: stu_create_session, stu_list_sessions, stu_destroy_session", file=sys.stderr)
+    print("  解析: stu_resolve_course_url", file=sys.stderr)
+    print("  查结构: stu_get_my_courses, stu_list_participated_courses,", file=sys.stderr)
+    print("          stu_get_course_structure, stu_get_learning_progress", file=sys.stderr)
+    print("  操作: stu_enroll_course, stu_browse_lesson,", file=sys.stderr)
+    print("        stu_get_questionnaire_questions, stu_submit_questionnaire,", file=sys.stderr)
+    print("        stu_check_in, stu_check_in_with_rating,", file=sys.stderr)
+    print("        stu_start_exam, stu_submit_exam", file=sys.stderr)
+    print("  批量: stu_batch_import_accounts, stu_batch_complete_course", file=sys.stderr)
+    print("  完成: stu_complete_course", file=sys.stderr)
+    print("  验证: stu_get_lesson_status", file=sys.stderr)
+    print("  讲师端: 请使用 umu-mcp-teacher", file=sys.stderr)
+    print(file=sys.stderr)
+    print("可用 Prompts:", file=sys.stderr)
+    print("  - stu_course_completion_workflow", file=sys.stderr)
+    print("  - stu_lesson_type_guide", file=sys.stderr)
+    print("  - stu_error_recovery_guide", file=sys.stderr)
+    print("  - stu_exam_workflow_guide", file=sys.stderr)
+    print(file=sys.stderr)
 
     transport = os.getenv("MCP_TRANSPORT", "stdio")
 
@@ -3913,8 +3940,8 @@ def main() -> None:
     elif transport == "sse":
         asyncio.run(mcp.run_sse_async())
     else:
-        print(f"不支持的传输方式: {transport}")
-        print("支持: stdio, sse")
+        print(f"不支持的传输方式: {transport}", file=sys.stderr)
+        print("支持: stdio, sse", file=sys.stderr)
 
 
 if __name__ == "__main__":

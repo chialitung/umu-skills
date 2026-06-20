@@ -38,6 +38,8 @@ def encrypt_password(password: str) -> str:
         >>> encrypt_password("TestPassword123!")
         'WIEvF2mrRcJkBW3Yg4aS12F4HZLK/Tyo5+71mqm8Ohg='
     """
+    if not password:
+        raise ValueError("密码不能为空")
     padder = PKCS7(algorithms.AES.block_size).padder()
     padded_data = padder.update(password.encode("utf-8")) + padder.finalize()
 
