@@ -450,3 +450,64 @@ class TestManageCourseCollaborators:
         assert mock_mcp.calls == [
             ("teacher", "tch_list_course_collaborators", {"group_id": "g1"}),
         ]
+
+
+class TestTeacherCourseLearningTasks:
+    async def test_list_course_learning_tasks_forwards_arguments(
+        self, registry_with_teacher_skills: SkillRegistry
+    ) -> None:
+        mock_mcp = MockMCPClientManager()
+        skills_server._skill_registry = registry_with_teacher_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="list_course_learning_tasks",
+            arguments={
+                "group_id": "g123",
+                "status_filter": "completed",
+                "include_disabled": False,
+                "page": 2,
+                "page_size": 10,
+                "fetch_all": True,
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert mock_mcp.calls == [
+            (
+                "teacher",
+                "tch_list_course_learning_tasks",
+                {
+                    "group_id": "g123",
+                    "status_filter": "completed",
+                    "include_disabled": False,
+                    "page": 2,
+                    "page_size": 10,
+                    "fetch_all": True,
+                },
+            ),
+        ]
+
+    async def test_list_course_learning_tasks_propagates_failure(
+        self, registry_with_teacher_skills: SkillRegistry
+    ) -> None:
+        responses = {
+            ("teacher", "tch_list_course_learning_tasks"): {
+                "success": False,
+                "error_code": "LIST_COURSE_LEARNING_TASKS_ERROR",
+                "error_message": "API 失败",
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_teacher_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="list_course_learning_tasks",
+            arguments={"group_id": "g123"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["error_code"] == "LIST_COURSE_LEARNING_TASKS_ERROR"
+        assert parsed["error_message"] == "API 失败"
+        assert parsed["next_action"] == "retry"

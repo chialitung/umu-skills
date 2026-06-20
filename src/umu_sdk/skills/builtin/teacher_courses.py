@@ -134,6 +134,55 @@ async def list_my_courses(
 
 
 @skill(
+    name="list_course_learning_tasks",
+    description="查询指定课程的学习任务分配学员清单，支持按已完成/未完成筛选，可选择是否包含已禁用账号",
+    required_servers=["teacher"],
+    return_description="学员清单及完成统计",
+)
+async def list_course_learning_tasks(
+    ctx: SkillContext,
+    group_id: str,
+    status_filter: str = "all",
+    include_disabled: bool = True,
+    page: int = 1,
+    page_size: int = 20,
+    fetch_all: bool = False,
+) -> dict[str, Any]:
+    """查询指定课程的学习任务分配学员清单."""
+    result = await ctx.call_tool(
+        server="teacher",
+        tool="tch_list_course_learning_tasks",
+        arguments={
+            "group_id": group_id,
+            "status_filter": status_filter,
+            "include_disabled": include_disabled,
+            "page": page,
+            "page_size": page_size,
+            "fetch_all": fetch_all,
+        },
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "LIST_COURSE_LEARNING_TASKS_FAILED",
+            "error_message": result.get("error_message") or "获取课程学习任务学员清单失败",
+            "suggested_action": result.get("suggested_action") or "请确认 group_id 正确且讲师已登录",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
     name="submit_course_for_audit",
     description="将课程提交至企业知识库进行审核，管理员审核通过后可被推荐和搜索",
     required_servers=["teacher"],
@@ -176,5 +225,6 @@ __all__ = [
     "get_course_categories",
     "get_course_info",
     "list_my_courses",
+    "list_course_learning_tasks",
     "submit_course_for_audit",
 ]
