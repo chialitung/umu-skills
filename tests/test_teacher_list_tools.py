@@ -296,3 +296,62 @@ class TestTchListCourseLearningTasks:
         assert params["group_id"] == "g123"
         assert params["type"] == "1"
         assert params["filter_disabled_user"] == "1"
+
+    async def test_fetch_all_merges_pages_and_reports_progress(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from umu_sdk.adapters.mcp.teacher import tch_list_course_learning_tasks
+
+        def _student(sid: str, name: str) -> dict[str, Any]:
+            return {
+                "student_id": sid,
+                "umu_id": f"u_{sid}",
+                "user_name": name,
+                "avatar": "",
+                "task_count": 2,
+                "task_done_count": 2,
+                "complete_num": 2,
+                "complete_rate": 1,
+                "is_assign": 1,
+                "assign_time": 0,
+                "last_assign_time": 1000,
+                "complete_time": 2000,
+                "first_learning_time": 500,
+                "last_learning_time": 2000,
+                "due_time": 3000,
+            }
+
+        page1 = {
+            "status": True,
+            "error_code": 0,
+            "data": {
+                "data_count": {"total_num": 2, "complete_num": 2, "uncomplete_num": 0, "complete_rate": 1, "exist_learning_task": 1},
+                "table_body": {
+                    "page_info": {"list_total_num": 2, "total_page_num": 2, "current_page": 1, "size": 50},
+                    "list": [_student("s1", "Alice")],
+                },
+            },
+        }
+        page2 = {
+            "status": True,
+            "error_code": 0,
+            "data": {
+                "data_count": {"total_num": 2, "complete_num": 2, "uncomplete_num": 0, "complete_rate": 1, "exist_learning_task": 1},
+                "table_body": {
+                    "page_info": {"list_total_num": 2, "total_page_num": 2, "current_page": 2, "size": 50},
+                    "list": [_student("s2", "Bob")],
+                },
+            },
+        }
+
+        with _patch_teacher_auth(require_auth=True) as client:
+            client.get.side_effect = [page1, page2]
+            result = json.loads(await tch_list_course_learning_tasks(group_id="g1", fetch_all=True))
+
+        assert result["success"] is True
+        assert len(result["data"]["students"]) == 2
+        output = capsys.readouterr().err
+        assert "[tch_list_course_learning_tasks]" in output
+        assert "获取完成" in output
+        assert result["data"]["pagination"]["total_all"] == 2
+        assert result["data"]["pagination"]["page_size"] == 50
