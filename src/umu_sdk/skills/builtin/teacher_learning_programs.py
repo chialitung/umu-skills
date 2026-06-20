@@ -141,6 +141,8 @@ async def create_learning_program(
     desc_richtext: str = "",
     cover_image_path: str = "",
     bg_image_path: str = "",
+    cover_image_url: str = "",
+    bg_image_url: str = "",
     tags: list[str] | None = None,
     category_ids: list[str] | None = None,
     category_names: list[str] | None = None,
@@ -150,7 +152,15 @@ async def create_learning_program(
     end_time: str = "",
     enable_certificate: bool = False,
     certificate_text: str = "",
+    certificate_theme_id: str = "",
     enable_points: bool = False,
+    skin_id: int = 1,
+    pc_skin_id: int = 1,
+    show_banner: bool = True,
+    unlock_type: int = 1,
+    show_type: int = 1,
+    open_module: int = 1,
+    sort: str = "asc",
 ) -> dict[str, Any]:
     """创建学习项目.
 
@@ -170,6 +180,10 @@ async def create_learning_program(
         create_args["cover_image_path"] = cover_image_path
     if bg_image_path:
         create_args["bg_image_path"] = bg_image_path
+    if cover_image_url:
+        create_args["cover_image_url"] = cover_image_url
+    if bg_image_url:
+        create_args["bg_image_url"] = bg_image_url
     if tags:
         create_args["tags"] = tags
     if category_ids:
@@ -180,6 +194,14 @@ async def create_learning_program(
         create_args["start_time"] = start_time
     if end_time:
         create_args["end_time"] = end_time
+    create_args["skin_id"] = skin_id
+    create_args["pc_skin_id"] = pc_skin_id
+    create_args["show_banner"] = show_banner
+    create_args["unlock_type"] = unlock_type
+    create_args["show_type"] = show_type
+    create_args["open_module"] = open_module
+    create_args["sort"] = sort
+    create_args["enable_certificate"] = enable_certificate
 
     ctx.logger.info("[create_learning_program] 创建学习项目: %s", title)
     create_result = await ctx.call_tool(
@@ -230,10 +252,15 @@ async def create_learning_program(
 
     if enable_certificate:
         ctx.logger.info("[create_learning_program] 配置证书")
+        cert_args: dict[str, Any] = {"program_id": program_id}
+        if certificate_text:
+            cert_args["text"] = certificate_text
+        if certificate_theme_id:
+            cert_args["theme_id"] = certificate_theme_id
         cert_result = await ctx.call_tool(
             server="teacher",
             tool="tch_configure_program_certificate",
-            arguments={"program_id": program_id, "text": certificate_text},
+            arguments=cert_args,
         )
         result_data["certificate_result"] = cert_result.get("data", {})
         if not cert_result["success"]:
@@ -274,10 +301,244 @@ async def create_learning_program(
     }
 
 
+@skill(
+    name="update_learning_program",
+    description="修改学习项目基本信息、模块与课程关系，支持删除课程",
+    required_servers=["teacher"],
+    return_description="包含 program_id 与各子操作结果",
+)
+async def update_learning_program(
+    ctx: SkillContext,
+    program_id: str,
+    title: str | None = None,
+    desc_plain: str | None = None,
+    desc_richtext: str | None = None,
+    cover_image_path: str | None = None,
+    bg_image_path: str | None = None,
+    cover_image_url: str | None = None,
+    bg_image_url: str | None = None,
+    tags: list[str] | None = None,
+    category_ids: list[str] | None = None,
+    category_names: list[str] | None = None,
+    skin_id: int | None = None,
+    pc_skin_id: int | None = None,
+    show_banner: bool | None = None,
+    unlock_type: int | None = None,
+    show_type: int | None = None,
+    open_module: int | None = None,
+    sort: str | None = None,
+    enable_certificate: bool | None = None,
+    modules: list[dict[str, Any]] | None = None,
+    remove_module_group_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """修改学习项目.
+
+    支持修改项目基本信息、模块信息、课程排序/必修状态，以及删除指定课程。
+    """
+    update_args: dict[str, Any] = {"program_id": program_id}
+    if title is not None:
+        update_args["title"] = title
+    if desc_plain is not None:
+        update_args["desc_plain"] = desc_plain
+    if desc_richtext is not None:
+        update_args["desc_richtext"] = desc_richtext
+    if cover_image_path is not None:
+        update_args["cover_image_path"] = cover_image_path
+    if bg_image_path is not None:
+        update_args["bg_image_path"] = bg_image_path
+    if cover_image_url is not None:
+        update_args["cover_image_url"] = cover_image_url
+    if bg_image_url is not None:
+        update_args["bg_image_url"] = bg_image_url
+    if tags is not None:
+        update_args["tags"] = tags
+    if category_ids is not None:
+        update_args["category_ids"] = category_ids
+    if category_names is not None:
+        update_args["category_names"] = category_names
+    if skin_id is not None:
+        update_args["skin_id"] = skin_id
+    if pc_skin_id is not None:
+        update_args["pc_skin_id"] = pc_skin_id
+    if show_banner is not None:
+        update_args["show_banner"] = show_banner
+    if unlock_type is not None:
+        update_args["unlock_type"] = unlock_type
+    if show_type is not None:
+        update_args["show_type"] = show_type
+    if open_module is not None:
+        update_args["open_module"] = open_module
+    if sort is not None:
+        update_args["sort"] = sort
+    if enable_certificate is not None:
+        update_args["enable_certificate"] = enable_certificate
+
+    result_data: dict[str, Any] = {"program_id": program_id}
+
+    # 先删除课程，再修改模块，避免顺序冲突
+    if remove_module_group_ids:
+        ctx.logger.info("[update_learning_program] 从项目 %s 删除课程", program_id)
+        remove_result = await ctx.call_tool(
+            server="teacher",
+            tool="tch_remove_courses_from_learning_program",
+            arguments={"program_id": program_id, "module_group_ids": remove_module_group_ids},
+        )
+        result_data["remove_courses_result"] = remove_result.get("data", {})
+        if not remove_result["success"]:
+            return {
+                "success": False,
+                "data": result_data,
+                "error_code": remove_result.get("error_code", "REMOVE_COURSES_FAILED"),
+                "error_message": remove_result.get("error_message", "删除课程失败"),
+                "suggested_action": "失败课程可单独重试",
+                "next_action": "retry",
+            }
+
+    ctx.logger.info("[update_learning_program] 修改项目 %s 基本信息", program_id)
+    update_result = await ctx.call_tool(
+        server="teacher",
+        tool="tch_update_learning_program",
+        arguments=update_args,
+    )
+    if not update_result["success"]:
+        return {
+            "success": False,
+            "data": result_data,
+            "error_code": update_result.get("error_code", "UPDATE_LEARNING_PROGRAM_FAILED"),
+            "error_message": update_result.get("error_message", "修改学习项目失败"),
+            "suggested_action": "请检查讲师是否已登录或项目是否存在",
+            "next_action": "retry",
+        }
+
+    if modules:
+        ctx.logger.info("[update_learning_program] 修改项目 %s 模块", program_id)
+        module_result = await ctx.call_tool(
+            server="teacher",
+            tool="tch_update_learning_program_modules",
+            arguments={"program_id": program_id, "modules": modules},
+        )
+        result_data["update_modules_result"] = module_result.get("data", {})
+        if not module_result["success"]:
+            return {
+                "success": False,
+                "data": result_data,
+                "error_code": module_result.get("error_code", "UPDATE_MODULES_FAILED"),
+                "error_message": module_result.get("error_message", "修改模块失败"),
+                "suggested_action": "部分模块可能未修改成功，请查看 update_modules_result",
+                "next_action": "retry",
+            }
+
+    return {
+        "success": True,
+        "data": result_data,
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "学习项目已修改完成",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="list_program_participants",
+    description="查询学习项目的学员名单，支持按完成状态筛选与是否包含禁用账号",
+    required_servers=["teacher"],
+    return_description="学员名单及 modules/courses 深度格式化结果",
+)
+async def list_program_participants(
+    ctx: SkillContext,
+    program_id: str,
+    status_filter: str = "all",
+    include_disabled: bool = True,
+    page: int = 1,
+    page_size: int = 20,
+    fetch_all: bool = False,
+) -> dict[str, Any]:
+    """查询学习项目的学员名单."""
+    result = await ctx.call_tool(
+        server="teacher",
+        tool="tch_list_program_participants",
+        arguments={
+            "program_id": program_id,
+            "status_filter": status_filter,
+            "include_disabled": include_disabled,
+            "page": page,
+            "page_size": page_size,
+            "fetch_all": fetch_all,
+        },
+    )
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "LIST_PROGRAM_PARTICIPANTS_FAILED",
+            "error_message": result.get("error_message") or "查询学习项目学员名单失败",
+            "suggested_action": result.get("suggested_action") or "请确认讲师已登录",
+            "next_action": "retry",
+        }
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
+    name="list_program_learning_tasks",
+    description="查询学习项目的学习任务学员名单，支持按完成状态筛选与是否包含禁用账号",
+    required_servers=["teacher"],
+    return_description="学习任务学员名单及 modules/courses 深度格式化结果",
+)
+async def list_program_learning_tasks(
+    ctx: SkillContext,
+    program_id: str,
+    status_filter: str = "all",
+    include_disabled: bool = True,
+    page: int = 1,
+    page_size: int = 20,
+    fetch_all: bool = False,
+) -> dict[str, Any]:
+    """查询学习项目的学习任务学员名单."""
+    result = await ctx.call_tool(
+        server="teacher",
+        tool="tch_list_program_learning_tasks",
+        arguments={
+            "program_id": program_id,
+            "status_filter": status_filter,
+            "include_disabled": include_disabled,
+            "page": page,
+            "page_size": page_size,
+            "fetch_all": fetch_all,
+        },
+    )
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "LIST_PROGRAM_LEARNING_TASKS_FAILED",
+            "error_message": result.get("error_message") or "查询学习项目学习任务学员名单失败",
+            "suggested_action": result.get("suggested_action") or "请确认讲师已登录",
+            "next_action": "retry",
+        }
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
 __all__ = [
     "list_teacher_learning_programs",
     "list_owned_learning_programs",
     "list_cooperated_learning_programs",
     "list_enrolled_learning_programs",
     "create_learning_program",
+    "update_learning_program",
+    "list_program_participants",
+    "list_program_learning_tasks",
 ]

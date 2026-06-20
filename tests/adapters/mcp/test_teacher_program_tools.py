@@ -12,8 +12,14 @@ from umu_sdk.adapters.mcp.teacher import (
     tch_add_courses_to_learning_program,
     tch_configure_program_certificate,
     tch_create_learning_program,
+    tch_get_learning_program,
+    tch_list_program_learning_tasks,
+    tch_list_program_participants,
+    tch_remove_courses_from_learning_program,
     tch_search_courses_for_program,
     tch_set_program_points_status,
+    tch_update_learning_program,
+    tch_update_learning_program_modules,
 )
 
 
@@ -92,3 +98,87 @@ class TestTchSearchCoursesForProgram:
             with _auth_patch(mock_client):
                 result = json.loads(await tch_search_courses_for_program("359929"))
             assert result["success"] is True
+
+
+class TestTchGetLearningProgram:
+    async def test_success(self, mock_client):
+        with patch("umu_sdk.adapters.mcp.teacher.ProgramBuilder") as MockBuilder:
+            instance = MockBuilder.return_value
+            instance.get_program.return_value = {"program_info": {"program_id": "359929"}}
+            with _auth_patch(mock_client):
+                result = json.loads(await tch_get_learning_program("359929"))
+            assert result["success"] is True
+            assert result["data"]["program_info"]["program_id"] == "359929"
+
+
+class TestTchUpdateLearningProgram:
+    async def test_success(self, mock_client):
+        with patch("umu_sdk.adapters.mcp.teacher.ProgramBuilder") as MockBuilder:
+            instance = MockBuilder.return_value
+            instance.update_program.return_value = {"program_id": "359929"}
+            with _auth_patch(mock_client):
+                result = json.loads(await tch_update_learning_program("359929", title="新标题"))
+            assert result["success"] is True
+            instance.update_program.assert_called_once()
+
+
+class TestTchUpdateLearningProgramModules:
+    async def test_success(self, mock_client):
+        with patch("umu_sdk.adapters.mcp.teacher.ProgramBuilder") as MockBuilder:
+            instance = MockBuilder.return_value
+            instance.update_modules.return_value = {"program_id": "359929"}
+            with _auth_patch(mock_client):
+                result = json.loads(
+                    await tch_update_learning_program_modules(
+                        "359929",
+                        modules=[{"module_id": "197797", "module_title": "新标题"}],
+                    )
+                )
+            assert result["success"] is True
+
+
+class TestTchRemoveCoursesFromLearningProgram:
+    async def test_success(self, mock_client):
+        with patch("umu_sdk.adapters.mcp.teacher.ProgramBuilder") as MockBuilder:
+            instance = MockBuilder.return_value
+            instance.remove_courses.return_value = {"removed": ["1"], "failed": []}
+            with _auth_patch(mock_client):
+                result = json.loads(await tch_remove_courses_from_learning_program("359929", ["1"]))
+            assert result["success"] is True
+            assert result["data"]["removed"] == ["1"]
+
+
+class TestTchListProgramParticipants:
+    async def test_success(self, mock_client):
+        with patch("umu_sdk.adapters.mcp.teacher.ProgramStudentManager") as MockManager:
+            instance = MockManager.return_value
+            instance.list_participants.return_value = {
+                "summary": {"total": 1, "completed": 1, "uncompleted": 0, "completion_rate": 1.0},
+                "students": [{"umu_id": "1", "user_name": "Alice"}],
+                "pagination": {"total": 1, "total_pages": 1, "current_page": 1, "page_size": 20},
+            }
+            with _auth_patch(mock_client):
+                result = json.loads(await tch_list_program_participants("358416"))
+            assert result["success"] is True
+            assert result["data"]["students"][0]["user_name"] == "Alice"
+
+
+class TestTchListProgramLearningTasks:
+    async def test_success(self, mock_client):
+        with patch("umu_sdk.adapters.mcp.teacher.ProgramStudentManager") as MockManager:
+            instance = MockManager.return_value
+            instance.list_learning_tasks.return_value = {
+                "summary": {
+                    "total": 1,
+                    "completed": 1,
+                    "uncompleted": 0,
+                    "completion_rate": 1.0,
+                    "has_learning_task": True,
+                },
+                "students": [{"umu_id": "1", "user_name": "Alice"}],
+                "pagination": {"total": 1, "total_pages": 1, "current_page": 1, "page_size": 20},
+            }
+            with _auth_patch(mock_client):
+                result = json.loads(await tch_list_program_learning_tasks("358416"))
+            assert result["success"] is True
+            assert result["data"]["summary"]["has_learning_task"] is True

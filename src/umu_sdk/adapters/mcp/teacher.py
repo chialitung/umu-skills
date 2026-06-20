@@ -66,6 +66,7 @@ from .document_upload import (
 )
 from .image_upload import ImageUploader
 from .program_builder import ProgramBuilder
+from .program_student_manager import ProgramStudentManager
 from .session import SessionManager
 from .video_upload import (
     VideoUploader,
@@ -7374,6 +7375,8 @@ async def tch_create_learning_program(
     desc_richtext: Annotated[str, Field(default="", description="富文本介绍（HTML）")] = "",
     cover_image_path: Annotated[str | None, Field(default=None, description="本地封面图路径")] = None,
     bg_image_path: Annotated[str | None, Field(default=None, description="本地背景图路径")] = None,
+    cover_image_url: Annotated[str | None, Field(default=None, description="封面图 URL，与 cover_image_path 二选一，URL 优先")] = None,
+    bg_image_url: Annotated[str | None, Field(default=None, description="背景图 URL，与 bg_image_path 二选一，URL 优先")] = None,
     tags: Annotated[list[str] | None, Field(default=None, description="标签列表")] = None,
     category_ids: Annotated[list[str] | None, Field(default=None, description="分类 ID 列表")] = None,
     category_names: Annotated[
@@ -7382,6 +7385,14 @@ async def tch_create_learning_program(
     ] = None,
     start_time: Annotated[str, Field(default="", description="开始时间戳字符串")] = "",
     end_time: Annotated[str, Field(default="", description="结束时间戳字符串")] = "",
+    skin_id: Annotated[int, Field(default=1, description="皮肤 ID")] = 1,
+    pc_skin_id: Annotated[int, Field(default=1, description="PC 皮肤 ID")] = 1,
+    show_banner: Annotated[bool, Field(default=True, description="是否显示 banner")] = True,
+    unlock_type: Annotated[int, Field(default=1, description="解锁类型")] = 1,
+    show_type: Annotated[int, Field(default=1, description="显示类型")] = 1,
+    open_module: Annotated[int, Field(default=1, description="开放模块")] = 1,
+    sort: Annotated[str, Field(default="asc", description="排序方式")] = "asc",
+    enable_certificate: Annotated[bool, Field(default=False, description="是否启用证书")] = False,
     session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
 ) -> str:
     """创建学习项目（不含课程）.
@@ -7401,11 +7412,21 @@ async def tch_create_learning_program(
             desc_richtext=desc_richtext,
             cover_path=cover_image_path or "",
             bg_path=bg_image_path or "",
+            cover_image_url=cover_image_url or "",
+            bg_image_url=bg_image_url or "",
             tags=tags,
             category_ids=category_ids,
             category_names=category_names,
             start_time=start_time,
             end_time=end_time,
+            skin_id=skin_id,
+            pc_skin_id=pc_skin_id,
+            show_banner=show_banner,
+            unlock_type=unlock_type,
+            show_type=show_type,
+            open_module=open_module,
+            sort=sort,
+            enable_certificate=enable_certificate,
         )
         return _ok(
             data=result,
@@ -7518,6 +7539,300 @@ async def tch_search_courses_for_program(
     except Exception as e:
         logger.exception("搜索课程失败")
         return _err("SEARCH_COURSES_FOR_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_get_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """获取学习项目详情.
+
+    返回项目基本信息、模块列表及课程关系，可用于修改前查看当前结构。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.get_program(program_id)
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("获取学习项目详情失败")
+        return _err("GET_LEARNING_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_update_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    title: Annotated[str | None, Field(default=None, description="学习项目标题")] = None,
+    desc_plain: Annotated[str | None, Field(default=None, description="纯文本介绍")] = None,
+    desc_richtext: Annotated[str | None, Field(default=None, description="富文本介绍（HTML）")] = None,
+    cover_image_path: Annotated[str | None, Field(default=None, description="本地封面图路径，传空字符串表示清除")] = None,
+    bg_image_path: Annotated[str | None, Field(default=None, description="本地背景图路径，传空字符串表示清除")] = None,
+    cover_image_url: Annotated[str | None, Field(default=None, description="封面图 URL，与 cover_image_path 二选一，URL 优先")] = None,
+    bg_image_url: Annotated[str | None, Field(default=None, description="背景图 URL，与 bg_image_path 二选一，URL 优先")] = None,
+    tags: Annotated[list[str] | None, Field(default=None, description="标签列表")] = None,
+    category_ids: Annotated[list[str] | None, Field(default=None, description="分类 ID 列表")] = None,
+    category_names: Annotated[
+        list[str] | None,
+        Field(default=None, description="分类名称列表，与 category_ids 二选一，名称优先"),
+    ] = None,
+    skin_id: Annotated[int | None, Field(default=None, description="皮肤 ID")] = None,
+    pc_skin_id: Annotated[int | None, Field(default=None, description="PC 皮肤 ID")] = None,
+    show_banner: Annotated[bool | None, Field(default=None, description="是否显示 banner")] = None,
+    unlock_type: Annotated[int | None, Field(default=None, description="解锁类型")] = None,
+    show_type: Annotated[int | None, Field(default=None, description="显示类型")] = None,
+    open_module: Annotated[int | None, Field(default=None, description="开放模块")] = None,
+    sort: Annotated[str | None, Field(default=None, description="排序方式")] = None,
+    enable_certificate: Annotated[bool | None, Field(default=None, description="是否启用证书")] = None,
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """修改学习项目基本信息.
+
+    未提供的字段保持原值；需要修改的字段显式传入。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.update_program(
+            program_id=program_id,
+            title=title,
+            desc_plain=desc_plain,
+            desc_richtext=desc_richtext,
+            cover_path=cover_image_path,
+            bg_path=bg_image_path,
+            cover_image_url=cover_image_url,
+            bg_image_url=bg_image_url,
+            tags=tags,
+            category_ids=category_ids,
+            category_names=category_names,
+            skin_id=skin_id,
+            pc_skin_id=pc_skin_id,
+            show_banner=show_banner,
+            unlock_type=unlock_type,
+            show_type=show_type,
+            open_module=open_module,
+            sort=sort,
+            enable_certificate=enable_certificate,
+        )
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("修改学习项目失败")
+        return _err("UPDATE_LEARNING_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_update_learning_program_modules(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    modules: Annotated[
+        list[dict[str, Any]],
+        Field(description='模块列表，每项包含 module_id 与可修改字段，例如 [{"module_id": "197797", "module_title": "新标题", "module_desc_richtext": "<p>描述</p>", "group_list": [...]}]'),
+    ],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """修改学习项目的模块信息.
+
+    可修改模块标题、模块描述、模块富文本描述、模块内课程顺序及是否必修。
+    group_list 中的 id 为模块课程关系 ID（module_group_id）。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.update_modules(program_id=program_id, modules=modules)
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("修改学习项目模块失败")
+        return _err("UPDATE_LEARNING_PROGRAM_MODULES_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_remove_courses_from_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    module_group_ids: Annotated[
+        list[str],
+        Field(description="模块课程关系 ID 列表（来自 group_list 中的 id）"),
+    ],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """从学习项目中移除课程.
+
+    module_group_ids 可通过 tch_get_learning_program 获取模块内课程的 id 字段。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.remove_courses(program_id=program_id, module_group_ids=module_group_ids)
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="失败项可单独重试",
+        )
+    except Exception as e:
+        logger.exception("从学习项目移除课程失败")
+        return _err("REMOVE_COURSES_FROM_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_list_program_participants(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    status_filter: Annotated[
+        str,
+        Field(
+            default="all",
+            description="学员完成状态筛选：all=全部, completed=已完成, uncompleted=未完成",
+        ),
+    ] = "all",
+    include_disabled: Annotated[
+        bool,
+        Field(default=True, description="是否包含已禁用账号，默认包含"),
+    ] = True,
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选会话 ID"),
+    ] = None,
+) -> str:
+    """查询学习项目的学员名单.
+
+    返回学习项目下所有学员的完成状态，支持按完成状态筛选和是否包含已禁用账号。
+    结果中的 modules / courses 字段已根据 table_head 动态列深度格式化。
+    讲师及以上权限角色可调用。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+            next_action="retry",
+        )
+
+    try:
+        manager = ProgramStudentManager(client, client.base_url)
+        result = manager.list_participants(
+            program_id=program_id,
+            status_filter=status_filter,
+            include_disabled=include_disabled,
+            page=page,
+            page_size=page_size,
+            fetch_all=fetch_all,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="如需查看学员在学习任务维度的详情，可调用 tch_list_program_learning_tasks",
+        )
+    except ValueError as e:
+        return _err(
+            error_code="INVALID_STATUS_FILTER",
+            error_message=str(e),
+            suggested_action="请使用 all、completed 或 uncompleted",
+            next_action="needs_user_input",
+        )
+    except Exception as e:
+        logger.exception("查询学习项目学员名单失败")
+        return _err("LIST_PROGRAM_PARTICIPANTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_list_program_learning_tasks(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    status_filter: Annotated[
+        str,
+        Field(
+            default="all",
+            description="学员完成状态筛选：all=全部, completed=已完成, uncompleted=未完成",
+        ),
+    ] = "all",
+    include_disabled: Annotated[
+        bool,
+        Field(default=True, description="是否包含已禁用账号，默认包含"),
+    ] = True,
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选会话 ID"),
+    ] = None,
+) -> str:
+    """查询学习项目的学习任务学员名单.
+
+    返回被分配给该学习项目作为学习任务的学员列表，支持按完成状态筛选和是否显示禁用账号。
+    结果中的 modules / courses 字段已根据 table_head 动态列深度格式化。
+    讲师及以上权限角色可调用。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+            next_action="retry",
+        )
+
+    try:
+        manager = ProgramStudentManager(client, client.base_url)
+        result = manager.list_learning_tasks(
+            program_id=program_id,
+            status_filter=status_filter,
+            include_disabled=include_disabled,
+            page=page,
+            page_size=page_size,
+            fetch_all=fetch_all,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="如需查看学员在项目维度的完成详情，可调用 tch_list_program_participants",
+        )
+    except ValueError as e:
+        return _err(
+            error_code="INVALID_STATUS_FILTER",
+            error_message=str(e),
+            suggested_action="请使用 all、completed 或 uncompleted",
+            next_action="needs_user_input",
+        )
+    except Exception as e:
+        logger.exception("查询学习项目学习任务学员名单失败")
+        return _err("LIST_PROGRAM_LEARNING_TASKS_FAILED", str(e))
 
 
 @mcp.tool()

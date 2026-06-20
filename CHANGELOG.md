@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-06-20
+
+### Added
+- 新增 Teacher MCP 学习项目学员名单查询能力：
+  - `tch_list_program_participants`：查询学习项目的学员名单，支持全部/完成必修/未完成必修筛选，支持是否包含已禁用账号，返回数据按 modules/courses 动态列深度格式化。
+  - `tch_list_program_learning_tasks`：查询学习项目的学习任务学员名单，支持相同筛选条件，返回数据按 modules/courses 动态列深度格式化。
+- 新增 `src/umu_sdk/adapters/mcp/program_student_manager.py`：封装学习项目学员/学习任务名单查询与动态列解析。
+- 新增对应 Skill：`list_program_participants`、`list_program_learning_tasks`。
+
+### Changed
+- `README.md` 教师工具数量标题更新为 90，内置 Skill 数量标题更新为 112。
+
 ## [0.18.2] - 2026-06-20
 
 ### Changed
