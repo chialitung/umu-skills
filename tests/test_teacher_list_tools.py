@@ -355,3 +355,37 @@ class TestTchListCourseLearningTasks:
         assert "获取完成" in output
         assert result["data"]["pagination"]["total_all"] == 2
         assert result["data"]["pagination"]["page_size"] == 50
+
+    async def test_not_authenticated_returns_retry(self) -> None:
+        from umu_sdk.adapters.mcp.teacher import tch_list_course_learning_tasks
+
+        with _patch_teacher_auth(require_auth=False) as client:
+            with patch("umu_sdk.adapters.mcp.teacher._require_auth", return_value="未登录"):
+                result = json.loads(await tch_list_course_learning_tasks(group_id="g1"))
+
+        assert result["success"] is False
+        assert result["error_code"] == "NOT_AUTHENTICATED"
+        assert result["next_action"] == "retry"
+        client.get.assert_not_called()
+
+    async def test_api_error_returns_error(self) -> None:
+        from umu_sdk.adapters.mcp.teacher import tch_list_course_learning_tasks
+
+        with _patch_teacher_auth(require_auth=True) as client:
+            client.get.return_value = {"status": False, "error": "课程不存在"}
+            result = json.loads(await tch_list_course_learning_tasks(group_id="g1"))
+
+        assert result["success"] is False
+        assert result["error_code"] == "LIST_COURSE_LEARNING_TASKS_ERROR"
+        assert "课程不存在" in result["error_message"]
+
+    async def test_invalid_status_filter_returns_user_input(self) -> None:
+        from umu_sdk.adapters.mcp.teacher import tch_list_course_learning_tasks
+
+        with _patch_teacher_auth(require_auth=True) as client:
+            result = json.loads(await tch_list_course_learning_tasks(group_id="g1", status_filter="done"))
+
+        assert result["success"] is False
+        assert result["error_code"] == "INVALID_STATUS_FILTER"
+        assert result["next_action"] == "needs_user_input"
+        client.get.assert_not_called()
