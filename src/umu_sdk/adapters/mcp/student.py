@@ -21,6 +21,7 @@ Environment Variables:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -35,6 +36,7 @@ from pydantic import Field
 
 from ...core.client import UMUClient
 from ...core.credential_loader import CredentialSource, load_credentials_with_source
+from ...core.encrypt import decrypt_aes_base64
 from .utils import format_login_summary, get_login_identity, report_pagination_progress
 from . import prompts
 from .batch import AccountImporter, AccountSource, BatchExecutor
@@ -402,6 +404,172 @@ def _format_scorm_total_time(seconds: int) -> str:
     return f"{hours:04d}:{mins:02d}:{secs:02d}.00"
 
 
+def _extract_page_data_json(html: str) -> dict[str, Any] | None:
+    """从 HTML 中提取 `var pageData = {...};` 并解析为 dict。"""
+    m = re.search(r"var\s+pageData\s*=\s*(\{.*?\});?\s*<\/script>", html, re.DOTALL)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(1))
+    except Exception:
+        return None
+
+
+def _extract_uscorm_runtime(
+    client: UMUClient,
+    element_id: str,
+    share_url: str,
+) -> dict[str, Any]:
+    """从 SCORM 小节分享页提取 UMU 自研 wrapper 的运行时信息。
+
+    UMU 对部分 SCORM 资源使用自研 wrapper（非 Moodle），运行时页由：
+      https://www.umu.cn/scorm/{token}/element/{base64(element_id)}
+    提供，commit 目标为 /napi/scorm/scorm12 或 /napi/scorm/scorm2004。
+
+    返回 dict，包含：
+      mode: "umu_wrapper"
+      scorm_version: "1.2" | "2004"
+      commit_url: 绝对提交地址
+      launch_url: 启动页地址
+      lms_data: 初始 CMI 数据
+    失败时抛出 ValueError。
+    """
+    headers = client.auth.get_auth_headers()
+    headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+    # 1. 访问分享页，拿到包含 resource_store 的 pageData
+    resp = client.http.get(share_url, headers=headers, follow_redirects=True)
+    page_data = _extract_page_data_json(resp.text or "")
+    if not page_data:
+        raise ValueError("分享页未包含 pageData")
+
+    resource_store = page_data.get("data", {}).get("resource_store") or page_data.get("resource_store") or []
+    if not resource_store:
+        raise ValueError("pageData 中没有 resource_store")
+
+    resource = resource_store[0]
+    encrypted_url = resource.get("transcoding_url") or resource.get("url")
+    if not encrypted_url:
+        raise ValueError("resource_store 缺少加密 URL")
+
+    decrypted = decrypt_aes_base64(str(encrypted_url))
+    # decrypted 形如 https://umu.cn/scorm/{token}/element
+    parsed = urlparse(decrypted)
+    base_path = parsed.path.rstrip("/")
+    if not base_path or not re.search(r"/scorm/[^/]+/element$", base_path):
+        raise ValueError(f"解密后的 SCORM URL 不符合预期: {decrypted}")
+
+    base64_id = base64.b64encode(str(element_id).encode()).decode()
+    launch_path = f"{base_path}/{base64_id}"
+    launch_url = f"https://www.umu.cn{launch_path}"
+
+    # 2. 访问启动页，读取 commit endpoint 与初始 lms_data
+    launch_resp = client.http.get(launch_url, headers=headers, follow_redirects=True)
+    launch_html = launch_resp.text or ""
+    launch_page_data = _extract_page_data_json(launch_html)
+    if not launch_page_data:
+        raise ValueError("SCORM 启动页未包含 pageData")
+
+    scorm_version = launch_page_data.get("scorm_version", "1.2")
+    lms_data = launch_page_data.get("lms_data", {}) or {}
+
+    version_commit_suffix = {"1.2": "scorm12", "2004": "scorm2004"}.get(str(scorm_version), "")
+    commit_urls = re.findall(r"settings\.lmsCommitUrl\s*=\s*\"([^\"]+)\"", launch_html)
+    commit_candidates = [u for u in commit_urls if version_commit_suffix in u] if version_commit_suffix else []
+    if commit_candidates:
+        commit_path = commit_candidates[0]
+    elif commit_urls:
+        commit_path = commit_urls[0]
+    else:
+        raise ValueError("SCORM 启动页未找到 commit URL")
+    if commit_path.startswith("http"):
+        commit_url = commit_path
+    else:
+        commit_url = f"https://www.umu.cn{commit_path}"
+
+    return {
+        "mode": "umu_wrapper",
+        "scorm_version": str(scorm_version),
+        "commit_url": commit_url,
+        "launch_url": launch_url,
+        "lms_data": lms_data,
+    }
+
+
+def _post_uscorm_commit(
+    client: UMUClient,
+    runtime: dict[str, Any],
+    cmi: dict[str, Any],
+) -> dict[str, Any]:
+    """向 UMU 自研 SCORM wrapper 提交 CMI 数据。"""
+    headers = client.auth.get_auth_headers()
+    headers["Content-Type"] = "application/json;charset=UTF-8"
+
+    response = client.http.post(
+        runtime["commit_url"],
+        json={"cmi": cmi},
+        headers=headers,
+        follow_redirects=False,
+    )
+    text = (response.text or "").strip()
+    try:
+        result = json.loads(text)
+    except Exception as e:
+        raise RuntimeError(f"SCORM commit 返回非 JSON ({response.status_code}): {text[:200]} ({e})")
+
+    if result.get("error_code") != 0:
+        raise RuntimeError(f"SCORM commit 失败: {result.get('error_message') or text[:200]}")
+    if result.get("data", {}).get("status") != 1:
+        raise RuntimeError(f"SCORM commit 未生效: {result.get('data')}")
+    return result
+
+
+def _build_uscorm_12_cmi(
+    runtime: dict[str, Any],
+    status: str,
+    score: int | None,
+    duration_seconds: int,
+    lesson_location: str,
+    suspend_data_json: str,
+) -> dict[str, Any]:
+    """构造 UMU wrapper SCORM 1.2 需要的 cmi 对象。"""
+    lms_data = runtime.get("lms_data", {}) or {}
+    initial_cmi = lms_data.get("cmi", {}) or {}
+    initial_core = initial_cmi.get("core", {}) or {}
+
+    core: dict[str, Any] = {
+        "entry": initial_core.get("entry", "ab-initio"),
+        "student_id": initial_core.get("student_id", ""),
+        "student_name": initial_core.get("student_name", ""),
+        "lesson_location": lesson_location or initial_core.get("lesson_location", ""),
+        "lesson_status": status,
+        "credit": initial_core.get("credit", "credit"),
+        "lesson_mode": initial_core.get("lesson_mode", "normal"),
+        "exit": "",
+    }
+    if duration_seconds > 0:
+        core["total_time"] = _format_scorm_total_time(duration_seconds)
+    else:
+        core["total_time"] = initial_core.get("total_time", "0000:00:00.00")
+
+    score_obj: dict[str, Any] = {
+        "min": "0",
+        "max": "100",
+    }
+    if score is not None:
+        score_obj["raw"] = str(score)
+    else:
+        score_obj["raw"] = initial_core.get("score", {}).get("raw", "")
+    core["score"] = score_obj
+
+    cmi: dict[str, Any] = {
+        "comments": initial_cmi.get("comments", ""),
+        "core": core,
+        "suspend_data": suspend_data_json or initial_cmi.get("suspend_data", ""),
+    }
+    return cmi
+
+
 def _parse_scorm_launch_url(url: str) -> dict[str, str]:
     """从 SCORM launch URL 解析 Moodle 运行时参数。
 
@@ -477,16 +645,18 @@ def _resolve_scorm_launch_params(
     client: UMUClient,
     element_id: str,
     provided_url: str | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """解析 SCORM 启动参数。
 
     优先使用调用方显式提供的 launch URL；否则尝试从 element 详情中查找 launch URL。
+    若检测到 UMU 自研 SCORM wrapper（非 Moodle），则返回 wrapper 运行时信息。
     自动发现失败时抛出 ValueError。
     """
     if provided_url:
         return _parse_scorm_launch_url(provided_url)
 
     # 1. 尝试从 element 详情中读取 launch 相关字段
+    share_url = ""
     try:
         r = client.get(client.desktop_url(f"/uapi/v1/element/{element_id}"))
         element_data = r.get("data", {}) or {}
@@ -497,8 +667,8 @@ def _resolve_scorm_launch_params(
             if url and "scorm" in url:
                 return _parse_scorm_launch_url(str(url))
 
-        # 2. 跟踪 share_url 重定向，看是否会落到 launch URL
         share_url = element_data.get("share_url") or setup.get("share_url")
+        # 2. 跟踪 share_url 重定向，看是否会落到 Moodle launch URL
         if share_url:
             headers = client.auth.get_auth_headers()
             headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
@@ -508,7 +678,14 @@ def _resolve_scorm_launch_params(
                 if "scorm" in location and "launch" in location:
                     return _parse_scorm_launch_url(location)
     except Exception as e:
-        print(f"[_resolve_scorm_launch_params] 自动发现失败: {e}", file=sys.stderr)
+        print(f"[_resolve_scorm_launch_params] Moodle 自动发现失败: {e}", file=sys.stderr)
+
+    # 3. 尝试 UMU 自研 SCORM wrapper
+    if share_url:
+        try:
+            return _extract_uscorm_runtime(client, element_id, share_url)
+        except Exception as e:
+            print(f"[_resolve_scorm_launch_params] UMU wrapper 自动发现失败: {e}", file=sys.stderr)
 
     raise ValueError("无法自动发现 SCORM 启动参数，请提供 scorm_launch_url")
 
@@ -1281,7 +1458,7 @@ async def stu_complete_scorm_section(
 
     触发条件：当 stu_get_course_structure 返回 completion_type=scorm 时调用。
     前置依赖：学员已登录，且小节类型为 SCORM。
-    副作用：向 Moodle SCORM 运行时提交 CMI 数据，可能改变学习状态。
+    副作用：向 Moodle 或 UMU 自研 SCORM wrapper 提交 CMI 数据，可能改变学习状态。
     """
     client = _get_client(session_id)
 
@@ -1342,38 +1519,56 @@ async def stu_complete_scorm_section(
 
     # 4. 提交 CMI 字段
     try:
-        extra: dict[str, str] = {"cmi__core__lesson_status": status}
-        if score is not None:
-            extra["cmi__core__score__raw"] = str(score)
-            extra["cmi__core__score__min"] = "0"
-            extra["cmi__core__score__max"] = "100"
-        if duration_seconds > 0:
-            extra["cmi__core__total_time"] = _format_scorm_total_time(duration_seconds)
-        if lesson_location:
-            extra["cmi__core__lesson_location"] = lesson_location
-        if suspend_data_json:
-            extra["cmi__suspend_data"] = suspend_data_json
-
-        if interactions_json:
-            try:
-                interactions = json.loads(interactions_json)
-                for idx, interaction in enumerate(interactions):
-                    prefix = f"cmi__interactions_{idx}"
-                    for field in ("id", "type", "student_response", "result", "latency", "time"):
-                        val = interaction.get(field)
-                        if val is not None:
-                            extra[f"{prefix}__{field}"] = str(val)
-            except Exception as e:
-                return _err(
-                    error_code="INVALID_INTERACTIONS_JSON",
-                    error_message=f"interactions_json 解析失败: {e}",
-                    suggested_action="请提供合法的 JSON 数组",
-                    next_action="needs_user_input",
+        if launch_params.get("mode") == "umu_wrapper":
+            if interactions_json:
+                print(
+                    "[stu_complete_scorm_section] UMU wrapper 暂不支持 interactions_json，已忽略",
+                    file=sys.stderr,
                 )
+            cmi = _build_uscorm_12_cmi(
+                launch_params,
+                status=status,
+                score=score,
+                duration_seconds=duration_seconds,
+                lesson_location=lesson_location,
+                suspend_data_json=suspend_data_json,
+            )
+            _post_uscorm_commit(client, launch_params, cmi)
+            # 空 commit，模拟 LMSCommit("")
+            _post_uscorm_commit(client, launch_params, {})
+        else:
+            extra: dict[str, str] = {"cmi__core__lesson_status": status}
+            if score is not None:
+                extra["cmi__core__score__raw"] = str(score)
+                extra["cmi__core__score__min"] = "0"
+                extra["cmi__core__score__max"] = "100"
+            if duration_seconds > 0:
+                extra["cmi__core__total_time"] = _format_scorm_total_time(duration_seconds)
+            if lesson_location:
+                extra["cmi__core__lesson_location"] = lesson_location
+            if suspend_data_json:
+                extra["cmi__suspend_data"] = suspend_data_json
 
-        _post_scorm_datamodel(client, launch_params, extra)
-        # 空 commit，模拟 LMSCommit("")
-        _post_scorm_datamodel(client, launch_params, {})
+            if interactions_json:
+                try:
+                    interactions = json.loads(interactions_json)
+                    for idx, interaction in enumerate(interactions):
+                        prefix = f"cmi__interactions_{idx}"
+                        for field in ("id", "type", "student_response", "result", "latency", "time"):
+                            val = interaction.get(field)
+                            if val is not None:
+                                extra[f"{prefix}__{field}"] = str(val)
+                except Exception as e:
+                    return _err(
+                        error_code="INVALID_INTERACTIONS_JSON",
+                        error_message=f"interactions_json 解析失败: {e}",
+                        suggested_action="请提供合法的 JSON 数组",
+                        next_action="needs_user_input",
+                    )
+
+            _post_scorm_datamodel(client, launch_params, extra)
+            # 空 commit，模拟 LMSCommit("")
+            _post_scorm_datamodel(client, launch_params, {})
     except Exception as e:
         return _err(
             error_code="SCORM_DATAMODEL_ERROR",

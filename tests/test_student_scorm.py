@@ -158,3 +158,106 @@ async def test_stu_get_course_structure_scorm_detection() -> None:
         lessons = parsed["data"]["lessons"]
         assert lessons[0]["completion_type"] == "scorm"
         assert lessons[1]["completion_type"] == "browse"
+
+
+def test_build_uscorm_12_cmi() -> None:
+    from umu_sdk.adapters.mcp.student import _build_uscorm_12_cmi
+
+    runtime = {
+        "lms_data": {
+            "cmi": {
+                "core": {
+                    "student_id": "123",
+                    "student_name": "student",
+                    "entry": "ab-initio",
+                    "lesson_mode": "normal",
+                    "credit": "credit",
+                },
+            },
+        },
+    }
+    cmi = _build_uscorm_12_cmi(
+        runtime,
+        status="passed",
+        score=80,
+        duration_seconds=125,
+        lesson_location="page-1",
+        suspend_data_json='{"checkpoint": 1}',
+    )
+    assert cmi["core"]["lesson_status"] == "passed"
+    assert cmi["core"]["score"]["raw"] == "80"
+    assert cmi["core"]["score"]["min"] == "0"
+    assert cmi["core"]["score"]["max"] == "100"
+    assert cmi["core"]["total_time"] == "0000:02:05.00"
+    assert cmi["core"]["lesson_location"] == "page-1"
+    assert cmi["suspend_data"] == '{"checkpoint": 1}'
+
+
+@pytest.mark.asyncio
+async def test_stu_complete_scorm_section_wrapper_success() -> None:
+    from umu_sdk.adapters.mcp.student import stu_complete_scorm_section
+
+    runtime = {
+        "mode": "umu_wrapper",
+        "scorm_version": "1.2",
+        "commit_url": "https://www.umu.cn/napi/scorm/scorm12",
+        "launch_url": "https://www.umu.cn/scorm/token/element/e789b64",
+        "lms_data": {
+            "cmi": {
+                "core": {
+                    "student_id": "123",
+                    "student_name": "student",
+                    "entry": "ab-initio",
+                    "lesson_mode": "normal",
+                    "credit": "credit",
+                },
+            },
+        },
+    }
+
+    with _patch_student_client() as client:
+        client.get.return_value = {
+            "error_code": 0,
+            "data": {
+                "id": "e789",
+                "type": 11,
+                "setup": {
+                    "content_type": "scorm",
+                    "share_url": "https://m.umu.cn/ssu_wrapper",
+                },
+            },
+        }
+        client.http.get.return_value = MagicMock(status_code=200, text="")
+
+        with patch(
+            "umu_sdk.adapters.mcp.student._extract_uscorm_runtime",
+            return_value=runtime,
+        ) as mock_extract, \
+                patch(
+            "umu_sdk.adapters.mcp.student._post_uscorm_commit",
+            return_value={"error_code": 0, "data": {"status": 1}},
+        ) as mock_commit, \
+                patch("umu_sdk.adapters.mcp.student.stu_get_lesson_status") as mock_status:
+            mock_status.return_value = json.dumps({
+                "success": True,
+                "data": {"is_completed": True, "element_id": "e789"},
+            })
+            result = await stu_complete_scorm_section(
+                element_id="e789",
+                status="completed",
+                score=95,
+                duration_seconds=60,
+            )
+
+    parsed = json.loads(result)
+    assert parsed["success"] is True
+    assert parsed["data"]["is_completed"] is True
+    assert parsed["next_action"] == "lesson_completed"
+
+    mock_extract.assert_called_once()
+    calls = mock_commit.call_args_list
+    assert len(calls) == 2
+    cmi = calls[0][0][2]
+    assert cmi["core"]["lesson_status"] == "completed"
+    assert cmi["core"]["score"]["raw"] == "95"
+    assert cmi["core"]["total_time"] == "0000:01:00.00"

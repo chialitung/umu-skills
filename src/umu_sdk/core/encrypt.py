@@ -61,6 +61,21 @@ def decrypt_password(encrypted_base64: str) -> str:
     Returns:
         明文密码
     """
+    return decrypt_aes_base64(encrypted_base64)
+
+
+def decrypt_aes_base64(encrypted_base64: str) -> str:
+    """使用 AES-256-CBC 解密 Base64 密文.
+
+    UMU 多处使用同一套密钥/IV（如密码传输、resource_store URL）加密数据，
+    本函数提供通用解密入口。
+
+    Args:
+        encrypted_base64: Base64 编码的密文
+
+    Returns:
+        明文字符串
+    """
     ciphertext = base64.b64decode(encrypted_base64)
 
     cipher = Cipher(
