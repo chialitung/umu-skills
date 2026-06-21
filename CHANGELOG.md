@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-21
+
+### Added
+- Student MCP 新增 SCORM 小节自动完成能力：
+  - `stu_complete_scorm_section` 支持提交 SCORM 1.2 CMI 数据
+  - 自动探测 Moodle 与 UMU 自研 SCORM wrapper 两种运行时
+  - wrapper 路径通过 `/napi/scorm/scorm12` 提交 `{"cmi": ...}` 完成小节
+- Skill 层 `complete_scorm_section` 已可用，支持被其他角色调用
+- `stu_get_course_structure` 修复 SCORM 小节识别：当 `type=11` 且 `setup.content_type="scorm"` 时返回 `completion_type="scorm"`
+
+### Changed
+- `/umu` Skill 文档新增“学员课程完成流程”：必须先检查 `needs_enrollment`，需要时先调用 `stu_enroll_course` 报名，再按 `completion_type` 完成小节
+- 替换测试与文档中的真实敏感信息（邮箱、企业名等）
+- 最小化发布规则补充：不属于发布范围的文件必须加入 `.gitignore`，禁止出现在未跟踪列表或提交历史中
+
 ## [0.15.0] - 2026-06-16
 
 ### Added
