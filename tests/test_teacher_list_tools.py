@@ -568,7 +568,7 @@ class TestTchListCourseLearningDurations:
                             "user_info": {
                                 "user_name": "Alice",
                                 "umu_id": "u1",
-                                "email": "alice@umu_aia.com",
+                                "email": "alice@example.com",
                             },
                             "learning_time_for_course": {"vlt": "01:31:26", "sum_learning_time": "01:31:26"},
                             "field_123": {

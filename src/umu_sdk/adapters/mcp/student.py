@@ -37,7 +37,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
-from ...core.credential_loader import CredentialSource, load_credentials_with_source
+from ...core.credential_loader import load_credentials_with_source
 from ...core.encrypt import decrypt_aes_base64
 from .utils import (
     format_login_summary,
@@ -1528,7 +1528,7 @@ async def stu_complete_scorm_section(
 
     # 3. 初始化 makeweikestatus 状态机
     try:
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
     except Exception as e:
         print(f"[stu_complete_scorm_section] makeweikestatus 失败: {e}", file=sys.stderr)
 
