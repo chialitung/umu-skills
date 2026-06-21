@@ -252,7 +252,7 @@ async def test_adm_list_course_blacklist_success(patch_get_client, mock_client):
                     "teacher_id": "20438403",
                     "student_id": "42878693",
                     "enterprise_id": "25105",
-                    "email": "teacher@umu_aia.com",
+                    "email": "teacher@example.com",
                     "phone": "",
                     "login_name": "",
                     "umu_id": "20440690",

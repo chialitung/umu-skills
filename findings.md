@@ -34,7 +34,7 @@ GET /api/cooperation/getall?t={timestamp}&append_manage_role=1&obj_id={group_id}
         "role_type": "cooperator",
         "cooperator_type": "teacher",
         "is_user": 1,
-        "teacher_email": "160534***@qq.com",
+        "teacher_email": "example@example.com",
         "umu_id": "17580402",
         "teacher_name": "...",
         "enterprise_id": 25105,
@@ -72,9 +72,9 @@ accounts={keyword}&search_source=add_cooperator&is_suggestion=1&group_id={group_
 {
   "data": [
     {
-      "account": "160534520@qq.com",
+      "account": "example@example.com",
       "account_type": "user",
-      "email": "160534520@qq.com",
+      "email": "example@example.com",
       "phone": "",
       "login_name": "",
       "id": "17580402",
@@ -105,7 +105,7 @@ accounts 数组项：
 {
   "type": 1,
   "role_type": "cooperator",
-  "account": "160534520@qq.com",
+  "account": "example@example.com",
   "account_type": "user",
   "umu_id": "17580402"
 }
