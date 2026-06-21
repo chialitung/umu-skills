@@ -21,7 +21,6 @@ Environment Variables:
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import re
@@ -1220,6 +1219,187 @@ async def stu_browse_lesson(
             error_code="BROWSE_FAILED",
             error_message=str(e),
             suggested_action="检查 element_id 是否正确",
+        )
+
+
+@mcp.tool()
+async def stu_complete_scorm_section(
+    element_id: Annotated[str, Field(description="小节元素 ID，来自 stu_get_course_structure 的 element_id")],
+    group_id: Annotated[
+        str,
+        Field(default="", description="课程组 ID（可选），用于完成后验证进度"),
+    ] = "",
+    status: Annotated[
+        str,
+        Field(
+            default="passed",
+            description='SCORM 1.2 cmi.core.lesson_status，可选 passed/completed/failed/incomplete/browsed',
+        ),
+    ] = "passed",
+    score: Annotated[
+        int | None,
+        Field(default=None, description="得分 0-100，提交到 cmi.core.score.raw"),
+    ] = None,
+    duration_seconds: Annotated[
+        int,
+        Field(
+            default=0,
+            description="本次学习时长（秒），格式化为 HHHH:MM:SS.SS 提交到 cmi.core.total_time",
+        ),
+    ] = 0,
+    lesson_location: Annotated[
+        str,
+        Field(default="", description="可选：写入 cmi.core.lesson_location"),
+    ] = "",
+    suspend_data_json: Annotated[
+        str,
+        Field(default="", description="高级：自定义 cmi.suspend_data JSON 字符串"),
+    ] = "",
+    interactions_json: Annotated[
+        str,
+        Field(default="", description="高级：自定义 cmi.interactions 数组 JSON 字符串"),
+    ] = "",
+    scorm_launch_url: Annotated[
+        str,
+        Field(
+            default="",
+            description="可选：完整的 SCORM launch URL。自动发现失败时作为兜底",
+        ),
+    ] = "",
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；否则使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """完成 SCORM 1.2 格式小节。
+
+    触发条件：当 stu_get_course_structure 返回 completion_type=scorm 时调用。
+    前置依赖：学员已登录，且小节类型为 SCORM。
+    副作用：向 Moodle SCORM 运行时提交 CMI 数据，可能改变学习状态。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="请先调用 stu_login 登录",
+            next_action="needs_user_input",
+        )
+
+    # 1. 校验元素类型
+    try:
+        r = client.get(client.desktop_url(f"/uapi/v1/element/{element_id}"))
+        element_data = r.get("data", {}) or {}
+        if element_data.get("type") != 11:
+            return _err(
+                error_code="INVALID_SECTION_TYPE",
+                error_message=f'小节类型不是 SCORM/H5：type={element_data.get("type")}',
+                suggested_action="请确认 element_id 对应 SCORM 小节",
+                next_action="needs_user_input",
+            )
+        setup = element_data.get("setup", {}) or {}
+        if setup.get("content_type") != "scorm":
+            return _err(
+                error_code="INVALID_SECTION_TYPE",
+                error_message="小节不是 SCORM 类型（setup.content_type != scorm）",
+                suggested_action="请使用 stu_browse_lesson 完成普通微课/视频小节",
+                next_action="needs_user_input",
+            )
+    except Exception as e:
+        return _err(
+            error_code="ELEMENT_FETCH_FAILED",
+            error_message=str(e),
+            suggested_action="检查 element_id 是否正确",
+            next_action="needs_user_input",
+        )
+
+    # 2. 解析 SCORM 启动参数
+    try:
+        launch_params = _resolve_scorm_launch_params(
+            client, element_id, provided_url=scorm_launch_url or None
+        )
+    except Exception as e:
+        return _err(
+            error_code="SCORM_LAUNCH_RESOLVE_FAILED",
+            error_message=str(e),
+            suggested_action="请提供 scorm_launch_url，或确认学员有权限访问该小节",
+            next_action="needs_user_input",
+        )
+
+    # 3. 初始化 makeweikestatus 状态机
+    try:
+        _makeweikestatus_sequence(client, element_id)
+    except Exception as e:
+        print(f"[stu_complete_scorm_section] makeweikestatus 失败: {e}", file=sys.stderr)
+
+    # 4. 提交 CMI 字段
+    try:
+        extra: dict[str, str] = {"cmi__core__lesson_status": status}
+        if score is not None:
+            extra["cmi__core__score__raw"] = str(score)
+            extra["cmi__core__score__min"] = "0"
+            extra["cmi__core__score__max"] = "100"
+        if duration_seconds > 0:
+            extra["cmi__core__total_time"] = _format_scorm_total_time(duration_seconds)
+        if lesson_location:
+            extra["cmi__core__lesson_location"] = lesson_location
+        if suspend_data_json:
+            extra["cmi__suspend_data"] = suspend_data_json
+
+        if interactions_json:
+            try:
+                interactions = json.loads(interactions_json)
+                for idx, interaction in enumerate(interactions):
+                    prefix = f"cmi__interactions_{idx}"
+                    for field in ("id", "type", "student_response", "result", "latency", "time"):
+                        val = interaction.get(field)
+                        if val is not None:
+                            extra[f"{prefix}__{field}"] = str(val)
+            except Exception as e:
+                return _err(
+                    error_code="INVALID_INTERACTIONS_JSON",
+                    error_message=f"interactions_json 解析失败: {e}",
+                    suggested_action="请提供合法的 JSON 数组",
+                    next_action="needs_user_input",
+                )
+
+        _post_scorm_datamodel(client, launch_params, extra)
+        # 空 commit，模拟 LMSCommit("")
+        _post_scorm_datamodel(client, launch_params, {})
+    except Exception as e:
+        return _err(
+            error_code="SCORM_DATAMODEL_ERROR",
+            error_message=str(e),
+            suggested_action="检查 scorm_launch_url 是否有效，或稍后重试",
+            next_action="retry",
+        )
+
+    # 5. 验证小节状态
+    try:
+        status_result = await stu_get_lesson_status(element_id, group_id, session_id)
+        parsed = json.loads(status_result)
+        if parsed.get("success") and parsed.get("data", {}).get("is_completed"):
+            return _ok(
+                data=parsed["data"],
+                next_action="lesson_completed",
+                suggested_action="小节已完成",
+            )
+        return _ok(
+            data=parsed.get("data"),
+            next_action="proceed",
+            suggested_action="已提交 SCORM 数据，请稍后再次确认完成状态",
+        )
+    except Exception as e:
+        return _err(
+            error_code="STATUS_CHECK_ERROR",
+            error_message=str(e),
+            suggested_action="已提交数据，但状态验证失败，请稍后调用 stu_get_lesson_status 检查",
+            next_action="retry",
         )
 
 
