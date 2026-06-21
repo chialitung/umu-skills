@@ -14,7 +14,9 @@ from unittest import mock
 from umu_sdk.skills.workbuddy.install import (
     _configure_mcp_servers,
     _detect_workbuddy_config_dir,
+    _get_credential_dir,
     _get_mcp_servers_path,
+    _get_old_credential_dir,
     _load_mcp_servers,
     _save_mcp_servers,
 )
@@ -35,7 +37,19 @@ class TestConfigureMcpServers:
         assert server["args"] == ["-m", "umu_sdk.skills.server"]
         assert server["env"]["UMU_BASE_URL"] == "https://www.umu.cn"
         assert server["env"]["MCP_LOG_LEVEL"] == "INFO"
+        assert server["env"]["UMU_SKILL_DIR"] == str(_get_credential_dir())
 
+    def test_credential_dir_is_generic(self) -> None:
+        """凭证目录应为独立的 ~/.umu_skills."""
+        creds_dir = _get_credential_dir()
+        assert creds_dir.name == ".umu_skills"
+        assert creds_dir.parent == Path.home()
+
+    def test_old_credential_dir_points_to_claude(self) -> None:
+        """旧凭证目录辅助函数仍指向 Claude Code 路径."""
+        old_dir = _get_old_credential_dir()
+        assert old_dir.name == "umu"
+        assert old_dir.parent.parent.name == ".claude"
     def test_preserves_existing_servers(self) -> None:
         """应保留已有的 MCP server 配置."""
         settings = {

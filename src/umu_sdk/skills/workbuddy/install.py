@@ -15,7 +15,7 @@
 2. 自动探测 WorkBuddy 配置目录
 3. 在 WorkBuddy 的 mcp_servers.json 中注册 umu-skills orchestrator
 4. 将 WorkBuddy 技能包复制到 WorkBuddy 配置目录
-5. 初始化/复用 Claude Code 加密凭证目录
+5. 初始化通用加密凭证目录（默认 ~/.umu_skills）
 """
 
 from __future__ import annotations
@@ -44,8 +44,13 @@ if sys.platform == "win32":
         pass
 
 
-def _get_claude_skill_dir() -> Path:
-    """返回与 Claude Code 共用的凭证目录."""
+def _get_credential_dir() -> Path:
+    """返回通用加密凭证目录（跨 AI 工具共享）."""
+    return Path.home() / ".umu_skills"
+
+
+def _get_old_credential_dir() -> Path:
+    """返回旧版 Claude Code 专用凭证目录（用于兼容提示）."""
     return Path.home() / ".claude" / "skills" / "umu"
 
 
@@ -165,6 +170,7 @@ def _configure_mcp_servers(settings: dict) -> dict:
         "env": {
             "UMU_BASE_URL": "https://www.umu.cn",
             "MCP_LOG_LEVEL": "INFO",
+            "UMU_SKILL_DIR": str(_get_credential_dir()),
         },
     }
 
@@ -180,9 +186,9 @@ def _copy_skill(source: Path, target: Path) -> None:
 
 def _init_credentials() -> None:
     """初始化凭证文件目录，但不写入任何明文信息."""
-    skill_dir = _get_claude_skill_dir()
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    creds_path = skill_dir / "credentials.enc"
+    creds_dir = _get_credential_dir()
+    creds_dir.mkdir(parents=True, exist_ok=True)
+    creds_path = creds_dir / "credentials.enc"
     if not creds_path.exists():
         print("凭证目录已准备就绪，首次使用时会引导你录入账号")
 
@@ -247,12 +253,16 @@ def _check_installation(workbuddy_dir: Path | None = None) -> int:
             ok = False
 
     # 5. 凭证目录检查
-    creds_dir = _get_claude_skill_dir()
+    creds_dir = _get_credential_dir()
     creds_path = creds_dir / "credentials.enc"
+    old_creds_path = _get_old_credential_dir() / "credentials.enc"
     if creds_path.exists():
         print(f"✓ 已存在加密凭证文件: {creds_path}")
+    elif old_creds_path.exists():
+        print(f"○ 发现旧路径加密凭证文件: {old_creds_path}")
+        print("  首次保存账号时会自动迁移到新版路径")
     else:
-        print("○ 尚未保存加密凭证，首次使用 UMU 操作时会引导录入")
+        print(f"○ 尚未保存加密凭证，首次使用 UMU 操作时会引导录入（{creds_dir}）")
 
     print()
     if ok:
@@ -307,14 +317,14 @@ def install(
             _copy_skill(source, target_skill_dir)
     print(f"已复制 WorkBuddy 技能包: {target_skill_dir}")
 
-    # 3. 初始化凭证目录（复用 Claude Code 路径）
+    # 3. 初始化通用加密凭证目录
     _init_credentials()
 
     print("\n=== 安装完成 ===")
     print(f"WorkBuddy 配置目录: {target_dir}")
     print(f"MCP 配置: {mcp_path}")
     print(f"技能包: {target_skill_dir}")
-    print(f"加密凭证: {_get_claude_skill_dir() / 'credentials.enc'}")
+    print(f"加密凭证: {_get_credential_dir() / 'credentials.enc'}")
     print("\n下一步：")
     print("1. 在 WorkBuddy 中导入技能包（通常通过 技能市场 → 本地导入 或 设置 → Skills）")
     print("2. 重启 WorkBuddy")

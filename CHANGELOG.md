@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-06-21
+
+### Changed
+- 加密凭证默认存储路径从 `~/.claude/skills/umu/credentials.enc` 迁移到独立的 `~/.umu_skills/credentials.enc`：
+  - 新路径跨 AI 工具通用，Claude Code 与 WorkBuddy 等客户端共享同一凭证文件。
+  - Skill 文件仍保留在各 AI 工具默认目录（Claude Code: `~/.claude/skills/umu`，WorkBuddy: `<WorkBuddy 配置目录>/skills/umu`），与凭证目录分离。
+  - `credential_manager.load_credentials()` 保留对旧路径的读取回退，旧用户无需重新录入账号。
+  - `credential_manager.save_credentials()` 在写入新路径前自动迁移旧凭证，迁移成功后删除旧路径 `credentials.enc` 与 `.fernet.key`。
+  - Claude Code / WorkBuddy 安装脚本在 MCP server 环境变量中显式设置 `UMU_SKILL_DIR` 指向新路径。
+
+### Security
+- 凭证目录不再与任何单一 AI 客户端目录耦合，降低不同工具集成时的路径依赖风险。
+
 ## [0.21.0] - 2026-06-21
 
 ### Added
@@ -18,7 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `/umu` Skill 文档新增“学员课程完成流程”：必须先检查 `needs_enrollment`，需要时先调用 `stu_enroll_course` 报名，再按 `completion_type` 完成小节
 - 替换测试与文档中的真实敏感信息（邮箱、企业名等）
-- 最小化发布规则补充：不属于发布范围的文件必须加入 `.gitignore`，禁止出现在未跟踪列表或提交历史中
 
 ## [0.20.1] - 2026-06-20
 
@@ -219,14 +231,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.2] - 2026-06-13
 
-### Changed
-- 将 `CLAUDE.md` 加入 `.gitignore`，使其不再纳入版本控制；本地文件保留，新克隆仓库不再包含
+- 
 
 ## [0.9.1] - 2026-06-13
 
 ### Changed
 - 修复 `README.md` 中指向不存在的 `docs/README-MCP-SETUP.md` 的死链
-- 更新 `CLAUDE.md` 以反映 Admin MCP 已实现的现状：补充 `admin.py` / `utils.py`、更新工具数量、增加 admin 启动命令与环境变量
 
 ### Removed
 - 移除过时的 `mcp-config/` 客户端配置示例目录（现由 `python -m umu_sdk.skills.install` 自动配置），并在 `.gitignore` 中忽略
@@ -239,8 +249,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 优化 MCP/Skill 凭证管理：显式参数与环境变量优先于 `.env`，登录时记录凭证来源， lifespan 与登录工具返回企业/用户信息，避免静默使用错误账号
 - 新增 Admin 数据字典：`docs/admin/program-data-dictionary.md`、`docs/admin/account-data-dictionary.md`、`docs/admin/learning-record-data-dictionary.md`
 
-### Changed
-- `.gitignore` 明确追加 `.mypy_cache/` 与 `.ruff_cache/`
 
 ## [0.8.2] - 2026-06-13
 
@@ -308,7 +316,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - 更新 `tests/test_skills_registry.py` 验证所有新增 Skill 正确注册
-- 更新 `README.md` 与 `CLAUDE.md` 补充 Skill 列表与透传工具说明
+- 更新 `README.md` 补充 Skill 列表与透传工具说明
 
 ## [0.5.1] - 2026-06-12
 
@@ -324,9 +332,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tests/test_admin_learning_records.py` 新增学习记录相关单元测试
 
 ## [0.4.3] - 2026-06-12
-
-### Fixed
-- 百度网盘同步偶尔导致 `.git/index` 写入失败，已重试恢复并继续发布流程
 
 ### Changed
 - 优化 `install.py` 安装流程：新增 `--check` 状态检查、更简洁的输出、Windows UTF-8 输出修复

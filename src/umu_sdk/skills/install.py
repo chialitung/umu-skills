@@ -13,10 +13,15 @@
 1. 安装/升级 umu-skills PyPI 包（如果尚未安装）
 2. 把 skill 文件复制到用户的 Claude Code 全局 skills 目录
 3. 创建/更新 .claude/settings.json 中的 MCP server 配置
-4. 初始化加密的凭证文件目录
+4. 初始化加密的凭证文件目录（默认 ~/.umu_skills）
 
-Windows 全局目录：C:\\Users\\<用户名>\\.claude\\skills\\umu
-macOS/Linux 全局目录：~/.claude/skills/umu
+Skill 文件目录：
+    Windows: C:\\Users\\<用户名>\\.claude\\skills\\umu
+    macOS/Linux: ~/.claude/skills/umu
+
+加密凭证目录：
+    Windows: C:\\Users\\<用户名>\\.umu_skills
+    macOS/Linux: ~/.umu_skills
 """
 
 from __future__ import annotations
@@ -51,7 +56,17 @@ def _get_claude_config_dir() -> Path:
 
 
 def _get_global_skill_dir() -> Path:
-    """返回全局 skill 安装目录."""
+    """返回 Claude Code 全局 skill 安装目录."""
+    return _get_claude_config_dir() / "skills" / "umu"
+
+
+def _get_credential_dir() -> Path:
+    """返回通用加密凭证目录（跨 AI 工具共享）."""
+    return Path.home() / ".umu_skills"
+
+
+def _get_old_credential_dir() -> Path:
+    """返回旧版 Claude Code 专用凭证目录（用于兼容提示）."""
     return _get_claude_config_dir() / "skills" / "umu"
 
 
@@ -178,6 +193,7 @@ def _configure_mcp_servers(settings: dict) -> dict:
     base_env = {
         "UMU_BASE_URL": "${UMU_BASE_URL:-https://www.umu.cn}",
         "MCP_LOG_LEVEL": "${MCP_LOG_LEVEL:-INFO}",
+        "UMU_SKILL_DIR": str(_get_credential_dir()),
     }
 
     # 使用当前 Python 解释器 + `python -m` 启动 MCP server，
@@ -202,10 +218,10 @@ def _configure_mcp_servers(settings: dict) -> dict:
     return settings
 
 
-def _init_credentials(skill_dir: Path) -> None:
+def _init_credentials(creds_dir: Path) -> None:
     """初始化凭证文件目录，但不写入任何明文信息."""
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    creds_path = skill_dir / "credentials.enc"
+    creds_dir.mkdir(parents=True, exist_ok=True)
+    creds_path = creds_dir / "credentials.enc"
     if not creds_path.exists():
         print("凭证目录已准备就绪，首次使用 /umu 时会引导你录入账号")
 
@@ -391,7 +407,7 @@ def _perform_install(source: Path, semantic_trigger: bool | None = None) -> None
     settings = _configure_mcp_servers(settings)
     _save_settings(settings)
 
-    _init_credentials(target)
+    _init_credentials(_get_credential_dir())
 
 
 def install(upgrade: bool = False, semantic_trigger: bool | None = None) -> None:
@@ -411,6 +427,7 @@ def install(upgrade: bool = False, semantic_trigger: bool | None = None) -> None
 
     print("\n=== 安装完成 ===")
     print(f"Skill 目录: {_get_global_skill_dir()}")
+    print(f"加密凭证目录: {_get_credential_dir()}")
     print(f"配置文件: {_get_settings_path()}")
     print("\n下一步：重启 Claude Code，然后输入 /umu 触发 skill")
 
@@ -469,11 +486,16 @@ def _check_installation() -> int:
         ok = False
 
     # 4. 凭证目录检查
-    creds_path = skill_dir / "credentials.enc"
+    creds_dir = _get_credential_dir()
+    creds_path = creds_dir / "credentials.enc"
+    old_creds_path = _get_old_credential_dir() / "credentials.enc"
     if creds_path.exists():
         print(f"✓ 已存在加密凭证文件: {creds_path}")
+    elif old_creds_path.exists():
+        print(f"○ 发现旧路径加密凭证文件: {old_creds_path}")
+        print("  首次保存 /umu 账号时会自动迁移到新版路径")
     else:
-        print("○ 尚未保存加密凭证，首次 /umu 会引导录入")
+        print(f"○ 尚未保存加密凭证，首次 /umu 会引导录入（{creds_dir}）")
 
     # 5. 语义触发开关检查
     skill_config = _load_skill_config(skill_dir)

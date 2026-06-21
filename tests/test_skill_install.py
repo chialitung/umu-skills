@@ -12,6 +12,9 @@ from umu_sdk.skills.install import (
     MAX_ALIASES,
     _configure_mcp_servers,
     _copy_skill,
+    _get_credential_dir,
+    _get_global_skill_dir,
+    _get_old_credential_dir,
     _load_skill_config,
     _render_skill_md,
     _save_aliases,
@@ -51,6 +54,27 @@ class TestConfigureMcpServers:
 
         assert env["UMU_BASE_URL"] == "${UMU_BASE_URL:-https://www.umu.cn}"
         assert env["MCP_LOG_LEVEL"] == "${MCP_LOG_LEVEL:-INFO}"
+        assert env["UMU_SKILL_DIR"] == str(_get_credential_dir())
+
+
+class TestInstallPaths:
+    def test_global_skill_dir_remains_in_claude_skills(self) -> None:
+        """Skill 文件仍应安装在 Claude Code 的 skills 目录."""
+        assert _get_global_skill_dir().name == "umu"
+        assert _get_global_skill_dir().parent.name == "skills"
+        assert _get_global_skill_dir().parent.parent.name == ".claude"
+
+    def test_credential_dir_is_generic(self) -> None:
+        """凭证目录应为独立的 ~/.umu_skills."""
+        creds_dir = _get_credential_dir()
+        assert creds_dir.name == ".umu_skills"
+        assert creds_dir.parent == Path.home()
+
+    def test_old_credential_dir_points_to_claude(self) -> None:
+        """旧凭证目录辅助函数仍指向 Claude Code 路径."""
+        old_dir = _get_old_credential_dir()
+        assert old_dir.name == "umu"
+        assert old_dir.parent.parent.name == ".claude"
 
 
 class TestCopySkill:

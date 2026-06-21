@@ -154,6 +154,162 @@ class TestCredentialManager:
         assert cm.has_role_credentials("teacher")
 
 
+class TestCredentialPathMigration:
+    """测试凭证路径从 ~/.claude/skills/umu 迁移到 ~/.umu_skills."""
+
+    @pytest.fixture
+    def isolated_paths(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> tuple[Path, Path]:
+        """将新版/旧版全局目录重定向到临时目录，避免污染真实 home."""
+        new_dir = tmp_path / ".umu_skills"
+        old_dir = tmp_path / ".claude" / "skills" / "umu"
+        monkeypatch.setattr(cm, "_NEW_GLOBAL_SKILL_DIR", new_dir)
+        monkeypatch.setattr(cm, "_OLD_GLOBAL_SKILL_DIR", old_dir)
+        return new_dir, old_dir
+
+    def test_get_skill_dir_defaults_to_new_global_path(
+        self,
+        isolated_paths: tuple[Path, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """默认应返回新的全局目录 ~/.umu_skills."""
+        monkeypatch.delenv("UMU_SKILL_DIR", raising=False)
+        new_dir, _old_dir = isolated_paths
+        assert cm.get_skill_dir() == new_dir
+
+    def test_load_credentials_falls_back_to_old_global_path(
+        self,
+        isolated_paths: tuple[Path, Path],
+        mock_keyring: _MemoryKeyring,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """新路径不存在但旧全局路径存在时，应能读取旧凭证."""
+        monkeypatch.delenv("UMU_SKILL_DIR", raising=False)
+        new_dir, old_dir = isolated_paths
+        old_dir.mkdir(parents=True)
+
+        # 直接在旧路径写入加密凭证（绕过迁移）
+        cm.set_role_credentials("teacher", "old_user", "old_pass", skill_dir=old_dir)
+        assert not (new_dir / cm.CREDENTIALS_FILENAME).exists()
+
+        username, password = cm.get_role_credentials("teacher")
+        assert username == "old_user"
+        assert password == "old_pass"
+
+    def test_save_credentials_migrates_from_old_path_and_deletes_old_file(
+        self,
+        isolated_paths: tuple[Path, Path],
+        mock_keyring: _MemoryKeyring,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """写入时应自动迁移旧路径凭证，并在成功后删除旧文件."""
+        monkeypatch.delenv("UMU_SKILL_DIR", raising=False)
+        new_dir, old_dir = isolated_paths
+        old_dir.mkdir(parents=True)
+
+        cm.set_role_credentials("teacher", "old_user", "old_pass", skill_dir=old_dir)
+        assert (old_dir / cm.CREDENTIALS_FILENAME).exists()
+
+        # 使用新版全局路径保存会触发迁移
+        cm.set_role_credentials("student", "new_user", "new_pass")
+
+        assert (new_dir / cm.CREDENTIALS_FILENAME).exists()
+        assert not (old_dir / cm.CREDENTIALS_FILENAME).exists()
+
+        # 旧凭证与新增凭证都应可读
+        assert cm.get_role_credentials("teacher") == ("old_user", "old_pass")
+        assert cm.get_role_credentials("student") == ("new_user", "new_pass")
+
+    def test_save_credentials_prefers_new_path_when_both_exist(
+        self,
+        isolated_paths: tuple[Path, Path],
+        mock_keyring: _MemoryKeyring,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """新旧路径都存在时，读取应优先使用新路径."""
+        monkeypatch.delenv("UMU_SKILL_DIR", raising=False)
+        new_dir, old_dir = isolated_paths
+
+        cm.set_role_credentials("teacher", "new_user", "new_pass", skill_dir=new_dir)
+        cm.set_role_credentials("teacher", "old_user", "old_pass", skill_dir=old_dir)
+
+        username, _password = cm.get_role_credentials("teacher")
+        assert username == "new_user"
+
+    def test_explicit_skill_dir_skips_migration(
+        self,
+        isolated_paths: tuple[Path, Path],
+        mock_keyring: _MemoryKeyring,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """显式传入 skill_dir 时不应触发全局路径迁移."""
+        monkeypatch.delenv("UMU_SKILL_DIR", raising=False)
+        new_dir, old_dir = isolated_paths
+        custom_dir = tmp_path / "custom"
+        custom_dir.mkdir()
+
+        cm.set_role_credentials("teacher", "old_user", "old_pass", skill_dir=old_dir)
+        cm.set_role_credentials("teacher", "custom_user", "custom_pass", skill_dir=custom_dir)
+
+        assert (old_dir / cm.CREDENTIALS_FILENAME).exists()
+        assert not (new_dir / cm.CREDENTIALS_FILENAME).exists()
+        assert cm.get_role_credentials("teacher", skill_dir=custom_dir) == (
+            "custom_user",
+            "custom_pass",
+        )
+
+    def test_get_skill_dir_prefers_new_dev_path(
+        self,
+        isolated_paths: tuple[Path, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """项目根目录下新的 .umu_skills 优先于旧开发路径."""
+        monkeypatch.delenv("UMU_SKILL_DIR", raising=False)
+        new_dir, _old_dir = isolated_paths
+
+        # 直接构造一个 fake 项目根目录下的新 dev 路径并使其存在
+        project_root = Path(cm.__file__).resolve().parents[3]
+        fake_new_dev = project_root / ".umu_skills"
+        fake_old_dev = project_root / ".claude" / "skills" / "umu"
+        fake_new_dev.mkdir(parents=True, exist_ok=True)
+        try:
+            assert cm.get_skill_dir() == fake_new_dev
+        finally:
+            fake_new_dev.rmdir()
+            # 若旧路径不存在 rmdir 会失败，因此忽略
+            try:
+                fake_old_dev.rmdir()
+            except OSError:
+                pass
+
+    def test_get_skill_dir_falls_back_to_old_dev_path(
+        self,
+        isolated_paths: tuple[Path, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """仅存在旧开发目录时，应回退到该目录."""
+        monkeypatch.delenv("UMU_SKILL_DIR", raising=False)
+        _new_dir, _old_dir = isolated_paths
+
+        project_root = Path(cm.__file__).resolve().parents[3]
+        fake_old_dev = project_root / ".claude" / "skills" / "umu"
+        fake_new_dev = project_root / ".umu_skills"
+        fake_old_dev.mkdir(parents=True, exist_ok=True)
+        try:
+            assert cm.get_skill_dir() == fake_old_dev
+        finally:
+            fake_old_dev.rmdir()
+            try:
+                fake_new_dev.rmdir()
+            except OSError:
+                pass
+
+
 class TestCredentialLoader:
     @pytest.fixture(autouse=True)
     def _isolated_skill_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:

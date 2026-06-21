@@ -56,7 +56,8 @@ python -m umu_sdk.skills.install --upgrade
 
 账号信息会加密保存在本地：
 
-- 文件位置：`~/.claude/skills/umu/credentials.enc`
+- 凭证文件位置：`~/.umu_skills/credentials.enc`
+- Skill 文件位置：`~/.claude/skills/umu/`（Claude Code 默认 skill 目录）
 - 加密方式：Fernet 对称加密
 - 密钥保护：操作系统 keyring（Windows DPAPI / macOS Keychain / Linux Secret Service）
 

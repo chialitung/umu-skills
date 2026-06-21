@@ -133,9 +133,11 @@ python -m umu_sdk.skills.install --upgrade
 账号信息会加密保存到：
 
 ```text
-Windows: C:\Users\<用户名>\.claude\skills\umu\credentials.enc
-macOS/Linux: ~/.claude/skills/umu/credentials.enc
+Windows: C:\Users\<用户名>\.umu_skills\credentials.enc
+macOS/Linux: ~/.umu_skills/credentials.enc
 ```
+
+Skill 文件仍位于各 AI 工具默认目录（Claude Code 为 `~/.claude/skills/umu`，WorkBuddy 为 `<WorkBuddy 配置目录>/skills/umu`），与加密凭证目录分离。
 
 加密方式：
 
@@ -199,7 +201,7 @@ python -m umu_sdk.skills.workbuddy.install
 - 检测 WorkBuddy 配置目录（支持 Windows / macOS / Linux）
 - 在 WorkBuddy 的 `mcp_servers.json` 中注册 `umu-skills` orchestrator
 - 将 WorkBuddy 版 UMU skill 包复制到配置目录
-- 初始化/复用 Claude Code 的加密凭证目录（`~/.claude/skills/umu/credentials.enc`）
+- 初始化通用加密凭证目录（`~/.umu_skills/credentials.enc`，与 Claude Code 共用）
 
 如果自动检测失败，手动指定 WorkBuddy 配置目录：
 
@@ -233,8 +235,8 @@ python -m umu_sdk.skills.workbuddy.install --upgrade
 首次使用 UMU 操作时，WorkBuddy 会引导你配置账号。账号信息会加密保存到：
 
 ```text
-Windows: C:\Users\<用户名>\.claude\skills\umu\credentials.enc
-macOS/Linux: ~/.claude/skills/umu/credentials.enc
+Windows: C:\Users\<用户名>\.umu_skills\credentials.enc
+macOS/Linux: ~/.umu_skills/credentials.enc
 ```
 
 该文件与 Claude Code 共用，如果你已经在 Claude Code 中配置过账号，WorkBuddy 会直接复用，无需重复录入。

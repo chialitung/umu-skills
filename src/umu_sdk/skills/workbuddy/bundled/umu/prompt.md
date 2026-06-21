@@ -28,7 +28,7 @@ python -m umu_sdk.skills.workbuddy.install --upgrade
 
 ## 账号配置
 
-账号信息加密保存在 `~/.claude/skills/umu/credentials.enc`（与 Claude Code 共用）。
+账号信息加密保存在 `~/.umu_skills/credentials.enc`（与 Claude Code 共用）。
 
 首次使用时，如果缺少凭证：
 1. 告诉用户当前缺少的角色，以及这些信息将加密保存。
@@ -170,4 +170,4 @@ python -m umu_sdk.skills.workbuddy.install --upgrade
 
 - 本 skill 包安装位置：`<WorkBuddy 配置目录>/skills/umu/`
 - MCP 配置位置：`<WorkBuddy 配置目录>/mcp_servers.json`
-- 加密凭证位置：`~/.claude/skills/umu/credentials.enc`
+- 加密凭证位置：`~/.umu_skills/credentials.enc`
