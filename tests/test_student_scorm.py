@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
