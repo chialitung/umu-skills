@@ -5,9 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-## [0.16.0] - 2026-06-21
+## [0.21.0] - 2026-06-21
 
 ### Added
 - Student MCP 新增 SCORM 小节自动完成能力：
@@ -21,6 +19,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/umu` Skill 文档新增“学员课程完成流程”：必须先检查 `needs_enrollment`，需要时先调用 `stu_enroll_course` 报名，再按 `completion_type` 完成小节
 - 替换测试与文档中的真实敏感信息（邮箱、企业名等）
 - 最小化发布规则补充：不属于发布范围的文件必须加入 `.gitignore`，禁止出现在未跟踪列表或提交历史中
+
+## [0.20.1] - 2026-06-20
+
+### Changed
+- `README.md`：将 WorkBuddy 使用章节前置到 Python SDK 章节之前；将所有 `Cline` 替换为 `WorkBuddy`，并在客户端列表中置于 `Cursor` 之前。
+
+## [0.20.0] - 2026-06-20
+
+### Added
+- 新增腾讯 WorkBuddy 集成支持：
+  - 新增 `python -m umu_sdk.skills.workbuddy.install` 一键安装脚本，自动探测 WorkBuddy 配置目录并注册 `umu-skills` orchestrator。
+  - 新增 `src/umu_sdk/skills/workbuddy/bundled/umu/` WorkBuddy 技能包（`skill.yaml` + `prompt.md`）。
+  - 安装脚本支持 `--check`、`--upgrade`、`--workbuddy-dir` 参数。
+  - WorkBuddy 集成复用现有的 Claude Code 加密凭证存储（`~/.claude/skills/umu/credentials.enc`），无需重复录入账号。
+- 新增 console script：`umu-skills-install-workbuddy`。
+
+### Changed
+- `README.md` 新增“在腾讯 WorkBuddy 中使用”章节。
+- `pyproject.toml` 版本号更新为 `0.20.0`，并配置 hatchling 打包 WorkBuddy 技能包资源文件。
+
+## [0.19.0] - 2026-06-20
+
+### Added
+- 新增 Teacher MCP 学习项目学员名单查询能力：
+  - `tch_list_program_participants`：查询学习项目的学员名单，支持全部/完成必修/未完成必修筛选，支持是否包含已禁用账号，返回数据按 modules/courses 动态列深度格式化。
+  - `tch_list_program_learning_tasks`：查询学习项目的学习任务学员名单，支持相同筛选条件，返回数据按 modules/courses 动态列深度格式化。
+- 新增 `src/umu_sdk/adapters/mcp/program_student_manager.py`：封装学习项目学员/学习任务名单查询与动态列解析。
+- 新增对应 Skill：`list_program_participants`、`list_program_learning_tasks`。
+
+### Changed
+- `README.md` 教师工具数量标题更新为 90，内置 Skill 数量标题更新为 112。
+
+## [0.18.2] - 2026-06-20
+
+### Changed
+- 将 `AGENTS.md` 加入 `.gitignore`，停止 Git 跟踪，仅保留在本地工作区。
+
+## [0.18.1] - 2026-06-20
+
+### Fixed
+- 修复 `core/client.py` HTTP 重试逻辑：`_handle_http_error` 在重试判断之前抛出异常，导致 429/502/503/504 等可重试错误无法重试的问题。
+- 修复 `core/client.py` 重试循环中 `except Exception` 过于宽泛的问题，改为捕获 `httpx.RequestError` 和 `OSError`。
+- 修复 `adapters/mcp/student.py` 中 `async def` 工具函数使用 `time.sleep` 阻塞 asyncio 事件循环的问题，全部替换为 `await asyncio.sleep`。
+- 修复 `adapters/mcp/student.py` 中 `stu_batch_complete_course` 内部闭包通过 `nonlocal` 共享修改答案字典导致的并发竞态问题。
+- 修复 `adapters/mcp/session.py` 中 `get_session_sync` 检测到 TTL 过期时仅返回 `None` 而不清理会话的内存泄漏问题。
+- 修复 `core/auth.py` 中 `get_token` 在 token 已过期时仍返回过期 token 的问题。
+- 修复 `core/env_loader.py` 中 `.env` 引号值无法正确处理行内注释的问题。
+- 修复 `adapters/mcp/student.py` 中 `print()` 输出到 stdout 破坏 MCP stdio JSON-RPC 通信的问题。
+- 修复 `core/encrypt.py` 中 `encrypt_password` 对空/None 密码缺少校验的问题。
+- 修复 `admin.py/teacher.py/student.py/course_builder.py` 中 `resp.get("status") is not True` 可能将字符串 `"true"` 误判为失败的问题。
+
+## [0.18.0] - 2026-06-20
+
+### Added
+- 新增 Teacher MCP 课程学员管理名单能力：
+  - `tch_list_course_participants`：查询指定课程的学员参与者名单，支持按全部/必修完成/必修未完成筛选，返回每位学员每个小节的完成状态/积分/得分明细。
+  - `tch_list_course_learning_durations`：查询指定课程的学员学习时长名单，支持按全部/必修完成/必修未完成筛选，返回每位学员每个小节的学习时长/首次/末次学习时间明细。
+- 新增对应 Skill：`list_course_participants`、`list_course_learning_durations`。
+- 新增 `tch_list_course_learning_tasks` 原子工具与 `list_course_learning_tasks` Skill，用于查询课程的学习任务分配学员清单。
+
+### Changed
+- `README.md` 教师工具数量标题更新为 79，内置 Skill 数量标题更新为 108。
+
+## [0.17.1] - 2026-06-19
+
+### Fixed
+- 修复 Release workflow (`.github/workflows/release.yml`) 在运行发布就绪检查前未安装项目依赖的问题，导致导入 `umu_sdk.adapters.mcp.*` 失败。
+- 发布就绪检查脚本现在会自动将 `src/` 加入 `sys.path`，支持在未安装 editable 包的环境中运行。
+
+## [0.17.0] - 2026-06-19
+
+### Added
+- 新增角色解析与智能路由框架：
+  - `src/umu_sdk/skills/role_resolver.py`：根据用户意图、会话上下文、已配置角色与子 MCP 可用性选择最佳执行角色，支持 admin ⊇ teacher ⊇ student 的能力层级 fallback
+  - `src/umu_sdk/skills/intent_capability_map.py`：基于关键词的意图分类（teacher/student/admin）
+  - `SkillContext` 增加 `session_state`，`app_lifespan` 初始化并持久化 `last_role` / `remembered_role`
+- 新增 `/umu` 斜杠命令智能路由 Skill（`src/umu_sdk/skills/slash/umu.py` + `_runner.py`）：
+  - 自动识别创建课程、列出课程、报名、查看进度、企业课程、学习项目等意图
+  - 多角色可用时交互式请求确认
+  - 高权限账号可自动登录低权限子 MCP 完成跨角色操作
+- 新增显式角色斜杠入口（`src/umu_sdk/skills/slash/umu_admin.py`、`umu_teacher.py`、`umu_student.py`）：
+  - `/umua` / `/umuadmin`：默认使用 admin 角色
+  - `/umut` / `/umuteacher`：默认使用 teacher 角色
+  - `/umus` / `/umustudent`：默认使用 student 角色
+- 新增测试：`tests/test_role_resolver.py`、`tests/test_intent_capability_map.py`、`tests/test_umu_slash.py`、`tests/test_slash_role_entries.py`
+
+### Changed
+- 消除 Admin/Teacher 重复建设的课程与学习项目访问权限能力：
+  - Admin MCP server 删除 14 个与 Teacher 重复的原子工具（`adm_set_course_access_permission`、`adm_get_course_access_permission`、`adm_get_course_access_list`、`adm_search_access_accounts`、`adm_add_course_access_accounts`、`adm_remove_course_access_accounts`、`adm_cancel_all_assigned_permissions`、`adm_set_program_access_permission`、`adm_get_program_access_permission`、`adm_get_program_access_list`、`adm_search_program_access_accounts`、`adm_add_program_access_accounts`、`adm_remove_program_access_accounts`、`adm_cancel_all_program_permissions`）
+  - 提取共享 helper `src/umu_sdk/adapters/mcp/shared_access_permissions.py` 与工厂 `src/umu_sdk/adapters/mcp/shared_session_tools.py`，供 Admin/Teacher/Student 复用
+  - Skill 层合并重复 Skill：统一使用 `course_permissions.py` 与 `program_permissions.py` 中的 canonical Skill，删除 `admin_course_permissions.py` 与 `teacher_course_permissions.py`
+  - Orchestrator 对已删除的 `adm_*` 原子工具保留向后兼容重定向，调用 `skill_call_atomic_tool(server="admin", tool="adm_*")` 时自动转发到 Teacher canonical 工具并附加 `deprecated` 提示
+- `SkillRegistry` 新增 `load_skill_package()` 通用加载方法，用于加载 `slash/` 包
+- 发布就绪检查脚本 `.github/scripts/check_release_readiness.py` 改用 FastMCP `list_tools()` 获取实际注册工具名，并同时扫描 `skills/builtin` 与 `skills/slash` 目录统计 Skill 数量
+- `README.md` 同步 Skill 数量至 105，新增斜杠命令使用说明与别名对照
+
+### Removed
+- `src/umu_sdk/skills/builtin/admin_course_permissions.py`
+- `src/umu_sdk/skills/builtin/teacher_course_permissions.py`
+
+## [0.16.1] - 2026-06-18
+
+### Changed
+- `README.md` 组织架构工具表中补充说明 `adm_update_department` 支持设置部门负责人
+- `/umu` Skill 文档新增"设置/调整部门负责人"工作流示例
+
+## [0.16.0] - 2026-06-18
+
+### Added
+- 为多个不支持服务端搜索的 MCP 列表工具增加客户端模糊匹配能力：
+  - Admin：`adm_list_departments`、`adm_list_classes`、`adm_list_groups` 新增 `fuzzy_name`、`top_k`、`similarity_threshold` 参数
+  - Teacher：`tch_list_sections` 新增 `fuzzy_title`；`tch_get_categories` 新增 `fuzzy_name`，同时匹配 `name` 与 `path`
+  - Student：`stu_get_my_courses`、`stu_list_participated_courses` 新增 `fuzzy_title`
+- `adm_list_groups` 新增 `fetch_all` 全量获取能力，提供 `fuzzy_name` 时自动启用
+- `src/umu_sdk/adapters/mcp/utils.py` 新增通用模糊匹配工具函数：`compute_similarity`、`fuzzy_filter_items`、`fuzzy_filter_items_multi_key`
+- 新增 `tests/test_fuzzy_matching.py` 覆盖相似度计算与单/多字段过滤
+
+### Changed
+- 更新 `/umu` Skill 文档（`SKILL.md`）与工具参考（`references/tools.md`），增加模糊匹配使用原则与参数说明
+- `README.md` 工具列表与数量标题已同步检查
 
 ## [0.15.0] - 2026-06-16
 

@@ -56,10 +56,14 @@ class SkillRegistry:
 
     def load_builtin_skills(self, package_name: str = "umu_sdk.skills.builtin") -> None:
         """自动加载内置 Skill 包中的所有模块."""
+        self.load_skill_package(package_name)
+
+    def load_skill_package(self, package_name: str) -> None:
+        """自动加载指定 Skill 包中的所有模块."""
         try:
             package = importlib.import_module(package_name)
         except ImportError as e:
-            logger.warning("加载内置 Skill 包失败: %s", e)
+            logger.warning("加载 Skill 包失败: %s", e)
             return
 
         prefix = package.__name__ + "."
@@ -72,7 +76,7 @@ class SkillRegistry:
                 module = importlib.import_module(mod_name)
                 self.register_from_module(module)
             except Exception as e:
-                logger.warning("加载内置 Skill 模块 %s 失败: %s", mod_name, e)
+                logger.warning("加载 Skill 模块 %s 失败: %s", mod_name, e)
 
     def list_skills(self) -> list[SkillInfo]:
         """返回所有已注册 Skill 的元数据."""

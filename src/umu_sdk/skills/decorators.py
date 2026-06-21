@@ -29,6 +29,7 @@ class SkillContext:
     mcp: MCPClientManager
     skill_name: str = ""
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger("umu.mcp.skills"))
+    session_state: dict[str, Any] = field(default_factory=dict)
 
     async def call_tool(
         self,

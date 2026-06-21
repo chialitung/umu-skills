@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Annotated, Any, AsyncIterator
@@ -34,8 +35,13 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
-from ...core.credential_loader import CredentialSource, load_credentials_with_source
-from .utils import format_login_summary, get_login_identity, report_pagination_progress
+from ...core.credential_loader import load_credentials_with_source
+from .utils import (
+    format_login_summary,
+    fuzzy_filter_items,
+    get_login_identity,
+    report_pagination_progress,
+)
 from ...core.admin_models import (
     AdminAccount,
     AdminAccountRaw,
@@ -63,6 +69,17 @@ from ...core.admin_models import (
     UserTaskRaw,
 )
 from .session import SessionManager
+from .shared_access_permissions import (
+    _parse_access_permission_response as _parse_business_response,
+)
+from .shared_session_tools import (
+    SessionToolConfig,
+    make_check_auth_tool,
+    make_create_session_tool,
+    make_destroy_session_tool,
+    make_list_sessions_tool,
+    make_login_tool,
+)
 from . import prompts
 
 # ---------------------------------------------------------------------------
@@ -252,102 +269,42 @@ def _err(
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
+_ADMIN_SESSION_CONFIG = SessionToolConfig(
+    role="adm",
+    role_label="管理员",
+    tool_domain_hint="管理员端相关 Tool",
+    login_success_suffix="现在可以调用管理员端相关 Tool",
+    check_auth_success_suffix="管理相关 Tool",
+    create_session_suggested_action="保存 session_id，后续调用 tool 时传入此参数",
+    create_session_with_password=True,
+    include_is_authenticated_in_session=True,
+)
+
+
 # ---------------------------------------------------------------------------
 # Tools: 认证
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-async def adm_login(
-    username: Annotated[str, Field(description="用户名/邮箱/手机号")],
-    password: Annotated[str, Field(description="明文密码，服务端会自动加密")],
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，在指定会话中登录；如果不提供，在默认会话中登录。",
-        ),
-    ] = None,
-) -> str:
-    """使用管理员账号登录 UMU 平台.
-
-    触发条件：当用户需要登录或当前认证已过期时调用。
-    前置依赖：无。
-    副作用：会设置认证 Token，后续 Tool 可以使用相同 session_id 复用此 Token。
-    """
-    client = _get_client(session_id)
-    try:
-        token = client.login(username, password)
-        # 更新会话用户名与来源
-        if session_id and _session_manager:
-            s = _session_manager.get_session_sync(session_id)
-            if s:
-                s.username = username
-                s.credential_source = CredentialSource.EXPLICIT.value
-        # 登录后获取用户/企业身份信息
-        identity = get_login_identity(client)
-        return _ok(
-            data={
-                "token": token,
-                "session_id": session_id,
-                "credential_source": CredentialSource.EXPLICIT.value,
-                **identity,
-            },
-            next_action="proceed",
-            suggested_action=(
-                f"已登录到企业「{identity.get('enterprise_name') or identity.get('enterprise_id', '')}」，"
-                "现在可以调用管理员端相关 Tool"
-            ),
-        )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_FAILED",
-            error_message=str(e),
-            suggested_action="检查用户名密码是否正确，或稍后重试",
-        )
+mcp.tool()(
+    make_login_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_client=_get_client,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def adm_check_auth(
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，检查指定会话的认证状态；如果不提供，检查默认会话。",
-        ),
-    ] = None,
-) -> str:
-    """检查当前是否已认证.
-
-    触发条件：在执行管理操作前，确认当前登录状态。
-    前置依赖：无。
-    副作用：无。
-    """
-    client = _get_client(session_id)
-    try:
-        is_auth = client.auth.is_authenticated()
-        token = client.auth.get_token()
-        if is_auth and token:
-            return _ok(
-                data={
-                    "is_authenticated": True,
-                    "token_preview": token[:20] + "...",
-                },
-                next_action="proceed",
-                suggested_action="当前已登录，可以正常调用管理相关 Tool",
-            )
-        else:
-            return _err(
-                error_code="NOT_AUTHENTICATED",
-                error_message="当前未登录或 Token 已过期",
-                suggested_action="调用 adm_login 重新登录",
-            )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_CHECK_FAILED",
-            error_message=str(e),
-            suggested_action="调用 adm_login 重新登录",
-        )
+mcp.tool()(
+    make_check_auth_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_client=_get_client,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
 @mcp.tool()
@@ -396,121 +353,34 @@ async def adm_get_user_info(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-async def adm_create_session(
-    username: Annotated[
-        str | None,
-        Field(default=None, description="可选用户名，如果提供则尝试自动登录"),
-    ] = None,
-    password: Annotated[
-        str | None,
-        Field(default=None, description="可选密码"),
-    ] = None,
-) -> str:
-    """创建新的独立会话.
-
-    触发条件：当需要为不同用户创建隔离的登录环境时调用。
-    前置依赖：无。
-    副作用：创建独立会话，拥有独立的 Cookie 和 Token。
-
-    每个会话拥有独立的 UMUClient 实例（含独立的 httpx.Client），
-    确保多用户并发使用时登录状态互不干扰。
-    """
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INITIALIZED",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        session = await _session_manager.create_session(username, password)
-        return _ok(
-            data={
-                "session_id": session.session_id,
-                "username": session.username,
-                "is_authenticated": session.client.auth.is_authenticated(),
-                "created_at": session.created_at,
-            },
-            next_action="proceed",
-            suggested_action="保存 session_id，后续调用 tool 时传入此参数",
-        )
-    except Exception as e:
-        return _err(
-            error_code="CREATE_SESSION_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_create_session_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def adm_list_sessions() -> str:
-    """列出所有活跃会话.
-
-    触发条件：需要查看当前有哪些会话在使用中。
-    前置依赖：无。
-    副作用：无（只读查询）。
-    """
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INITIALIZED",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        sessions = await _session_manager.list_sessions()
-        return _ok(
-            data={
-                "count": len(sessions),
-                "sessions": [
-                    {
-                        "session_id": s.session_id,
-                        "username": s.username,
-                        "is_authenticated": s.is_authenticated,
-                        "created_at": s.created_at,
-                        "last_used_at": s.last_used_at,
-                    }
-                    for s in sessions
-                ],
-            },
-            next_action="proceed",
-        )
-    except Exception as e:
-        return _err(
-            error_code="LIST_SESSIONS_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_list_sessions_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def adm_destroy_session(
-    session_id: Annotated[str, Field(description="要销毁的会话 ID")],
-) -> str:
-    """销毁指定会话.
-
-    触发条件：会话不再需要使用，或需要释放资源时调用。
-    前置依赖：无。
-    副作用：关闭会话的客户端连接，释放资源。
-    """
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INITIALIZED",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        success = await _session_manager.destroy_session(session_id)
-        if success:
-            return _ok(
-                data={"session_id": session_id, "destroyed": True},
-                next_action="proceed",
-            )
-        else:
-            return _err(
-                error_code="SESSION_NOT_FOUND",
-                error_message=f"会话不存在: {session_id}",
-            )
-    except Exception as e:
-        return _err(
-            error_code="DESTROY_SESSION_FAILED",
-            error_message=str(e),
-        )
-
+mcp.tool()(
+    make_destroy_session_tool(
+        _ADMIN_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 # ---------------------------------------------------------------------------
 # Tools: 账号管理
@@ -562,7 +432,7 @@ def _get_user_name_by_id(client: UMUClient, umu_id: str) -> str:
                 "group_operator": "intersection",
             },
         )
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             return ""
 
         user_list = resp.get("data", {}).get("list", [])
@@ -628,7 +498,7 @@ def _find_user_by_email(client: UMUClient, email: str) -> dict[str, Any] | None:
                 "group_operator": "intersection",
             },
         )
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             return None
 
         user_list = resp.get("data", {}).get("list", [])
@@ -866,7 +736,7 @@ async def _resolve_group_names(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             msg = resp.get("error", "")
             raise RuntimeError(f"查询分组列表失败: {msg}" if msg else "查询分组列表失败")
 
@@ -1615,7 +1485,7 @@ async def adm_update_account(
                 client.desktop_url("/ajax/enterprise/updateUser"),
                 data=profile_data,
             )
-            if resp.get("status") is not True and resp.get("error_code") != 0:
+            if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
                 return _err(
                     error_code="UPDATE_USER_FAILED",
                     error_message=resp.get("error", "更新用户信息失败"),
@@ -1789,6 +1659,27 @@ async def adm_update_account(
 
 @mcp.tool()
 async def adm_list_departments(
+    fuzzy_name: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的部门名称模糊匹配关键词。提供时会从全量部门中筛选"
+            "最匹配的候选，并返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -1836,6 +1727,15 @@ async def adm_list_departments(
                     "level": int(dept.get("level", 1) or 1),
                     "member_count": int(dept.get("member_count", 0) or 0),
                 }
+            )
+
+        if fuzzy_name and fuzzy_name.strip():
+            departments = fuzzy_filter_items(
+                departments,
+                fuzzy_name,
+                key="department_name",
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
             )
 
         return _ok(
@@ -3106,6 +3006,35 @@ async def adm_list_groups(
         int,
         Field(default=20, ge=1, le=100, description="每页数量（1-100），默认20"),
     ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，"
+            "自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    fuzzy_name: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的分组名称模糊匹配关键词。提供时会自动获取全量列表"
+            "并筛选最匹配的候选，返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -3130,21 +3059,20 @@ async def adm_list_groups(
             suggested_action="调用 adm_login 登录",
         )
 
-    try:
+    effective_fetch_all = fetch_all or bool(fuzzy_name and fuzzy_name.strip())
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict], dict]:
+        """获取单页数据，返回(分组列表, 分页信息)."""
         resp = client.get(
             client.desktop_url("/ajax/enterprise/getGroupList"),
             params={
-                "page": str(page),
-                "size": str(page_size),
+                "page": str(p),
+                "size": str(sz),
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
-            return _err(
-                error_code="LIST_GROUPS_FAILED",
-                error_message=resp.get("error", "获取分组列表失败"),
-                suggested_action="检查管理员权限或稍后重试",
-            )
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取分组列表失败"))
 
         group_list = resp.get("data", {}).get("list", [])
         groups = []
@@ -3158,19 +3086,81 @@ async def adm_list_groups(
             )
 
         page_info = resp.get("data", {}).get("page_info", {})
+        return groups, page_info
 
-        return _ok(
-            data={
-                "groups": groups,
-                "pagination": {
-                    "total": int(page_info.get("list_total_num", 0) or 0),
-                    "current_page": int(page_info.get("current_page", page) or page),
-                    "page_size": int(page_info.get("size", page_size) or page_size),
+    try:
+        if effective_fetch_all:
+            all_groups: list[dict] = []
+            current_page = 1
+            batch_size = 20
+            total_all = 0
+
+            while True:
+                groups, page_info = _fetch_page(current_page, batch_size)
+                all_groups.extend(groups)
+                total_all = int(page_info.get("list_total_num", 0) or total_all)
+
+                report_pagination_progress(
+                    "adm_list_groups",
+                    current_page,
+                    len(all_groups),
+                    total_all,
+                    20,
+                    is_complete=len(all_groups) >= total_all or not groups,
+                )
+
+                if len(all_groups) >= total_all or not groups:
+                    break
+                current_page += 1
+                if current_page > 50:
+                    report_pagination_progress(
+                        "adm_list_groups",
+                        current_page,
+                        len(all_groups),
+                        total_all,
+                        20,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            result_groups = all_groups
+            if fuzzy_name and fuzzy_name.strip():
+                result_groups = fuzzy_filter_items(
+                    all_groups,
+                    fuzzy_name,
+                    key="group_name",
+                    top_k=top_k,
+                    similarity_threshold=similarity_threshold,
+                )
+
+            return _ok(
+                data={
+                    "groups": result_groups,
+                    "total": len(result_groups),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(result_groups) if result_groups else 0,
+                    },
                 },
-            },
-            next_action="proceed",
-            suggested_action="使用 group_id 在 adm_create_account 中指定分组",
-        )
+                next_action="proceed",
+                suggested_action="使用 group_id 在 adm_create_account 中指定分组",
+            )
+        else:
+            groups, page_info = _fetch_page(page, page_size)
+            return _ok(
+                data={
+                    "groups": groups,
+                    "pagination": {
+                        "total": int(page_info.get("list_total_num", 0) or 0),
+                        "current_page": int(page_info.get("current_page", page) or page),
+                        "page_size": int(page_info.get("size", page_size) or page_size),
+                    },
+                },
+                next_action="proceed",
+                suggested_action="使用 group_id 在 adm_create_account 中指定分组",
+            )
     except Exception as e:
         return _err(
             error_code="LIST_GROUPS_ERROR",
@@ -3601,7 +3591,7 @@ async def adm_get_group(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             return _err(
                 error_code="GET_GROUP_FAILED",
                 error_message=resp.get("error", "获取分组详情失败"),
@@ -4296,7 +4286,7 @@ async def adm_list_accounts(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取账号列表失败"))
 
         user_list = resp.get("data", {}).get("list", [])
@@ -5265,6 +5255,27 @@ async def adm_list_classes(
             "自动遍历所有分页并合并结果。",
         ),
     ] = False,
+    fuzzy_name: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的班级名称模糊匹配关键词。提供时会自动获取全量列表"
+            "并筛选最匹配的候选，返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -5296,6 +5307,8 @@ async def adm_list_classes(
             suggested_action="调用 adm_login 登录",
         )
 
+    effective_fetch_all = fetch_all or bool(fuzzy_name and fuzzy_name.strip())
+
     def _fetch_page(p: int, sz: int) -> tuple[list[dict], int]:
         """获取单页数据，返回(班级列表, 总数量)."""
         params: dict[str, str] = {
@@ -5325,7 +5338,7 @@ async def adm_list_classes(
         return classes, total_all
 
     try:
-        if fetch_all:
+        if effective_fetch_all:
             all_classes: list[dict] = []
             current_page = 1
             batch_size = 20
@@ -5360,14 +5373,24 @@ async def adm_list_classes(
                     logger.warning("fetch_all 达到安全上限 50 页，停止获取")
                     break
 
+            result_classes = all_classes
+            if fuzzy_name and fuzzy_name.strip():
+                result_classes = fuzzy_filter_items(
+                    all_classes,
+                    fuzzy_name,
+                    key="name",
+                    top_k=top_k,
+                    similarity_threshold=similarity_threshold,
+                )
+
             return _ok(
                 data={
-                    "classes": all_classes,
-                    "total": len(all_classes),
+                    "classes": result_classes,
+                    "total": len(result_classes),
                     "pagination": {
                         "total_all": total_all,
                         "current_page": 1,
-                        "page_size": len(all_classes) if all_classes else 0,
+                        "page_size": len(result_classes) if result_classes else 0,
                     },
                 },
                 next_action="proceed",
@@ -5717,7 +5740,7 @@ async def adm_get_scheduled_disables(
                 },
             )
 
-            if resp.get("status") is not True and resp.get("error_code") != 0:
+            if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
                 continue
 
             user_list = resp.get("data", {}).get("list", [])
@@ -6211,7 +6234,7 @@ async def adm_list_courses(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取课程列表失败"))
 
         course_list = resp.get("data", {}).get("list", [])
@@ -6445,7 +6468,7 @@ async def adm_list_course_audit_records(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取课程审核列表失败"))
 
         record_list = resp.get("data", {}).get("list", [])
@@ -6636,7 +6659,7 @@ async def adm_audit_course(
             data=payload,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "课程审核操作失败"))
 
         action_text = {1: "通过", 2: "拒绝", 3: "撤销提交"}[audit_status_code]
@@ -7126,7 +7149,7 @@ async def adm_list_learning_programs(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
 
         program_list = resp.get("data", {}).get("list", [])
@@ -7214,6 +7237,166 @@ async def adm_list_learning_programs(
             error_message=str(e),
             suggested_action="检查网络连接后重试",
         )
+
+
+# ---------------------------------------------------------------------------
+# Tools: 个人视角学习项目列表查询
+# ---------------------------------------------------------------------------
+
+def _program_list_url_and_params(
+    scope: str,
+    keywords: str,
+    page: int,
+    page_size: int,
+) -> tuple[str, dict[str, str]]:
+    """根据 scope 返回学习项目列表的端点和参数."""
+    base_params: dict[str, str] = {
+        "t": str(int(time.time() * 1000)),
+        "page": str(page),
+        "size": str(page_size),
+    }
+    if scope == "owned":
+        url = "/api/program/getlist"
+        base_params["owner"] = "1"
+        base_params["type"] = "1"
+    elif scope == "cooperated":
+        url = "/api/program/getcooperateprogramlist"
+    elif scope == "enrolled":
+        url = "/api/program/getmyparticipatedprogramlist"
+    else:
+        raise ValueError(f"不支持的 scope: {scope}")
+
+    if keywords:
+        base_params["keywords"] = keywords
+
+    return url, base_params
+
+
+def _format_program_list_item(item: dict[str, Any]) -> dict[str, Any]:
+    """统一格式化 /api/program/getlist 返回的项目字段."""
+    creator = item.get("creator", {}) or {}
+    return {
+        "program_id": str(item.get("program_id", "")),
+        "program_title": item.get("program_title", ""),
+        "desc": item.get("desc", ""),
+        "access_code": item.get("access_code", ""),
+        "share_url": item.get("share_url", ""),
+        "share_pc_url": item.get("share_pc_url", ""),
+        "head_img": item.get("head_img", ""),
+        "bg_img": item.get("setup", {}).get("bg_img", ""),
+        "create_time": item.get("create_time", ""),
+        "update_time": item.get("update_time", ""),
+        "creator_umu_id": str(creator.get("umu_id", "")),
+        "creator_name": creator.get("user_name", item.get("creater_name", "")),
+        "group_num": item.get("group_num", 0),
+        "module_num": item.get("module_num", 0),
+        "is_creator": item.get("is_creator", 0),
+    }
+
+
+@mcp.tool()
+async def adm_list_personal_learning_programs(
+    scope: Annotated[
+        str,
+        Field(description="列表视角：owned=我拥有的, cooperated=协同给我的, enrolled=我报名的"),
+    ],
+    keywords: Annotated[str | None, Field(default=None, description="按标题/访问码模糊搜索")] = None,
+    page: Annotated[int, Field(default=1, ge=1, description="页码")] = 1,
+    page_size: Annotated[int, Field(default=20, ge=1, le=100, description="每页数量")] = 20,
+    fetch_all: Annotated[bool, Field(default=False, description="是否自动获取全量数据")] = False,
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """查询当前管理员作为普通用户的学习项目清单."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+        )
+
+    try:
+        url, base_params = _program_list_url_and_params(scope, keywords or "", page, page_size)
+    except ValueError as e:
+        return _err(error_code="INVALID_SCOPE", error_message=str(e), next_action="needs_user_input")
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        params = {**base_params, "page": str(p), "size": str(sz)}
+        resp = client.get(client.desktop_url(url), params=params)
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
+
+        data = resp.get("data", {})
+        page_info = data.get("page_info", {})
+        program_list = data.get("list", [])
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return [_format_program_list_item(item) for item in program_list], total_all
+
+    try:
+        if fetch_all:
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+            batch_size = 20
+
+            while True:
+                items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(items)
+
+                report_pagination_progress(
+                    "adm_list_personal_learning_programs",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                    is_complete=len(all_items) >= total_all or not items,
+                )
+
+                if len(all_items) >= total_all or not items:
+                    break
+                current_page += 1
+                if current_page > 50:
+                    report_pagination_progress(
+                        "adm_list_personal_learning_programs",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            return _ok(
+                data={
+                    "scope": scope,
+                    "programs": all_items,
+                    "total": len(all_items),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(all_items) if all_items else 0,
+                    },
+                },
+                next_action="proceed",
+            )
+
+        items, _ = _fetch_page(page, page_size)
+        return _ok(
+            data={
+                "scope": scope,
+                "programs": items,
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                },
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取学习项目列表失败")
+        return _err("LIST_LEARNING_PROGRAMS_FAILED", str(e))
 
 
 async def _resolve_instructor_tag_names(
@@ -7976,6 +8159,167 @@ async def adm_list_teaching_records(
 
 
 # ---------------------------------------------------------------------------
+# Tools: 课程自动关闭
+# ---------------------------------------------------------------------------
+
+
+def _format_auto_close_tips(close_time: str) -> str:
+    """将关闭时间格式化为 UMU 前端展示文本.
+
+    支持的输入格式示例：
+    - 2026-06-30T10:00:00
+    - 2026-06-30 10:00:00
+    - 2026-06-30T10:00
+    - 2026-06-30 10:00
+    - 2026/06/30 10:00
+    - 2026年06月30日10点
+
+    输出固定为：课程开启自动关闭时间，将在YYYY年M月D日H点关闭
+    """
+    close_time = close_time.strip()
+    formats = [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M",
+        "%Y年%m月%d日%H点",
+    ]
+    parsed: datetime | None = None
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(close_time, fmt)
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        raise ValueError(
+            f"无法解析关闭时间: {close_time}，支持的格式如 2026-06-30 10:00"
+        )
+    formatted = f"{parsed.year}年{parsed.month}月{parsed.day}日{parsed.hour}点关闭"
+    return f"课程开启自动关闭时间，将在{formatted}"
+
+
+@mcp.tool()
+async def adm_set_course_auto_close(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    close_time: Annotated[
+        str,
+        Field(
+            description="自动关闭时间，支持格式如 2026-06-30 10:00、2026-06-30T10:00:00、2026年6月30日10点"
+        ),
+    ],
+    custom_tips: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="自定义提示文本；若提供则直接作为 accessPermissionTips，忽略 close_time 的默认格式化",
+        ),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """设置课程的定时自动关闭提示.
+
+    该接口通过保存 group_setup.accessPermissionTips 来告知 UMU 在指定时间后自动关闭课程。
+    关闭时间会被格式化为 UMU 前端展示文本，如：
+    "课程开启自动关闭时间，将在2026年6月30日10点关闭"。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        tips = custom_tips.strip() if custom_tips else _format_auto_close_tips(close_time)
+    except ValueError as e:
+        return _err("INVALID_CLOSE_TIME", str(e), next_action="needs_user_input")
+
+    try:
+        group_setup = {
+            "accessPermissionTips": tips,
+            "access_permission_tips": tips,
+            "enable_mini_program": 0,
+            "learn_within_mini_program": 0,
+        }
+        resp = client.post(
+            client.desktop_url("/api/group/savesetup"),
+            data={
+                "group_id": str(group_id),
+                "group_setup": json.dumps(group_setup, ensure_ascii=False),
+            },
+        )
+        ok, data, err = _parse_business_response(resp)
+        if not ok:
+            return _err("SET_COURSE_AUTO_CLOSE_FAILED", err or "设置课程定时自动关闭失败")
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "access_permission_tips": tips,
+                "detail": data,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("设置课程定时自动关闭失败")
+        return _err("SET_COURSE_AUTO_CLOSE_FAILED", str(e))
+
+
+@mcp.tool()
+async def adm_cancel_course_auto_close(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """取消课程的定时自动关闭."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        group_setup = {
+            "accessPermissionTips": "",
+            "access_permission_tips": "",
+            "enable_mini_program": 0,
+            "learn_within_mini_program": 0,
+        }
+        resp = client.post(
+            client.desktop_url("/api/group/savesetup"),
+            data={
+                "group_id": str(group_id),
+                "group_setup": json.dumps(group_setup, ensure_ascii=False),
+            },
+        )
+        ok, data, err = _parse_business_response(resp)
+        if not ok:
+            return _err("CANCEL_COURSE_AUTO_CLOSE_FAILED", err or "取消课程定时自动关闭失败")
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "access_permission_tips": "",
+                "detail": data,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("取消课程定时自动关闭失败")
+        return _err("CANCEL_COURSE_AUTO_CLOSE_FAILED", str(e))
+
+
+# ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
 
@@ -8042,6 +8386,11 @@ def main() -> None:
     print("        adm_remove_group_members, adm_add_group_managers,")
     print("        adm_remove_group_managers")
     print("  课程: adm_list_courses,")
+    print("        adm_set_course_access_permission, adm_get_course_access_permission,")
+    print("        adm_get_course_access_list, adm_search_access_accounts,")
+    print("        adm_add_course_access_accounts, adm_remove_course_access_accounts,")
+    print("        adm_cancel_all_assigned_permissions,")
+    print("        adm_set_course_auto_close, adm_cancel_course_auto_close,")
     print("        adm_list_course_audit_records, adm_audit_course,")
     print("        adm_list_course_categories")
     print("  课程审核黑名单: adm_list_course_blacklist, adm_save_course_blacklist")

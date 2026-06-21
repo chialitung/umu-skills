@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "umu-skills"
-version = "0.16.0"
+version = "0.21.0"
 description = "An unofficial, third-party AI Skill framework for UMU Learning Platform operations via MCP"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -50,6 +50,7 @@ umu-skills-student = "umu_sdk.adapters.mcp.student:main"
 umu-skills-teacher = "umu_sdk.adapters.mcp.teacher:main"
 umu-skills-admin = "umu_sdk.adapters.mcp.admin:main"
 umu-skills-orchestrator = "umu_sdk.skills.server:main"
+umu-skills-install-workbuddy = "umu_sdk.skills.workbuddy.install:main"
 
 [project.urls]
 Homepage = "https://github.com/your-org/umu-skills"
@@ -59,6 +60,10 @@ Issues = "https://github.com/your-org/umu-skills/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/umu_sdk"]
+include = [
+    "src/umu_sdk/skills/bundled/**/*",
+    "src/umu_sdk/skills/workbuddy/bundled/**/*",
+]
 
 [tool.ruff]
 line-length = 100

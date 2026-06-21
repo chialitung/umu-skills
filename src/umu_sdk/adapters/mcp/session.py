@@ -176,13 +176,13 @@ class SessionManager:
         """同步获取会话（用于已有 event loop 的 async tool 内部）.
 
         注意：此函数不获取锁，依赖调用方场景（单线程 event loop）。
-        TTL 检查在此版本中不自动销毁，仅返回 None。
+        TTL 过期时会同步清理会话。
 
         Args:
             session_id: 会话 ID
 
         Returns:
-            会话对象，不存在则返回 None
+            会话对象，不存在或已过期则返回 None
         """
         session = self._sessions.get(session_id)
         if session is None:
@@ -190,6 +190,7 @@ class SessionManager:
 
         # 检查 TTL
         if time.time() - session.last_used_at > self.session_ttl:
+            self._destroy_session_unlocked(session_id)
             return None
 
         session.touch()

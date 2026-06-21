@@ -38,6 +38,28 @@ def find_env_file(path: str | Path | None = None) -> Path | None:
     return None
 
 
+def _parse_env_value(value: str) -> str:
+    """解析 .env 值，支持引号包裹和行内注释.
+
+    - 以引号开头时，取匹配引号对之间的内容，忽略后续注释。
+    - 无引号时，按第一个 '#' 分割并去掉尾部空白。
+    """
+    value = value.strip()
+    if not value:
+        return ""
+    if value[0] in ('"', "'"):
+        quote = value[0]
+        i = 1
+        while i < len(value):
+            if value[i] == "\\" and i + 1 < len(value):
+                i += 2
+                continue
+            if value[i] == quote:
+                return value[1:i]
+            i += 1
+    return value.split("#", 1)[0].strip()
+
+
 def parse_env_file(path: str | Path | None = None) -> dict[str, str]:
     """解析 .env 文件，返回键值对字典.
 
@@ -64,7 +86,7 @@ def parse_env_file(path: str | Path | None = None) -> dict[str, str]:
         if not match:
             continue
         key, value = match.groups()
-        value = value.strip().strip("\"'").strip()
+        value = _parse_env_value(value)
         result[key] = value
     return result
 
