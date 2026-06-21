@@ -847,8 +847,11 @@ async def stu_get_course_structure(
                     lesson["questions_preview"] = exam_preview
                 except Exception:
                     pass
-        elif etype == 11:  # 视频
-            lesson["completion_type"] = "browse"
+        elif etype == 11:  # 微课 / SCORM / H5
+            if setup.get("content_type") == "scorm":
+                lesson["completion_type"] = "scorm"
+            else:
+                lesson["completion_type"] = "browse"
         elif etype == 13:  # 文章
             lesson["completion_type"] = "browse"
         elif etype == 14:  # 文档

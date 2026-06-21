@@ -120,3 +120,42 @@ async def test_stu_complete_scorm_section_invalid_type() -> None:
     parsed = json.loads(result)
     assert parsed["success"] is False
     assert parsed["error_code"] == "INVALID_SECTION_TYPE"
+
+
+@pytest.mark.asyncio
+async def test_stu_get_course_structure_scorm_detection() -> None:
+    from umu_sdk.adapters.mcp.student import stu_get_course_structure
+
+    with _patch_student_client() as client, \
+            patch(
+                "umu_sdk.adapters.mcp.student._resolve_course_identifier",
+                return_value=("g1", "sk1", "https://m.umu.cn/course?groupId=g1&sKey=sk1"),
+            ), \
+            patch("umu_sdk.adapters.mcp.student._check_needs_enroll", return_value=(False, None)):
+        client.get.return_value = {
+            "error_code": 0,
+            "data": {
+                "list": [
+                    {
+                        "element_id": "e1",
+                        "type": 11,
+                        "title": "SCORM 小节",
+                        "extend": {"learn_status": 0},
+                        "setup": {"content_type": "scorm"},
+                    },
+                    {
+                        "element_id": "e2",
+                        "type": 11,
+                        "title": "普通视频",
+                        "extend": {"learn_status": 0},
+                        "setup": {"content_type": "video"},
+                    },
+                ],
+            },
+        }
+
+        result = await stu_get_course_structure(course_identifier="aet123")
+        parsed = json.loads(result)
+        lessons = parsed["data"]["lessons"]
+        assert lessons[0]["completion_type"] == "scorm"
+        assert lessons[1]["completion_type"] == "browse"
