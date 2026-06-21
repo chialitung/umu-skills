@@ -56,6 +56,7 @@ logger = logging.getLogger("umu.mcp.skills")
 # ---------------------------------------------------------------------------
 _mcp_client: MCPClientManager | None = None
 _skill_registry: SkillRegistry | None = None
+_session_state: dict[str, Any] = {}
 
 
 @asynccontextmanager
@@ -68,7 +69,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     3. 加载内置 Skill 并校验所需服务器是否可用。
     关闭时释放所有子进程资源。
     """
-    global _mcp_client, _skill_registry
+    global _mcp_client, _skill_registry, _session_state
 
     base_url = os.getenv("UMU_BASE_URL", "https://www.umu.cn")
     logger.info("UMU Skills Orchestrator 启动中，目标: %s", base_url)
@@ -92,6 +93,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     # 加载 Skill
     _skill_registry = SkillRegistry()
     _skill_registry.load_builtin_skills()
+    _skill_registry.load_skill_package("umu_sdk.skills.slash")
 
     missing = _skill_registry.validate_servers(available_servers)
     if missing:
@@ -102,9 +104,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
     logger.info("UMU Skills Orchestrator 已启动，加载 %d 个 Skill", len(_skill_registry.list_skills()))
 
+    # 初始化会话状态
+    _session_state = {"last_role": None, "remembered_role": None}
+
     yield {
         "mcp_client": _mcp_client,
         "skill_registry": _skill_registry,
+        "session_state": _session_state,
     }
 
     # 清理
@@ -112,6 +118,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
         await _mcp_client.stop()
         _mcp_client = None
     _skill_registry = None
+    _session_state = {}
     logger.info("UMU Skills Orchestrator 已关闭")
 
 
@@ -189,6 +196,27 @@ def _err(
 
 
 # ---------------------------------------------------------------------------
+# 向后兼容：Admin 已删除的原子工具重定向到 Teacher canonical 工具
+# ---------------------------------------------------------------------------
+_ADMIN_TO_TEACHER_TOOL_MAP: dict[str, tuple[str, str]] = {
+    "adm_set_course_access_permission": ("teacher", "tch_set_course_access_permission"),
+    "adm_get_course_access_permission": ("teacher", "tch_get_course_access_permission"),
+    "adm_get_course_access_list": ("teacher", "tch_get_course_access_list"),
+    "adm_search_access_accounts": ("teacher", "tch_search_access_accounts"),
+    "adm_add_course_access_accounts": ("teacher", "tch_add_course_access_accounts"),
+    "adm_remove_course_access_accounts": ("teacher", "tch_remove_course_access_accounts"),
+    "adm_cancel_all_assigned_permissions": ("teacher", "tch_cancel_all_assigned_permissions"),
+    "adm_get_program_access_permission": ("teacher", "tch_get_program_access_permission"),
+    "adm_set_program_access_permission": ("teacher", "tch_set_program_access_permission"),
+    "adm_get_program_access_list": ("teacher", "tch_get_program_access_list"),
+    "adm_search_program_access_accounts": ("teacher", "tch_search_program_access_accounts"),
+    "adm_add_program_access_accounts": ("teacher", "tch_add_program_access_accounts"),
+    "adm_remove_program_access_accounts": ("teacher", "tch_remove_program_access_accounts"),
+    "adm_cancel_all_program_permissions": ("teacher", "tch_cancel_all_program_permissions"),
+}
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 @mcp.tool()
@@ -262,6 +290,7 @@ async def skill_run(name: str, arguments: dict[str, Any]) -> str:
         mcp=_mcp_client,
         skill_name=name,
         logger=logger,
+        session_state=_session_state,
     )
 
     try:
@@ -322,29 +351,52 @@ async def skill_call_atomic_tool(
             suggested_action="请检查 orchestrator 配置或启动对应的子 MCP",
         )
 
+    actual_server = server
+    actual_tool = tool
+    migration_note = ""
+    if server == "admin" and tool in _ADMIN_TO_TEACHER_TOOL_MAP:
+        actual_server, actual_tool = _ADMIN_TO_TEACHER_TOOL_MAP[tool]
+        migration_note = (
+            f"工具 {tool} 已弃用，已自动重定向到 {actual_server}/{actual_tool}，"
+            "建议迁移到 teacher 侧 canonical 工具"
+        )
+        logger.warning("[skill_call_atomic_tool] %s", migration_note)
+        if actual_server not in available:
+            return _err(
+                "SERVER_UNAVAILABLE",
+                f"重定向目标子 MCP [{actual_server}] 未连接",
+                suggested_action="请启动 teacher 子 MCP 或直接使用 teacher 工具",
+            )
+
     try:
         result = await _mcp_client.call_tool(
-            server=server,
-            tool=tool,
+            server=actual_server,
+            tool=actual_tool,
             arguments=arguments or {},
             read_timeout_seconds=read_timeout_seconds,
         )
     except Exception as e:
-        logger.exception("透传调用原子工具 [%s/%s] 时出错", server, tool)
+        logger.exception("透传调用原子工具 [%s/%s] 时出错", actual_server, actual_tool)
         return _err(
             "ATOMIC_TOOL_ERROR",
             f"调用原子工具时发生异常: {e}",
             suggested_action="请检查子 MCP 日志或工具参数",
         )
 
+    extra: dict[str, Any] = {}
+    if migration_note:
+        extra["deprecated"] = True
+        extra["migration_note"] = migration_note
+
     if not result.success:
         return _err(
             error_code=result.error_code or "ATOMIC_TOOL_FAILED",
             error_message=result.error_message or "原子工具调用失败",
             data=result.data,
+            **extra,
         )
 
-    return _ok(data=result.data)
+    return _ok(data=result.data, **extra)
 
 
 # ---------------------------------------------------------------------------

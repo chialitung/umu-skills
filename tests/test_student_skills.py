@@ -163,6 +163,42 @@ class TestStudentLearning:
             ("student", "stu_get_lesson_status", {"element_id": "elem-123", "group_id": "g-123"}),
         ]
 
+    async def test_complete_scorm_section(self, registry_with_student_skills: SkillRegistry) -> None:
+        responses = {
+            ("student", "stu_complete_scorm_section"): {
+                "success": True,
+                "data": {"is_completed": True, "element_id": "e-scorm"},
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_student_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="complete_scorm_section",
+            arguments={
+                "element_id": "e-scorm",
+                "group_id": "g1",
+                "status": "passed",
+                "score": 90,
+                "duration_seconds": 120,
+                "scorm_launch_url": "https://vfua3ytp5.m.umu.cn/scorm/1/launch/2/course/3/element/abc?sesskey=s",
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["is_completed"] is True
+
+        assert len(mock_mcp.calls) == 1
+        server, tool, args = mock_mcp.calls[0]
+        assert server == "student"
+        assert tool == "stu_complete_scorm_section"
+        assert args["element_id"] == "e-scorm"
+        assert args["group_id"] == "g1"
+        assert args["score"] == 90
+        assert args["duration_seconds"] == 120
+        assert "scorm_launch_url" in args
+
 
 class TestStudentAssessment:
     async def test_get_questionnaire(self, registry_with_student_skills: SkillRegistry) -> None:

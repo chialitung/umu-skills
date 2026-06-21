@@ -60,7 +60,7 @@ def sample_raw_instructor():
         "user_type": "1",
         "register_from": "1",
         "user_name": "Cecilia Wang",
-        "email": "cecilia-j.wang@aia.com",
+        "email": "instructor@example.com",
         "number": "9009732",
         "on_job_status": 1,
         "phone": "13800138000",
@@ -133,7 +133,7 @@ class TestInstructor:
         assert instructor.umu_id == "12733916"
         assert instructor.student_id == "31492212"
         assert instructor.user_name == "Cecilia Wang"
-        assert instructor.email == "cecilia-j.wang@aia.com"
+        assert instructor.email == "instructor@example.com"
         assert instructor.number == "9009732"
         assert instructor.phone == "13800138000"
         assert instructor.login_name == "cecilia.wang"

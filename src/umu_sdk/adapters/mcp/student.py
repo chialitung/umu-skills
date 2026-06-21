@@ -21,22 +21,67 @@ Environment Variables:
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
+import logging
 import os
 import re
+import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncIterator
+from urllib.parse import parse_qs, urlparse
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
-from ...core.credential_loader import CredentialSource, load_credentials_with_source
-from .utils import format_login_summary, get_login_identity, report_pagination_progress
+from ...core.credential_loader import load_credentials_with_source
+from ...core.encrypt import decrypt_aes_base64
+from .utils import (
+    format_login_summary,
+    fuzzy_filter_items,
+    get_login_identity,
+    report_pagination_progress,
+)
 from . import prompts
 from .batch import AccountImporter, AccountSource, BatchExecutor
 from .session import SessionManager
+from .shared_session_tools import (
+    SessionToolConfig,
+    make_check_auth_tool,
+    make_create_session_tool,
+    make_destroy_session_tool,
+    make_list_sessions_tool,
+    make_login_tool,
+)
+
+# ---------------------------------------------------------------------------
+# 日志配置
+# ---------------------------------------------------------------------------
+def _setup_logging() -> None:
+    """配置结构化日志."""
+    level_name = os.getenv("MCP_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(level)
+
+    fmt = os.getenv(
+        "MCP_LOG_FORMAT",
+        "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    )
+    handler.setFormatter(logging.Formatter(fmt))
+
+    root = logging.getLogger("umu.mcp.student")
+    root.setLevel(level)
+    root.handlers = [handler]
+
+
+_setup_logging()
+logger = logging.getLogger("umu.mcp.student")
+
 
 # ---------------------------------------------------------------------------
 # 全局实例（由 lifespan 管理）
@@ -77,13 +122,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
             default_session.credential_source = source.value
             identity = get_login_identity(_umu_client)
             summary = format_login_summary(username, source.value, identity)
-            print(f"[MCP Student] 默认会话已自动登录: {summary}")
+            logger.info("[MCP Student] 默认会话已自动登录: %s", summary)
         except Exception as e:
-            print(f"[MCP Student] 默认会话自动登录失败: {e}")
+            logger.warning("[MCP Student] 默认会话自动登录失败: %s", e)
     else:
-        print("[MCP Student] 未配置学生账号凭据，请调用 stu_login 或 stu_create_session")
+        logger.info("[MCP Student] 未配置学生账号凭据，请调用 stu_login 或 stu_create_session")
 
-    print(f"[MCP Student] UMU 学员端服务已启动，目标: {base_url}")
+    logger.info("[MCP Student] UMU 学员端服务已启动，目标: %s", base_url)
 
     yield {"client": _umu_client, "session_manager": _session_manager}
 
@@ -92,7 +137,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
         _session_manager.close_all()
         _session_manager = None
     _umu_client = None
-    print("[MCP Student] UMU 学员端服务已关闭")
+    logger.info("[MCP Student] UMU 学员端服务已关闭")
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +238,18 @@ def _err(
     }
     result.update(kwargs)
     return json.dumps(result, ensure_ascii=False, default=str)
+
+
+_STUDENT_SESSION_CONFIG = SessionToolConfig(
+    role="stu",
+    role_label="学员",
+    tool_domain_hint="学习相关 Tool",
+    login_success_suffix="现在可以调用其他学习相关 Tool",
+    check_auth_success_suffix="学习相关 Tool",
+    create_session_suggested_action="保存 session_id，后续调用 tool 时传入此参数",
+    create_session_with_password=True,
+    include_is_authenticated_in_session=True,
+)
 
 
 def _get_html(client: UMUClient, url: str) -> str:
@@ -353,7 +410,7 @@ def _check_needs_enroll(client: UMUClient, group_id: str, s_key: str = "") -> tu
     return False, None
 
 
-def _makeweikestatus_sequence(
+async def _makeweikestatus_sequence(
     client: UMUClient, element_id: str | int, extras: dict[str, dict] | None = None
 ) -> dict[str, Any]:
     """执行 makeweikestatus 状态机序列.
@@ -381,8 +438,8 @@ def _makeweikestatus_sequence(
             results.append({"action": action, "status": "ok"})
         except Exception as e:
             results.append({"action": action, "status": "failed", "error": str(e)})
-            print(f"[makeweikestatus] {action} 失败: {e}")
-        time.sleep(0.3)
+            logger.warning(f"[makeweikestatus] {action} 失败: {e}")
+        await asyncio.sleep(0.3)
 
     failed = [r for r in results if r["status"] == "failed"]
     return {
@@ -392,101 +449,324 @@ def _makeweikestatus_sequence(
     }
 
 
+def _format_scorm_total_time(seconds: int) -> str:
+    """将秒数转换为 SCORM 1.2 cmi.core.total_time 格式 HHHH:MM:SS.SS."""
+    seconds = max(0, seconds)
+    hours, rem = divmod(seconds, 3600)
+    mins, secs = divmod(rem, 60)
+    return f"{hours:04d}:{mins:02d}:{secs:02d}.00"
+
+
+def _extract_page_data_json(html: str) -> dict[str, Any] | None:
+    """从 HTML 中提取 `var pageData = {...};` 并解析为 dict。"""
+    m = re.search(r"var\s+pageData\s*=\s*(\{.*?\});?\s*<\/script>", html, re.DOTALL)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(1))
+    except Exception:
+        return None
+
+
+def _extract_uscorm_runtime(
+    client: UMUClient,
+    element_id: str,
+    share_url: str,
+) -> dict[str, Any]:
+    """从 SCORM 小节分享页提取 UMU 自研 wrapper 的运行时信息。
+
+    UMU 对部分 SCORM 资源使用自研 wrapper（非 Moodle），运行时页由：
+      https://www.umu.cn/scorm/{token}/element/{base64(element_id)}
+    提供，commit 目标为 /napi/scorm/scorm12 或 /napi/scorm/scorm2004。
+
+    返回 dict，包含：
+      mode: "umu_wrapper"
+      scorm_version: "1.2" | "2004"
+      commit_url: 绝对提交地址
+      launch_url: 启动页地址
+      lms_data: 初始 CMI 数据
+    失败时抛出 ValueError。
+    """
+    headers = client.auth.get_auth_headers()
+    headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+    # 1. 访问分享页，拿到包含 resource_store 的 pageData
+    resp = client.http.get(share_url, headers=headers, follow_redirects=True)
+    page_data = _extract_page_data_json(resp.text or "")
+    if not page_data:
+        raise ValueError("分享页未包含 pageData")
+
+    resource_store = page_data.get("data", {}).get("resource_store") or page_data.get("resource_store") or []
+    if not resource_store:
+        raise ValueError("pageData 中没有 resource_store")
+
+    resource = resource_store[0]
+    encrypted_url = resource.get("transcoding_url") or resource.get("url")
+    if not encrypted_url:
+        raise ValueError("resource_store 缺少加密 URL")
+
+    decrypted = decrypt_aes_base64(str(encrypted_url))
+    # decrypted 形如 https://umu.cn/scorm/{token}/element
+    parsed = urlparse(decrypted)
+    base_path = parsed.path.rstrip("/")
+    if not base_path or not re.search(r"/scorm/[^/]+/element$", base_path):
+        raise ValueError(f"解密后的 SCORM URL 不符合预期: {decrypted}")
+
+    base64_id = base64.b64encode(str(element_id).encode()).decode()
+    launch_path = f"{base_path}/{base64_id}"
+    launch_url = f"https://www.umu.cn{launch_path}"
+
+    # 2. 访问启动页，读取 commit endpoint 与初始 lms_data
+    launch_resp = client.http.get(launch_url, headers=headers, follow_redirects=True)
+    launch_html = launch_resp.text or ""
+    launch_page_data = _extract_page_data_json(launch_html)
+    if not launch_page_data:
+        raise ValueError("SCORM 启动页未包含 pageData")
+
+    scorm_version = launch_page_data.get("scorm_version", "1.2")
+    lms_data = launch_page_data.get("lms_data", {}) or {}
+
+    version_commit_suffix = {"1.2": "scorm12", "2004": "scorm2004"}.get(str(scorm_version), "")
+    commit_urls = re.findall(r"settings\.lmsCommitUrl\s*=\s*\"([^\"]+)\"", launch_html)
+    commit_candidates = [u for u in commit_urls if version_commit_suffix in u] if version_commit_suffix else []
+    if commit_candidates:
+        commit_path = commit_candidates[0]
+    elif commit_urls:
+        commit_path = commit_urls[0]
+    else:
+        raise ValueError("SCORM 启动页未找到 commit URL")
+    if commit_path.startswith("http"):
+        commit_url = commit_path
+    else:
+        commit_url = f"https://www.umu.cn{commit_path}"
+
+    return {
+        "mode": "umu_wrapper",
+        "scorm_version": str(scorm_version),
+        "commit_url": commit_url,
+        "launch_url": launch_url,
+        "lms_data": lms_data,
+    }
+
+
+def _post_uscorm_commit(
+    client: UMUClient,
+    runtime: dict[str, Any],
+    cmi: dict[str, Any],
+) -> dict[str, Any]:
+    """向 UMU 自研 SCORM wrapper 提交 CMI 数据。"""
+    headers = client.auth.get_auth_headers()
+    headers["Content-Type"] = "application/json;charset=UTF-8"
+
+    response = client.http.post(
+        runtime["commit_url"],
+        json={"cmi": cmi},
+        headers=headers,
+        follow_redirects=False,
+    )
+    text = (response.text or "").strip()
+    try:
+        result = json.loads(text)
+    except Exception as e:
+        raise RuntimeError(f"SCORM commit 返回非 JSON ({response.status_code}): {text[:200]} ({e})")
+
+    if result.get("error_code") != 0:
+        raise RuntimeError(f"SCORM commit 失败: {result.get('error_message') or text[:200]}")
+    if result.get("data", {}).get("status") != 1:
+        raise RuntimeError(f"SCORM commit 未生效: {result.get('data')}")
+    return result
+
+
+def _build_uscorm_12_cmi(
+    runtime: dict[str, Any],
+    status: str,
+    score: int | None,
+    duration_seconds: int,
+    lesson_location: str,
+    suspend_data_json: str,
+) -> dict[str, Any]:
+    """构造 UMU wrapper SCORM 1.2 需要的 cmi 对象。"""
+    lms_data = runtime.get("lms_data", {}) or {}
+    initial_cmi = lms_data.get("cmi", {}) or {}
+    initial_core = initial_cmi.get("core", {}) or {}
+
+    core: dict[str, Any] = {
+        "entry": initial_core.get("entry", "ab-initio"),
+        "student_id": initial_core.get("student_id", ""),
+        "student_name": initial_core.get("student_name", ""),
+        "lesson_location": lesson_location or initial_core.get("lesson_location", ""),
+        "lesson_status": status,
+        "credit": initial_core.get("credit", "credit"),
+        "lesson_mode": initial_core.get("lesson_mode", "normal"),
+        "exit": "",
+    }
+    if duration_seconds > 0:
+        core["total_time"] = _format_scorm_total_time(duration_seconds)
+    else:
+        core["total_time"] = initial_core.get("total_time", "0000:00:00.00")
+
+    score_obj: dict[str, Any] = {
+        "min": "0",
+        "max": "100",
+    }
+    if score is not None:
+        score_obj["raw"] = str(score)
+    else:
+        score_obj["raw"] = initial_core.get("score", {}).get("raw", "")
+    core["score"] = score_obj
+
+    cmi: dict[str, Any] = {
+        "comments": initial_cmi.get("comments", ""),
+        "core": core,
+        "suspend_data": suspend_data_json or initial_cmi.get("suspend_data", ""),
+    }
+    return cmi
+
+
+def _parse_scorm_launch_url(url: str) -> dict[str, str]:
+    """从 SCORM launch URL 解析 Moodle 运行时参数。
+
+    返回 dict，包含 subdomain, a, scoid, course, sesskey, attempt。
+    """
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        raise ValueError("launch url 缺少 host")
+
+    parts = parsed.hostname.split(".")
+    subdomain = parts[0] if parts else ""
+
+    path_parts = parsed.path.strip("/").split("/")
+    # 期望路径: /scorm/{a}/launch/{scoid}/course/{course}/element/{base64_id}
+    if (
+        len(path_parts) >= 7
+        and path_parts[0] == "scorm"
+        and path_parts[2] == "launch"
+        and path_parts[4] == "course"
+        and path_parts[6] == "element"
+    ):
+        params: dict[str, str] = {
+            "a": path_parts[1],
+            "scoid": path_parts[3],
+            "course": path_parts[5],
+        }
+    else:
+        params = {}
+
+    qs = parse_qs(parsed.query)
+    params.update({k: v[0] for k, v in qs.items()})
+    params.setdefault("attempt", "1")
+    params["subdomain"] = subdomain
+
+    required = ["a", "scoid", "course", "sesskey"]
+    missing = [k for k in required if not params.get(k)]
+    if missing:
+        raise ValueError(f"launch url 缺少必要参数: {missing}")
+
+    return params
+
+
+def _post_scorm_datamodel(
+    client: UMUClient,
+    launch_params: dict[str, str],
+    extra_fields: dict[str, str],
+) -> str:
+    """向 Moodle datamodel.php 提交一条 CMI 记录。
+
+    datamodel.php 返回 text/plain，成功时以 true 开头，因此不能复用 client.post。
+    """
+    url = f'https://{launch_params["subdomain"]}.m.umu.cn/mod/scorm/datamodel.php'
+    form: dict[str, str] = {
+        "id": "",
+        "a": launch_params["a"],
+        "sesskey": launch_params["sesskey"],
+        "attempt": launch_params.get("attempt", "1"),
+        "scoid": launch_params["scoid"],
+    }
+    form.update(extra_fields)
+
+    headers = client.auth.get_auth_headers()
+    headers["Content-Type"] = "application/x-www-form-urlencoded"
+
+    response = client.http.post(url, data=form, headers=headers, follow_redirects=False)
+    text = (response.text or "").strip()
+    if not text.startswith("true"):
+        raise RuntimeError(f"datamodel.php 提交失败 ({response.status_code}): {text[:200]}")
+    return text
+
+
+def _resolve_scorm_launch_params(
+    client: UMUClient,
+    element_id: str,
+    provided_url: str | None = None,
+) -> dict[str, Any]:
+    """解析 SCORM 启动参数。
+
+    优先使用调用方显式提供的 launch URL；否则尝试从 element 详情中查找 launch URL。
+    若检测到 UMU 自研 SCORM wrapper（非 Moodle），则返回 wrapper 运行时信息。
+    自动发现失败时抛出 ValueError。
+    """
+    if provided_url:
+        return _parse_scorm_launch_url(provided_url)
+
+    # 1. 尝试从 element 详情中读取 launch 相关字段
+    share_url = ""
+    try:
+        r = client.get(client.desktop_url(f"/uapi/v1/element/{element_id}"))
+        element_data = r.get("data", {}) or {}
+        setup = element_data.get("setup", {}) or {}
+
+        for key in ("scorm_launch_url", "launch_url", "resource_url"):
+            url = element_data.get(key) or setup.get(key)
+            if url and "scorm" in url:
+                return _parse_scorm_launch_url(str(url))
+
+        share_url = element_data.get("share_url") or setup.get("share_url")
+        # 2. 跟踪 share_url 重定向，看是否会落到 Moodle launch URL
+        if share_url:
+            headers = client.auth.get_auth_headers()
+            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            resp = client.http.get(share_url, headers=headers, follow_redirects=False)
+            if resp.status_code in (301, 302, 307, 308):
+                location = resp.headers.get("location", "")
+                if "scorm" in location and "launch" in location:
+                    return _parse_scorm_launch_url(location)
+    except Exception as e:
+        print(f"[_resolve_scorm_launch_params] Moodle 自动发现失败: {e}", file=sys.stderr)
+
+    # 3. 尝试 UMU 自研 SCORM wrapper
+    if share_url:
+        try:
+            return _extract_uscorm_runtime(client, element_id, share_url)
+        except Exception as e:
+            print(f"[_resolve_scorm_launch_params] UMU wrapper 自动发现失败: {e}", file=sys.stderr)
+
+    raise ValueError("无法自动发现 SCORM 启动参数，请提供 scorm_launch_url")
+
+
 # ---------------------------------------------------------------------------
 # Tools: 认证
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
-async def stu_login(
-    username: Annotated[str, Field(description="用户名/邮箱/手机号")],
-    password: Annotated[str, Field(description="明文密码，服务端会自动加密")],
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，在指定会话中登录；如果不提供，在默认会话中登录。",
-        ),
-    ] = None,
-) -> str:
-    """使用用户名密码登录 UMU 学习平台.
 
-    触发条件：当用户需要登录或当前认证已过期时调用。
-    前置依赖：无。
-    副作用：会设置认证 Token，后续 Tool 可以使用相同 session_id 复用此 Token。
-    """
-    client = _get_client(session_id)
-    try:
-        token = client.login(username, password)
-        # 更新会话用户名与来源
-        if session_id and _session_manager:
-            s = _session_manager.get_session_sync(session_id)
-            if s:
-                s.username = username
-                s.credential_source = CredentialSource.EXPLICIT.value
-        # 登录后获取用户/企业身份信息
-        identity = get_login_identity(client)
-        return _ok(
-            data={
-                "token": token,
-                "session_id": session_id,
-                "credential_source": CredentialSource.EXPLICIT.value,
-                **identity,
-            },
-            next_action="proceed",
-            suggested_action=(
-                f"已登录到企业「{identity.get('enterprise_name') or identity.get('enterprise_id', '')}」，"
-                "现在可以调用其他学习相关 Tool"
-            ),
-        )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_FAILED",
-            error_message=str(e),
-            suggested_action="检查用户名密码是否正确，或稍后重试",
-        )
+mcp.tool()(
+    make_login_tool(
+        _STUDENT_SESSION_CONFIG,
+        get_client=_get_client,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def stu_check_auth(
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，检查指定会话的认证状态；如果不提供，检查默认会话。",
-        ),
-    ] = None,
-) -> str:
-    """检查当前是否已认证.
-
-    触发条件：在执行学习操作前，确认当前登录状态。
-    前置依赖：无。
-    副作用：无。
-    """
-    client = _get_client(session_id)
-    try:
-        is_auth = client.auth.is_authenticated()
-        token = client.auth.get_token()
-        if is_auth and token:
-            return _ok(
-                data={
-                    "is_authenticated": True,
-                    "token_preview": token[:20] + "...",
-                },
-                next_action="proceed",
-                suggested_action="当前已登录，可以正常调用学习相关 Tool",
-            )
-        else:
-            return _err(
-                error_code="NOT_AUTHENTICATED",
-                error_message="当前未登录或 Token 已过期",
-                suggested_action="调用 stu_login 重新登录",
-            )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_CHECK_FAILED",
-            error_message=str(e),
-            suggested_action="调用 stu_login 重新登录",
-        )
+mcp.tool()(
+    make_check_auth_tool(
+        _STUDENT_SESSION_CONFIG,
+        get_client=_get_client,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -726,8 +1006,11 @@ async def stu_get_course_structure(
                     lesson["questions_preview"] = exam_preview
                 except Exception:
                     pass
-        elif etype == 11:  # 视频
-            lesson["completion_type"] = "browse"
+        elif etype == 11:  # 微课 / SCORM / H5
+            if setup.get("content_type") == "scorm":
+                lesson["completion_type"] = "scorm"
+            else:
+                lesson["completion_type"] = "browse"
         elif etype == 13:  # 文章
             lesson["completion_type"] = "browse"
         elif etype == 14:  # 文档
@@ -858,6 +1141,27 @@ async def stu_get_my_courses(
         bool,
         Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
     ] = False,
+    fuzzy_title: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的课程标题模糊匹配关键词。提供时会自动获取全量列表"
+            "并筛选最匹配的候选，返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -919,8 +1223,10 @@ async def stu_get_my_courses(
 
         raise RuntimeError(f"无法获取课程列表: {last_error}")
 
+    effective_fetch_all = fetch_all or bool(fuzzy_title and fuzzy_title.strip())
+
     try:
-        if fetch_all:
+        if effective_fetch_all:
             batch_size = 50
             all_courses: list[dict[str, Any]] = []
             total_all = 0
@@ -965,12 +1271,22 @@ async def stu_get_my_courses(
 
                 current_page += 1
 
+            result_courses = all_courses
+            if fuzzy_title and fuzzy_title.strip():
+                result_courses = fuzzy_filter_items(
+                    all_courses,
+                    fuzzy_title,
+                    key="title",
+                    top_k=top_k,
+                    similarity_threshold=similarity_threshold,
+                )
+
             return _ok(
                 data={
-                    "total": total_all,
+                    "total": len(result_courses),
                     "page": current_page,
                     "page_size": batch_size,
-                    "courses": all_courses,
+                    "courses": result_courses,
                 },
                 next_action="proceed",
                 suggested_action="选择要学习的课程，调用 stu_get_course_structure 获取详情",
@@ -1087,7 +1403,7 @@ async def stu_browse_lesson(
             extras["playing"] = {"left_time": str(duration_seconds)}
             extras["achieve"] = {"left_time": str(duration_seconds), "vlt_status": "1"}
 
-        _makeweikestatus_sequence(client, element_id, extras)
+        await _makeweikestatus_sequence(client, element_id, extras)
         return _ok(
             data={"element_id": element_id, "action": "browse_completed"},
             next_action="proceed",
@@ -1098,6 +1414,205 @@ async def stu_browse_lesson(
             error_code="BROWSE_FAILED",
             error_message=str(e),
             suggested_action="检查 element_id 是否正确",
+        )
+
+
+@mcp.tool()
+async def stu_complete_scorm_section(
+    element_id: Annotated[str, Field(description="小节元素 ID，来自 stu_get_course_structure 的 element_id")],
+    group_id: Annotated[
+        str,
+        Field(default="", description="课程组 ID（可选），用于完成后验证进度"),
+    ] = "",
+    status: Annotated[
+        str,
+        Field(
+            default="passed",
+            description='SCORM 1.2 cmi.core.lesson_status，可选 passed/completed/failed/incomplete/browsed',
+        ),
+    ] = "passed",
+    score: Annotated[
+        int | None,
+        Field(default=None, description="得分 0-100，提交到 cmi.core.score.raw"),
+    ] = None,
+    duration_seconds: Annotated[
+        int,
+        Field(
+            default=0,
+            description="本次学习时长（秒），格式化为 HHHH:MM:SS.SS 提交到 cmi.core.total_time",
+        ),
+    ] = 0,
+    lesson_location: Annotated[
+        str,
+        Field(default="", description="可选：写入 cmi.core.lesson_location"),
+    ] = "",
+    suspend_data_json: Annotated[
+        str,
+        Field(default="", description="高级：自定义 cmi.suspend_data JSON 字符串"),
+    ] = "",
+    interactions_json: Annotated[
+        str,
+        Field(default="", description="高级：自定义 cmi.interactions 数组 JSON 字符串"),
+    ] = "",
+    scorm_launch_url: Annotated[
+        str,
+        Field(
+            default="",
+            description="可选：完整的 SCORM launch URL。自动发现失败时作为兜底",
+        ),
+    ] = "",
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；否则使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """完成 SCORM 1.2 格式小节。
+
+    触发条件：当 stu_get_course_structure 返回 completion_type=scorm 时调用。
+    前置依赖：学员已登录，且小节类型为 SCORM。
+    副作用：向 Moodle 或 UMU 自研 SCORM wrapper 提交 CMI 数据，可能改变学习状态。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="请先调用 stu_login 登录",
+            next_action="needs_user_input",
+        )
+
+    # 1. 校验元素类型
+    try:
+        r = client.get(client.desktop_url(f"/uapi/v1/element/{element_id}"))
+        element_data = r.get("data", {}) or {}
+        if element_data.get("type") != 11:
+            return _err(
+                error_code="INVALID_SECTION_TYPE",
+                error_message=f'小节类型不是 SCORM/H5：type={element_data.get("type")}',
+                suggested_action="请确认 element_id 对应 SCORM 小节",
+                next_action="needs_user_input",
+            )
+        setup = element_data.get("setup", {}) or {}
+        if setup.get("content_type") != "scorm":
+            return _err(
+                error_code="INVALID_SECTION_TYPE",
+                error_message="小节不是 SCORM 类型（setup.content_type != scorm）",
+                suggested_action="请使用 stu_browse_lesson 完成普通微课/视频小节",
+                next_action="needs_user_input",
+            )
+    except Exception as e:
+        return _err(
+            error_code="ELEMENT_FETCH_FAILED",
+            error_message=str(e),
+            suggested_action="检查 element_id 是否正确",
+            next_action="needs_user_input",
+        )
+
+    # 2. 解析 SCORM 启动参数
+    try:
+        launch_params = _resolve_scorm_launch_params(
+            client, element_id, provided_url=scorm_launch_url or None
+        )
+    except Exception as e:
+        return _err(
+            error_code="SCORM_LAUNCH_RESOLVE_FAILED",
+            error_message=str(e),
+            suggested_action="请提供 scorm_launch_url，或确认学员有权限访问该小节",
+            next_action="needs_user_input",
+        )
+
+    # 3. 初始化 makeweikestatus 状态机
+    try:
+        await _makeweikestatus_sequence(client, element_id)
+    except Exception as e:
+        print(f"[stu_complete_scorm_section] makeweikestatus 失败: {e}", file=sys.stderr)
+
+    # 4. 提交 CMI 字段
+    try:
+        if launch_params.get("mode") == "umu_wrapper":
+            if interactions_json:
+                print(
+                    "[stu_complete_scorm_section] UMU wrapper 暂不支持 interactions_json，已忽略",
+                    file=sys.stderr,
+                )
+            cmi = _build_uscorm_12_cmi(
+                launch_params,
+                status=status,
+                score=score,
+                duration_seconds=duration_seconds,
+                lesson_location=lesson_location,
+                suspend_data_json=suspend_data_json,
+            )
+            _post_uscorm_commit(client, launch_params, cmi)
+            # 空 commit，模拟 LMSCommit("")
+            _post_uscorm_commit(client, launch_params, {})
+        else:
+            extra: dict[str, str] = {"cmi__core__lesson_status": status}
+            if score is not None:
+                extra["cmi__core__score__raw"] = str(score)
+                extra["cmi__core__score__min"] = "0"
+                extra["cmi__core__score__max"] = "100"
+            if duration_seconds > 0:
+                extra["cmi__core__total_time"] = _format_scorm_total_time(duration_seconds)
+            if lesson_location:
+                extra["cmi__core__lesson_location"] = lesson_location
+            if suspend_data_json:
+                extra["cmi__suspend_data"] = suspend_data_json
+
+            if interactions_json:
+                try:
+                    interactions = json.loads(interactions_json)
+                    for idx, interaction in enumerate(interactions):
+                        prefix = f"cmi__interactions_{idx}"
+                        for field in ("id", "type", "student_response", "result", "latency", "time"):
+                            val = interaction.get(field)
+                            if val is not None:
+                                extra[f"{prefix}__{field}"] = str(val)
+                except Exception as e:
+                    return _err(
+                        error_code="INVALID_INTERACTIONS_JSON",
+                        error_message=f"interactions_json 解析失败: {e}",
+                        suggested_action="请提供合法的 JSON 数组",
+                        next_action="needs_user_input",
+                    )
+
+            _post_scorm_datamodel(client, launch_params, extra)
+            # 空 commit，模拟 LMSCommit("")
+            _post_scorm_datamodel(client, launch_params, {})
+    except Exception as e:
+        return _err(
+            error_code="SCORM_DATAMODEL_ERROR",
+            error_message=str(e),
+            suggested_action="检查 scorm_launch_url 是否有效，或稍后重试",
+            next_action="retry",
+        )
+
+    # 5. 验证小节状态
+    try:
+        status_result = await stu_get_lesson_status(element_id, group_id, session_id)
+        parsed = json.loads(status_result)
+        if parsed.get("success") and parsed.get("data", {}).get("is_completed"):
+            return _ok(
+                data=parsed["data"],
+                next_action="lesson_completed",
+                suggested_action="小节已完成",
+            )
+        return _ok(
+            data=parsed.get("data"),
+            next_action="proceed",
+            suggested_action="已提交 SCORM 数据，请稍后再次确认完成状态",
+        )
+    except Exception as e:
+        return _err(
+            error_code="STATUS_CHECK_ERROR",
+            error_message=str(e),
+            suggested_action="已提交数据，但状态验证失败，请稍后调用 stu_get_lesson_status 检查",
+            next_action="retry",
         )
 
 
@@ -1710,7 +2225,7 @@ async def stu_submit_questionnaire(
             )
 
         # 3. 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={"element_id": element_id, "submit_id": submit_id},
@@ -1872,7 +2387,7 @@ async def stu_submit_questionnaire_with_config(
             )
 
         # 7. 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={
@@ -1925,7 +2440,7 @@ async def stu_check_in(
                 {"q": json.dumps(q_payload, ensure_ascii=False)},
             )
         except Exception as e:
-            print(f"[stu_check_in] insertAnswer 失败（非致命）: {e}")
+            logger.warning(f"[stu_check_in] insertAnswer 失败（非致命）: {e}")
 
         # 调用 insertWxAnswer（备选）
         try:
@@ -1938,10 +2453,10 @@ async def stu_check_in(
                 },
             )
         except Exception as e:
-            print(f"[stu_check_in] insertWxAnswer 失败（非致命）: {e}")
+            logger.warning(f"[stu_check_in] insertWxAnswer 失败（非致命）: {e}")
 
         # 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={"element_id": element_id, "action": "checkin_completed"},
@@ -2023,10 +2538,10 @@ async def stu_check_in_with_rating(
                 {"q": json.dumps(q_payload, ensure_ascii=False)},
             )
         except Exception as e:
-            print(f"[stu_check_in_with_rating] insertAnswer 失败（非致命）: {e}")
+            logger.warning(f"[stu_check_in_with_rating] insertAnswer 失败（非致命）: {e}")
 
         # 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={"element_id": element_id, "rating": rating},
@@ -2377,8 +2892,8 @@ async def stu_submit_exam_with_config(
                     },
                 )
             except Exception as e:
-                print(f"[stu_submit_exam_with_config] saveAnswer 失败（非致命）: {e}")
-            time.sleep(0.3)
+                logger.warning(f"[stu_submit_exam_with_config] saveAnswer 失败（非致命）: {e}")
+            await asyncio.sleep(0.3)
 
         # 10. 提交考试
         r = client.post(
@@ -2403,7 +2918,7 @@ async def stu_submit_exam_with_config(
             )
 
         # 11. 执行 makeweikestatus 序列
-        _makeweikestatus_sequence(client, element_id)
+        await _makeweikestatus_sequence(client, element_id)
 
         return _ok(
             data={
@@ -2550,120 +3065,35 @@ async def stu_get_lesson_status(
 # Tools: 会话管理
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
-async def stu_create_session(
-    username: Annotated[
-        str | None,
-        Field(default=None, description="可选用户名，如果提供则尝试自动登录"),
-    ] = None,
-    password: Annotated[
-        str | None,
-        Field(default=None, description="可选密码"),
-    ] = None,
-) -> str:
-    """创建新的独立会话.
 
-    触发条件：当需要为不同用户创建隔离的登录环境时调用。
-    前置依赖：无。
-    副作用：创建独立会话，拥有独立的 Cookie 和 Token。
-
-    每个会话拥有独立的 UMUClient 实例（含独立的 httpx.Client），
-    确保多用户并发使用时登录状态互不干扰。
-    """
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INITIALIZED",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        session = await _session_manager.create_session(username, password)
-        return _ok(
-            data={
-                "session_id": session.session_id,
-                "username": session.username,
-                "is_authenticated": session.client.auth.is_authenticated(),
-                "created_at": session.created_at,
-            },
-            next_action="proceed",
-            suggested_action="保存 session_id，后续调用 tool 时传入此参数",
-        )
-    except Exception as e:
-        return _err(
-            error_code="CREATE_SESSION_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_create_session_tool(
+        _STUDENT_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def stu_list_sessions() -> str:
-    """列出所有活跃会话.
-
-    触发条件：需要查看当前有哪些会话在使用中。
-    前置依赖：无。
-    副作用：无（只读查询）。
-    """
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INITIALIZED",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        sessions = await _session_manager.list_sessions()
-        return _ok(
-            data={
-                "count": len(sessions),
-                "sessions": [
-                    {
-                        "session_id": s.session_id,
-                        "username": s.username,
-                        "is_authenticated": s.is_authenticated,
-                        "created_at": s.created_at,
-                        "last_used_at": s.last_used_at,
-                    }
-                    for s in sessions
-                ],
-            },
-            next_action="proceed",
-        )
-    except Exception as e:
-        return _err(
-            error_code="LIST_SESSIONS_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_list_sessions_tool(
+        _STUDENT_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def stu_destroy_session(
-    session_id: Annotated[str, Field(description="要销毁的会话 ID")],
-) -> str:
-    """销毁指定会话.
-
-    触发条件：会话不再需要使用，或需要释放资源时调用。
-    前置依赖：无。
-    副作用：关闭会话的客户端连接，释放资源。
-    """
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INITIALIZED",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        success = await _session_manager.destroy_session(session_id)
-        if success:
-            return _ok(
-                data={"session_id": session_id, "destroyed": True},
-                next_action="proceed",
-            )
-        else:
-            return _err(
-                error_code="SESSION_NOT_FOUND",
-                error_message=f"会话不存在: {session_id}",
-            )
-    except Exception as e:
-        return _err(
-            error_code="DESTROY_SESSION_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_destroy_session_tool(
+        _STUDENT_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -2844,7 +3274,7 @@ async def stu_complete_course(
                         error_message=f"课程需要报名但报名失败: {r.get('message', '未知错误')}",
                         data={"details": details},
                     )
-                time.sleep(1)
+                await asyncio.sleep(1)
             except Exception as e:
                 details.append({"action": "enroll", "success": False, "error": str(e)})
                 return _err(
@@ -2972,7 +3402,7 @@ async def stu_complete_course(
 
             try:
                 if etype in (11, 13, 15):  # 视频/文章/图文
-                    _makeweikestatus_sequence(client, eid)
+                    await _makeweikestatus_sequence(client, eid)
                     lesson_detail["action"] = "browse"
                     lesson_detail["success"] = True
                     completed += 1
@@ -2984,7 +3414,7 @@ async def stu_complete_course(
                     if vlt_min:
                         extras["playing"] = {"left_time": str(vlt_min)}
                         extras["achieve"] = {"left_time": str(vlt_min), "vlt_status": "1"}
-                    _makeweikestatus_sequence(client, eid, extras)
+                    await _makeweikestatus_sequence(client, eid, extras)
                     lesson_detail["action"] = "browse"
                     lesson_detail["success"] = True
                     completed += 1
@@ -3003,7 +3433,7 @@ async def stu_complete_course(
                         client.mobile_url("/ajax/insertAnswer"),
                         {"q": json.dumps(q_payload, ensure_ascii=False)},
                     )
-                    _makeweikestatus_sequence(client, eid)
+                    await _makeweikestatus_sequence(client, eid)
                     lesson_detail["action"] = "checkin_with_rating" if advance == "1" else "checkin"
                     lesson_detail["success"] = True
                     completed += 1
@@ -3058,7 +3488,7 @@ async def stu_complete_course(
                         if r.get("error_code") != 0:
                             raise RuntimeError(f"提交问卷失败: {r.get('message', '')}")
 
-                        _makeweikestatus_sequence(client, eid)
+                        await _makeweikestatus_sequence(client, eid)
                         lesson_detail["success"] = True
                         completed += 1
                     elif not skip_questionnaire:
@@ -3132,7 +3562,7 @@ async def stu_complete_course(
                                 )
                             except Exception:
                                 pass
-                            time.sleep(0.3)
+                            await asyncio.sleep(0.3)
 
                         # 提交考试
                         r = client.post(
@@ -3151,7 +3581,7 @@ async def stu_complete_course(
                         ).lower():
                             raise RuntimeError(f"提交考试失败: {r.get('message', '')}")
 
-                        _makeweikestatus_sequence(client, eid)
+                        await _makeweikestatus_sequence(client, eid)
                         lesson_detail["success"] = True
                         completed += 1
                     elif not skip_exam:
@@ -3165,7 +3595,7 @@ async def stu_complete_course(
                 lesson_detail["error"] = str(e)
 
             details.append(lesson_detail)
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
 
         # 检查最终进度
         try:
@@ -3356,7 +3786,9 @@ async def stu_batch_complete_course(
     # 定义批量任务函数
     async def complete_course_task(client: UMUClient, course_id: str) -> dict[str, Any]:
         """单个账号的课程完成逻辑."""
-        nonlocal q_answers_map, e_answers_map
+        # 复制外部 map，避免并发任务共享修改同一字典
+        local_q_answers_map = dict(q_answers_map) if q_answers_map else {}
+        local_e_answers_map = dict(e_answers_map) if e_answers_map else {}
         details: list[dict[str, Any]] = []
         completed = 0
         total = 0
@@ -3374,7 +3806,7 @@ async def stu_batch_complete_course(
                         {"enroll_id": str(enroll_id)},
                     )
                     details.append({"action": "enroll", "success": r.get("error_code") == 0})
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                 except Exception as e:
                     details.append({"action": "enroll", "success": False, "error": str(e)})
 
@@ -3411,9 +3843,7 @@ async def stu_batch_complete_course(
                             try:
                                 idx = int(idx_str)
                                 if idx in q_index_to_id:
-                                    if q_answers_map is None:
-                                        q_answers_map = {}
-                                    q_answers_map[q_index_to_id[idx]] = cfg
+                                    local_q_answers_map[q_index_to_id[idx]] = cfg
                             except ValueError:
                                 pass
                 except json.JSONDecodeError:
@@ -3426,9 +3856,7 @@ async def stu_batch_complete_course(
                             try:
                                 idx = int(idx_str)
                                 if idx in e_index_to_id:
-                                    if e_answers_map is None:
-                                        e_answers_map = {}
-                                    e_answers_map[e_index_to_id[idx]] = cfg
+                                    local_e_answers_map[e_index_to_id[idx]] = cfg
                             except ValueError:
                                 pass
                 except json.JSONDecodeError:
@@ -3459,7 +3887,7 @@ async def stu_batch_complete_course(
                 cfg, cfg_source = _resolve_lesson_answers_config(
                     lesson_idx, eid, etype,
                     lesson_answers_map,
-                    q_answers_map, e_answers_map,
+                    local_q_answers_map, local_e_answers_map,
                     questionnaire_answers, exam_answers,
                 )
 
@@ -3475,7 +3903,7 @@ async def stu_batch_complete_course(
 
                 try:
                     if etype in (11, 13, 15):  # 视频/文章/图文
-                        _makeweikestatus_sequence(client, eid)
+                        await _makeweikestatus_sequence(client, eid)
                         lesson_detail["action"] = "browse"
                         lesson_detail["success"] = True
                         completed += 1
@@ -3487,7 +3915,7 @@ async def stu_batch_complete_course(
                         if vlt_min:
                             extras["playing"] = {"left_time": str(vlt_min)}
                             extras["achieve"] = {"left_time": str(vlt_min), "vlt_status": "1"}
-                        _makeweikestatus_sequence(client, eid, extras)
+                        await _makeweikestatus_sequence(client, eid, extras)
                         lesson_detail["action"] = "browse"
                         lesson_detail["success"] = True
                         completed += 1
@@ -3506,7 +3934,7 @@ async def stu_batch_complete_course(
                             client.mobile_url("/ajax/insertAnswer"),
                             {"q": json.dumps(q_payload, ensure_ascii=False)},
                         )
-                        _makeweikestatus_sequence(client, eid)
+                        await _makeweikestatus_sequence(client, eid)
                         if advance == "1":
                             lesson_detail["action"] = "checkin_with_rating"
                         else:
@@ -3564,7 +3992,7 @@ async def stu_batch_complete_course(
                             if r.get("error_code") != 0:
                                 raise RuntimeError(f"提交问卷失败: {r.get('message', '')}")
 
-                            _makeweikestatus_sequence(client, eid)
+                            await _makeweikestatus_sequence(client, eid)
                             lesson_detail["success"] = True
                             completed += 1
 
@@ -3647,7 +4075,7 @@ async def stu_batch_complete_course(
                                     )
                                 except Exception:
                                     pass
-                                time.sleep(0.3)
+                                await asyncio.sleep(0.3)
 
                             # 提交考试
                             r = client.post(
@@ -3668,7 +4096,7 @@ async def stu_batch_complete_course(
                                     f"提交考试失败: {r.get('message', '')}"
                                 )
 
-                            _makeweikestatus_sequence(client, eid)
+                            await _makeweikestatus_sequence(client, eid)
                             lesson_detail["success"] = True
                             completed += 1
 
@@ -3683,7 +4111,7 @@ async def stu_batch_complete_course(
                     lesson_detail["error"] = str(e)
 
                 details.append(lesson_detail)
-                time.sleep(0.5)  # 小节间延迟
+                await asyncio.sleep(0.5)  # 小节间延迟
 
             return {
                 "completed_lessons": completed,
@@ -3748,6 +4176,27 @@ async def stu_list_participated_courses(
         bool,
         Field(default=False, description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。"),
     ] = False,
+    fuzzy_title: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的课程标题模糊匹配关键词。提供时会自动获取全量列表"
+            "并筛选最匹配的候选，返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(default=None, description="可选的会话 ID"),
@@ -3801,7 +4250,7 @@ async def stu_list_participated_courses(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取已参与课程列表失败"))
 
         data = resp.get("data", {})
@@ -3812,8 +4261,10 @@ async def stu_list_participated_courses(
         total_all = int(page_info.get("list_total_num", 0) or 0)
         return formatted_list, total_all
 
+    effective_fetch_all = fetch_all or bool(fuzzy_title and fuzzy_title.strip())
+
     try:
-        if fetch_all:
+        if effective_fetch_all:
             batch_size = 50
             all_items: list[dict[str, Any]] = []
             total_all = 0
@@ -3855,9 +4306,19 @@ async def stu_list_participated_courses(
 
                 current_page += 1
 
+            result_items = all_items
+            if fuzzy_title and fuzzy_title.strip():
+                result_items = fuzzy_filter_items(
+                    all_items,
+                    fuzzy_title,
+                    key="title",
+                    top_k=top_k,
+                    similarity_threshold=similarity_threshold,
+                )
+
             return _ok(
                 data={
-                    "courses": all_items,
+                    "courses": result_items,
                     "filter": {
                         "learn_status": learn_status,
                         "learn_status_label": status_map.get(learn_status, "unknown"),
@@ -3937,39 +4398,39 @@ def main() -> None:
     """MCP 服务入口."""
     import asyncio
 
-    print("=" * 60)
-    print("UMU 学员端 MCP Server")
-    print("=" * 60)
-    print()
-    print("支持的传输方式:")
-    print("  - stdio:  标准输入输出（推荐用于本地 AI 助手）")
-    print()
-    print("环境变量:")
-    print("  UMU_BASE_URL         - UMU 基础 URL（默认: https://www.umu.cn）")
-    print("  UMU_STUDENT_USERNAME - 学生登录用户名")
-    print("  UMU_STUDENT_PASSWORD - 学生登录密码")
-    print()
-    print("可用 Tools:")
-    print("  认证: stu_login, stu_check_auth")
-    print("  会话: stu_create_session, stu_list_sessions, stu_destroy_session")
-    print("  解析: stu_resolve_course_url")
-    print("  查结构: stu_get_my_courses, stu_list_participated_courses,")
-    print("          stu_get_course_structure, stu_get_learning_progress")
-    print("  操作: stu_enroll_course, stu_browse_lesson,")
-    print("        stu_get_questionnaire_questions, stu_submit_questionnaire,")
-    print("        stu_check_in, stu_check_in_with_rating,")
-    print("        stu_start_exam, stu_submit_exam")
-    print("  批量: stu_batch_import_accounts, stu_batch_complete_course")
-    print("  完成: stu_complete_course")
-    print("  验证: stu_get_lesson_status")
-    print("  讲师端: 请使用 umu-mcp-teacher")
-    print()
-    print("可用 Prompts:")
-    print("  - stu_course_completion_workflow")
-    print("  - stu_lesson_type_guide")
-    print("  - stu_error_recovery_guide")
-    print("  - stu_exam_workflow_guide")
-    print()
+    print("=" * 60, file=sys.stderr)
+    print("UMU 学员端 MCP Server", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    print(file=sys.stderr)
+    print("支持的传输方式:", file=sys.stderr)
+    print("  - stdio:  标准输入输出（推荐用于本地 AI 助手）", file=sys.stderr)
+    print(file=sys.stderr)
+    print("环境变量:", file=sys.stderr)
+    print("  UMU_BASE_URL         - UMU 基础 URL（默认: https://www.umu.cn）", file=sys.stderr)
+    print("  UMU_STUDENT_USERNAME - 学生登录用户名", file=sys.stderr)
+    print("  UMU_STUDENT_PASSWORD - 学生登录密码", file=sys.stderr)
+    print(file=sys.stderr)
+    print("可用 Tools:", file=sys.stderr)
+    print("  认证: stu_login, stu_check_auth", file=sys.stderr)
+    print("  会话: stu_create_session, stu_list_sessions, stu_destroy_session", file=sys.stderr)
+    print("  解析: stu_resolve_course_url", file=sys.stderr)
+    print("  查结构: stu_get_my_courses, stu_list_participated_courses,", file=sys.stderr)
+    print("          stu_get_course_structure, stu_get_learning_progress", file=sys.stderr)
+    print("  操作: stu_enroll_course, stu_browse_lesson,", file=sys.stderr)
+    print("        stu_get_questionnaire_questions, stu_submit_questionnaire,", file=sys.stderr)
+    print("        stu_check_in, stu_check_in_with_rating,", file=sys.stderr)
+    print("        stu_start_exam, stu_submit_exam", file=sys.stderr)
+    print("  批量: stu_batch_import_accounts, stu_batch_complete_course", file=sys.stderr)
+    print("  完成: stu_complete_course", file=sys.stderr)
+    print("  验证: stu_get_lesson_status", file=sys.stderr)
+    print("  讲师端: 请使用 umu-mcp-teacher", file=sys.stderr)
+    print(file=sys.stderr)
+    print("可用 Prompts:", file=sys.stderr)
+    print("  - stu_course_completion_workflow", file=sys.stderr)
+    print("  - stu_lesson_type_guide", file=sys.stderr)
+    print("  - stu_error_recovery_guide", file=sys.stderr)
+    print("  - stu_exam_workflow_guide", file=sys.stderr)
+    print(file=sys.stderr)
 
     transport = os.getenv("MCP_TRANSPORT", "stdio")
 
@@ -3978,8 +4439,8 @@ def main() -> None:
     elif transport == "sse":
         asyncio.run(mcp.run_sse_async())
     else:
-        print(f"不支持的传输方式: {transport}")
-        print("支持: stdio, sse")
+        print(f"不支持的传输方式: {transport}", file=sys.stderr)
+        print("支持: stdio, sse", file=sys.stderr)
 
 
 if __name__ == "__main__":

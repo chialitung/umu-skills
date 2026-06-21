@@ -130,6 +130,69 @@ async def complete_browse_lesson(
 
 
 @skill(
+    name="complete_scorm_section",
+    description="完成 SCORM 1.2 小节，支持状态、得分、学习时长",
+    required_servers=["student"],
+    return_description="SCORM 小节完成结果",
+)
+async def complete_scorm_section(
+    ctx: SkillContext,
+    element_id: str,
+    group_id: str = "",
+    status: str = "passed",
+    score: int | None = None,
+    duration_seconds: int = 0,
+    lesson_location: str = "",
+    suspend_data_json: str = "",
+    interactions_json: str = "",
+    scorm_launch_url: str = "",
+) -> dict[str, Any]:
+    """完成 SCORM 1.2 格式小节。"""
+    arguments: dict[str, Any] = {"element_id": element_id}
+    if group_id:
+        arguments["group_id"] = group_id
+    if status != "passed":
+        arguments["status"] = status
+    if score is not None:
+        arguments["score"] = score
+    if duration_seconds > 0:
+        arguments["duration_seconds"] = duration_seconds
+    if lesson_location:
+        arguments["lesson_location"] = lesson_location
+    if suspend_data_json:
+        arguments["suspend_data_json"] = suspend_data_json
+    if interactions_json:
+        arguments["interactions_json"] = interactions_json
+    if scorm_launch_url:
+        arguments["scorm_launch_url"] = scorm_launch_url
+
+    result = await ctx.call_tool(
+        server="student",
+        tool="stu_complete_scorm_section",
+        arguments=arguments,
+    )
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "SCORM_COMPLETE_FAILED",
+            "error_message": result.get("error_message") or "SCORM 小节完成失败",
+            "suggested_action": "请确认 element_id 与 scorm_launch_url 正确",
+            "next_action": "needs_user_input",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
+@skill(
     name="complete_checkin",
     description="完成签到小节",
     required_servers=["student"],
@@ -251,6 +314,7 @@ __all__ = [
     "resolve_course_identifier",
     "list_my_courses_student",
     "complete_browse_lesson",
+    "complete_scorm_section",
     "complete_checkin",
     "complete_rating_checkin",
     "check_lesson_completion",

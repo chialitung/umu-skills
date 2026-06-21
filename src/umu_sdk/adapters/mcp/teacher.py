@@ -46,8 +46,14 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ...core.client import UMUClient
-from ...core.credential_loader import CredentialSource, load_credentials_with_source
-from .utils import format_login_summary, get_login_identity, report_pagination_progress
+from ...core.credential_loader import load_credentials_with_source
+from .utils import (
+    format_login_summary,
+    fuzzy_filter_items,
+    fuzzy_filter_items_multi_key,
+    get_login_identity,
+    report_pagination_progress,
+)
 from .cos_upload import (
     ScormUploader,
     UploadResult,
@@ -59,11 +65,33 @@ from .document_upload import (
     validate_document_path,
 )
 from .image_upload import ImageUploader
+from .program_builder import ProgramBuilder
+from .program_student_manager import ProgramStudentManager
 from .session import SessionManager
 from .video_upload import (
     VideoUploader,
     validate_video_path,
     VIDEO_MEDIA_TYPE,
+)
+from .shared_access_permissions import (
+    _add_obj_access_accounts,
+    _cancel_all_assigned_permissions,
+    _format_access_account,
+    _get_obj_access_list,
+    _get_obj_access_permission,
+    _parse_access_permission_response as _parse_collaboration_response,
+    _permission_text,
+    _remove_obj_access_accounts,
+    _search_access_permission_account,
+    _set_obj_access_permission,
+)
+from .shared_session_tools import (
+    SessionToolConfig,
+    make_check_auth_tool,
+    make_create_session_tool,
+    make_destroy_session_tool,
+    make_list_sessions_tool,
+    make_login_tool,
 )
 
 # ---------------------------------------------------------------------------
@@ -623,6 +651,20 @@ def _err(
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
+_TEACHER_SESSION_CONFIG = SessionToolConfig(
+    role="tch",
+    role_label="讲师",
+    tool_domain_hint="讲师端资源管理相关 Tool",
+    login_success_suffix="现在可以调用讲师端资源管理相关 Tool",
+    check_auth_success_suffix="讲师端 Tool",
+    create_session_suggested_action="使用此 session_id 调用 tch_login 登录",
+    create_session_with_password=False,
+    isoformat_timestamps=True,
+    session_manager_not_init_code="SESSION_MANAGER_NOT_INIT",
+    create_session_failed_code="SESSION_CREATE_FAILED",
+)
+
+
 # ---------------------------------------------------------------------------
 # 辅助函数
 # ---------------------------------------------------------------------------
@@ -661,7 +703,7 @@ def _find_document_by_name_size(
                 "status_str": "in_use,transcoding,wait_transcoding",
             },
         )
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             return None
 
         for item in resp.get("data", {}).get("list", []):
@@ -688,8 +730,6 @@ def _verify_resource_registered(
     Returns:
         True 如果确认注册成功，False 如果无法确认
     """
-    import time
-
     for attempt in range(max_attempts):
         try:
             # 方式 1: 通过 getresourceinfo 验证
@@ -851,19 +891,6 @@ def _upload_image_if_needed(
 # 课程协同辅助函数
 # ---------------------------------------------------------------------------
 
-def _parse_collaboration_response(resp: dict[str, Any]) -> tuple[bool, Any, str]:
-    """解析 UMU 协同接口响应.
-
-    UMU 接口在业务成功时 status=true/error_code=0，但顶层 success 可能为 false。
-    返回 (is_success, data_or_none, error_message)。
-    """
-    if not isinstance(resp, dict):
-        return False, None, "响应格式异常"
-    if resp.get("status") is True or resp.get("error_code") == 0:
-        return True, resp.get("data"), ""
-    return False, None, resp.get("error", "") or resp.get("error_message", "业务请求失败")
-
-
 _ROLE_TO_API: dict[str, str] = {
     "editor": "cooperator",
     "operator": "operator",
@@ -940,179 +967,61 @@ def _find_unique_account(
 # Tools: 认证
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
-async def tch_login(
-    username: Annotated[str, Field(description="用户名/邮箱/手机号")],
-    password: Annotated[str, Field(description="明文密码，服务端会自动加密")],
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，在指定会话中登录；如果不提供，在默认会话中登录。",
-        ),
-    ] = None,
-) -> str:
-    """使用用户名密码登录 UMU 平台（讲师账号）."""
-    client = _get_client(session_id)
-    try:
-        token = client.login(username, password)
-        # 更新会话用户名与来源
-        if session_id and _session_manager:
-            s = _session_manager.get_session_sync(session_id)
-            if s:
-                s.username = username
-                s.credential_source = CredentialSource.EXPLICIT.value
-        # 登录后获取用户/企业身份信息
-        identity = get_login_identity(client)
-        return _ok(
-            data={
-                "token": token,
-                "session_id": session_id,
-                "credential_source": CredentialSource.EXPLICIT.value,
-                **identity,
-            },
-            next_action="proceed",
-            suggested_action=(
-                f"已登录到企业「{identity.get('enterprise_name') or identity.get('enterprise_id', '')}」，"
-                "现在可以调用讲师端资源管理相关 Tool"
-            ),
-        )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_FAILED",
-            error_message=str(e),
-            suggested_action="检查用户名密码是否正确，或稍后重试",
-        )
+
+mcp.tool()(
+    make_login_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_client=_get_client,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def tch_check_auth(
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，检查指定会话的认证状态；如果不提供，检查默认会话。",
-        ),
-    ] = None,
-) -> str:
-    """检查当前是否已认证."""
-    client = _get_client(session_id)
-    try:
-        is_auth = client.auth.is_authenticated()
-        token = client.auth.get_token()
-        if is_auth and token:
-            return _ok(
-                data={"is_authenticated": True, "token_preview": token[:20] + "..."},
-                next_action="proceed",
-                suggested_action="当前已登录，可以正常调用讲师端 Tool",
-            )
-        else:
-            return _err(
-                error_code="NOT_AUTHENTICATED",
-                error_message="当前未登录或 Token 已过期",
-                suggested_action="调用 tch_login 重新登录",
-            )
-    except Exception as e:
-        return _err(
-            error_code="AUTH_CHECK_FAILED",
-            error_message=str(e),
-            suggested_action="调用 tch_login 重新登录",
-        )
+mcp.tool()(
+    make_check_auth_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_client=_get_client,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
 # ---------------------------------------------------------------------------
 # Tools: 会话管理
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
-async def tch_create_session(
-    username: Annotated[
-        str | None,
-        Field(default=None, description="可选的预设用户名"),
-    ] = None,
-) -> str:
-    """创建新的独立会话."""
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INIT",
-            error_message="会话管理器未初始化",
-            suggested_action="请检查 MCP 服务是否正确启动",
-        )
-    try:
-        session = await _session_manager.create_session()
-        if username:
-            session.username = username
-        return _ok(
-            data={
-                "session_id": session.session_id,
-                "created_at": session.created_at.isoformat(),
-                "username": session.username,
-            },
-            next_action="proceed",
-            suggested_action="使用此 session_id 调用 tch_login 登录",
-        )
-    except Exception as e:
-        return _err(
-            error_code="SESSION_CREATE_FAILED",
-            error_message=str(e),
-            suggested_action="请稍后重试",
-        )
+
+mcp.tool()(
+    make_create_session_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def tch_list_sessions() -> str:
-    """列出所有活跃会话."""
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INIT",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        sessions = _session_manager.list_sessions()
-        return _ok(
-            data={
-                "count": len(sessions),
-                "sessions": [
-                    {
-                        "session_id": s.session_id,
-                        "username": s.username,
-                        "created_at": s.created_at.isoformat(),
-                        "last_used_at": s.last_used_at.isoformat(),
-                    }
-                    for s in sessions
-                ],
-            },
-            next_action="proceed",
-        )
-    except Exception as e:
-        return _err(
-            error_code="LIST_SESSIONS_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_list_sessions_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
-@mcp.tool()
-async def tch_destroy_session(
-    session_id: Annotated[str, Field(description="要销毁的会话 ID")],
-) -> str:
-    """销毁指定会话."""
-    if _session_manager is None:
-        return _err(
-            error_code="SESSION_MANAGER_NOT_INIT",
-            error_message="会话管理器未初始化",
-        )
-    try:
-        _session_manager.destroy_session(session_id)
-        return _ok(
-            data={"session_id": session_id, "destroyed": True},
-            next_action="proceed",
-            suggested_action="会话已销毁，如需继续操作请创建新会话",
-        )
-    except Exception as e:
-        return _err(
-            error_code="DESTROY_SESSION_FAILED",
-            error_message=str(e),
-        )
+mcp.tool()(
+    make_destroy_session_tool(
+        _TEACHER_SESSION_CONFIG,
+        get_session_manager=lambda: _session_manager,
+        ok=_ok,
+        err=_err,
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1297,7 +1206,7 @@ async def tch_list_resources(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取资源列表失败"))
 
         data = resp.get("data", {})
@@ -1727,7 +1636,7 @@ async def tch_list_documents(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取文档列表失败"))
 
         data = resp.get("data", {})
@@ -2400,7 +2309,7 @@ async def tch_list_audio_videos(
             params=params,
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取音视频列表失败"))
 
         data = resp.get("data", {})
@@ -5795,6 +5704,27 @@ async def tch_delete_section(
 @mcp.tool()
 async def tch_list_sections(
     group_id: Annotated[str, Field(description="课程 ID")],
+    fuzzy_title: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的小节标题模糊匹配关键词。提供时会从课程全部小节中"
+            "筛选最匹配的候选，并返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -5827,6 +5757,15 @@ async def tch_list_sections(
     try:
         builder = CourseBuilder(client)
         sections = builder.list_sections(group_id)
+
+        if fuzzy_title and fuzzy_title.strip():
+            sections = fuzzy_filter_items(
+                sections,
+                fuzzy_title,
+                key="title",
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+            )
 
         return _ok(
             data={
@@ -5895,6 +5834,27 @@ async def tch_get_section(
 
 @mcp.tool()
 async def tch_get_categories(
+    fuzzy_name: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的分类名称模糊匹配关键词。提供时会从全部分类中"
+            "筛选最匹配的候选，并返回相似度分数。",
+        ),
+    ] = None,
+    top_k: Annotated[
+        int,
+        Field(default=10, ge=1, le=100, description="模糊匹配时最多返回的候选数量"),
+    ] = 10,
+    similarity_threshold: Annotated[
+        float,
+        Field(
+            default=0.3,
+            ge=0.0,
+            le=1.0,
+            description="模糊匹配的最小相似度阈值（0.0 ~ 1.0）",
+        ),
+    ] = 0.3,
     session_id: Annotated[
         str | None,
         Field(
@@ -5937,6 +5897,15 @@ async def tch_get_categories(
 
         for root in tree:
             walk(root, [])
+
+        if fuzzy_name and fuzzy_name.strip():
+            flat_list = fuzzy_filter_items_multi_key(
+                flat_list,
+                fuzzy_name,
+                keys=["name", "path"],
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+            )
 
         return _ok(
             data={
@@ -6789,7 +6758,7 @@ async def tch_list_created_courses(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取已创建课程列表失败"))
 
         data = resp.get("data", {})
@@ -6950,7 +6919,7 @@ async def tch_list_cooperated_courses(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取协同课程列表失败"))
 
         data = resp.get("data", {})
@@ -7110,7 +7079,7 @@ async def tch_list_participated_courses(
             },
         )
 
-        if resp.get("status") is not True and resp.get("error_code") != 0:
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
             raise RuntimeError(resp.get("error", "获取已参与课程列表失败"))
 
         data = resp.get("data", {})
@@ -7231,6 +7200,641 @@ async def tch_list_participated_courses(
         )
 
 
+# ---------------------------------------------------------------------------
+# Tools: 学习项目列表查询
+# ---------------------------------------------------------------------------
+
+def _program_list_url_and_params(
+    scope: str,
+    keywords: str,
+    page: int,
+    page_size: int,
+) -> tuple[str, dict[str, str]]:
+    """根据 scope 返回学习项目列表的端点和参数."""
+    base_params: dict[str, str] = {
+        "t": str(int(time.time() * 1000)),
+        "page": str(page),
+        "size": str(page_size),
+    }
+    if scope == "owned":
+        url = "/api/program/getlist"
+        base_params["owner"] = "1"
+        base_params["type"] = "1"
+    elif scope == "cooperated":
+        url = "/api/program/getcooperateprogramlist"
+    elif scope == "enrolled":
+        url = "/api/program/getmyparticipatedprogramlist"
+    else:
+        raise ValueError(f"不支持的 scope: {scope}")
+
+    if keywords:
+        base_params["keywords"] = keywords
+
+    return url, base_params
+
+
+def _format_program_list_item(item: dict[str, Any]) -> dict[str, Any]:
+    """统一格式化 /api/program/getlist 返回的项目字段."""
+    creator = item.get("creator", {}) or {}
+    return {
+        "program_id": str(item.get("program_id", "")),
+        "program_title": item.get("program_title", ""),
+        "desc": item.get("desc", ""),
+        "access_code": item.get("access_code", ""),
+        "share_url": item.get("share_url", ""),
+        "share_pc_url": item.get("share_pc_url", ""),
+        "head_img": item.get("head_img", ""),
+        "bg_img": item.get("setup", {}).get("bg_img", ""),
+        "create_time": item.get("create_time", ""),
+        "update_time": item.get("update_time", ""),
+        "creator_umu_id": str(creator.get("umu_id", "")),
+        "creator_name": creator.get("user_name", item.get("creater_name", "")),
+        "group_num": item.get("group_num", 0),
+        "module_num": item.get("module_num", 0),
+        "is_creator": item.get("is_creator", 0),
+    }
+
+
+@mcp.tool()
+async def tch_list_learning_programs(
+    scope: Annotated[
+        str,
+        Field(description="列表视角：owned=我拥有的, cooperated=协同给我的, enrolled=我报名的"),
+    ],
+    keywords: Annotated[
+        str | None,
+        Field(default=None, description="按标题/访问码模糊搜索"),
+    ] = None,
+    page: Annotated[int, Field(default=1, ge=1, description="页码")] = 1,
+    page_size: Annotated[int, Field(default=20, ge=1, le=100, description="每页数量")] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(default=False, description="是否自动获取全量数据"),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选会话 ID"),
+    ] = None,
+) -> str:
+    """查询当前讲师的学习项目清单.
+
+    支持三个视角：我拥有的、协同给我的、我报名的（作为学员参与）。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        url, base_params = _program_list_url_and_params(scope, keywords or "", page, page_size)
+    except ValueError as e:
+        return _err("INVALID_SCOPE", str(e), next_action="needs_user_input")
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        params = {**base_params, "page": str(p), "size": str(sz)}
+        resp = client.get(client.desktop_url(url), params=params)
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
+
+        data = resp.get("data", {})
+        page_info = data.get("page_info", {})
+        program_list = data.get("list", [])
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return [_format_program_list_item(item) for item in program_list], total_all
+
+    try:
+        if fetch_all:
+            all_items: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+            batch_size = 20
+
+            while True:
+                items, total_all = _fetch_page(current_page, batch_size)
+                all_items.extend(items)
+
+                report_pagination_progress(
+                    "tch_list_learning_programs",
+                    current_page,
+                    len(all_items),
+                    total_all,
+                    batch_size,
+                    is_complete=len(all_items) >= total_all or not items,
+                )
+
+                if len(all_items) >= total_all or not items:
+                    break
+                current_page += 1
+                if current_page > 50:
+                    report_pagination_progress(
+                        "tch_list_learning_programs",
+                        current_page,
+                        len(all_items),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+            return _ok(
+                data={
+                    "scope": scope,
+                    "programs": all_items,
+                    "total": len(all_items),
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": 1,
+                        "page_size": len(all_items) if all_items else 0,
+                    },
+                },
+                next_action="proceed",
+            )
+
+        items, _ = _fetch_page(page, page_size)
+        return _ok(
+            data={
+                "scope": scope,
+                "programs": items,
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                },
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取学习项目列表失败")
+        return _err("LIST_LEARNING_PROGRAMS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_create_learning_program(
+    title: Annotated[str, Field(description="学习项目标题")],
+    desc_plain: Annotated[str, Field(default="", description="纯文本介绍")] = "",
+    desc_richtext: Annotated[str, Field(default="", description="富文本介绍（HTML）")] = "",
+    cover_image_path: Annotated[str | None, Field(default=None, description="本地封面图路径")] = None,
+    bg_image_path: Annotated[str | None, Field(default=None, description="本地背景图路径")] = None,
+    cover_image_url: Annotated[str | None, Field(default=None, description="封面图 URL，与 cover_image_path 二选一，URL 优先")] = None,
+    bg_image_url: Annotated[str | None, Field(default=None, description="背景图 URL，与 bg_image_path 二选一，URL 优先")] = None,
+    tags: Annotated[list[str] | None, Field(default=None, description="标签列表")] = None,
+    category_ids: Annotated[list[str] | None, Field(default=None, description="分类 ID 列表")] = None,
+    category_names: Annotated[
+        list[str] | None,
+        Field(default=None, description="分类名称列表，与 category_ids 二选一，名称优先"),
+    ] = None,
+    start_time: Annotated[str, Field(default="", description="开始时间戳字符串")] = "",
+    end_time: Annotated[str, Field(default="", description="结束时间戳字符串")] = "",
+    skin_id: Annotated[int, Field(default=1, description="皮肤 ID")] = 1,
+    pc_skin_id: Annotated[int, Field(default=1, description="PC 皮肤 ID")] = 1,
+    show_banner: Annotated[bool, Field(default=True, description="是否显示 banner")] = True,
+    unlock_type: Annotated[int, Field(default=1, description="解锁类型")] = 1,
+    show_type: Annotated[int, Field(default=1, description="显示类型")] = 1,
+    open_module: Annotated[int, Field(default=1, description="开放模块")] = 1,
+    sort: Annotated[str, Field(default="asc", description="排序方式")] = "asc",
+    enable_certificate: Annotated[bool, Field(default=False, description="是否启用证书")] = False,
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """创建学习项目（不含课程）.
+
+    返回包含 program_id 的 JSON，可用于后续添加课程。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.create_program(
+            title=title,
+            desc_plain=desc_plain,
+            desc_richtext=desc_richtext,
+            cover_path=cover_image_path or "",
+            bg_path=bg_image_path or "",
+            cover_image_url=cover_image_url or "",
+            bg_image_url=bg_image_url or "",
+            tags=tags,
+            category_ids=category_ids,
+            category_names=category_names,
+            start_time=start_time,
+            end_time=end_time,
+            skin_id=skin_id,
+            pc_skin_id=pc_skin_id,
+            show_banner=show_banner,
+            unlock_type=unlock_type,
+            show_type=show_type,
+            open_module=open_module,
+            sort=sort,
+            enable_certificate=enable_certificate,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="可调用 tch_add_courses_to_learning_program 添加课程",
+        )
+    except Exception as e:
+        logger.exception("创建学习项目失败")
+        return _err("CREATE_LEARNING_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_add_courses_to_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    modules: Annotated[
+        list[dict[str, Any]],
+        Field(description='模块列表，每项包含 module_title 与 course_ids，例如 [{"module_title": "阶段一", "course_ids": ["7329920"]}]'),
+    ],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """将课程按模块添加到学习项目.
+
+    若 module_id 为空且提供 module_title，则自动创建新模块。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.add_courses(program_id=program_id, modules=modules)
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="失败课程可单独重试",
+        )
+    except Exception as e:
+        logger.exception("添加课程到学习项目失败")
+        return _err("ADD_COURSES_TO_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_configure_program_certificate(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    theme_id: Annotated[str, Field(default="", description="证书模板 ID，不填则使用第一个可用模板")] = "",
+    text: Annotated[str, Field(default="", description="证书正文")] = "",
+    teacher_name: Annotated[str, Field(default="", description="讲师姓名")] = "",
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """配置学习项目证书."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.configure_certificate(program_id, theme_id, text, teacher_name)
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("配置证书失败")
+        return _err("CONFIGURE_CERTIFICATE_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_set_program_points_status(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    enabled: Annotated[bool, Field(description="是否开启积分")],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """开启或关闭学习项目积分."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.set_points_status(program_id, enabled)
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("设置积分状态失败")
+        return _err("SET_POINTS_STATUS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_search_courses_for_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    keywords: Annotated[str, Field(default="", description="搜索关键词")] = "",
+    creater_name: Annotated[str, Field(default="", description="按创建人筛选")] = "",
+    page: Annotated[int, Field(default=1, ge=1, description="页码")] = 1,
+    page_size: Annotated[int, Field(default=10, ge=1, le=100, description="每页数量")] = 10,
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """搜索可加入学习项目的课程."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        items, total = builder.search_courses(program_id, keywords, creater_name, page, page_size)
+        return _ok(
+            data={
+                "courses": items,
+                "total": total,
+                "pagination": {"current_page": page, "page_size": page_size},
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("搜索课程失败")
+        return _err("SEARCH_COURSES_FOR_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_get_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """获取学习项目详情.
+
+    返回项目基本信息、模块列表及课程关系，可用于修改前查看当前结构。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.get_program(program_id)
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("获取学习项目详情失败")
+        return _err("GET_LEARNING_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_update_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    title: Annotated[str | None, Field(default=None, description="学习项目标题")] = None,
+    desc_plain: Annotated[str | None, Field(default=None, description="纯文本介绍")] = None,
+    desc_richtext: Annotated[str | None, Field(default=None, description="富文本介绍（HTML）")] = None,
+    cover_image_path: Annotated[str | None, Field(default=None, description="本地封面图路径，传空字符串表示清除")] = None,
+    bg_image_path: Annotated[str | None, Field(default=None, description="本地背景图路径，传空字符串表示清除")] = None,
+    cover_image_url: Annotated[str | None, Field(default=None, description="封面图 URL，与 cover_image_path 二选一，URL 优先")] = None,
+    bg_image_url: Annotated[str | None, Field(default=None, description="背景图 URL，与 bg_image_path 二选一，URL 优先")] = None,
+    tags: Annotated[list[str] | None, Field(default=None, description="标签列表")] = None,
+    category_ids: Annotated[list[str] | None, Field(default=None, description="分类 ID 列表")] = None,
+    category_names: Annotated[
+        list[str] | None,
+        Field(default=None, description="分类名称列表，与 category_ids 二选一，名称优先"),
+    ] = None,
+    skin_id: Annotated[int | None, Field(default=None, description="皮肤 ID")] = None,
+    pc_skin_id: Annotated[int | None, Field(default=None, description="PC 皮肤 ID")] = None,
+    show_banner: Annotated[bool | None, Field(default=None, description="是否显示 banner")] = None,
+    unlock_type: Annotated[int | None, Field(default=None, description="解锁类型")] = None,
+    show_type: Annotated[int | None, Field(default=None, description="显示类型")] = None,
+    open_module: Annotated[int | None, Field(default=None, description="开放模块")] = None,
+    sort: Annotated[str | None, Field(default=None, description="排序方式")] = None,
+    enable_certificate: Annotated[bool | None, Field(default=None, description="是否启用证书")] = None,
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """修改学习项目基本信息.
+
+    未提供的字段保持原值；需要修改的字段显式传入。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.update_program(
+            program_id=program_id,
+            title=title,
+            desc_plain=desc_plain,
+            desc_richtext=desc_richtext,
+            cover_path=cover_image_path,
+            bg_path=bg_image_path,
+            cover_image_url=cover_image_url,
+            bg_image_url=bg_image_url,
+            tags=tags,
+            category_ids=category_ids,
+            category_names=category_names,
+            skin_id=skin_id,
+            pc_skin_id=pc_skin_id,
+            show_banner=show_banner,
+            unlock_type=unlock_type,
+            show_type=show_type,
+            open_module=open_module,
+            sort=sort,
+            enable_certificate=enable_certificate,
+        )
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("修改学习项目失败")
+        return _err("UPDATE_LEARNING_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_update_learning_program_modules(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    modules: Annotated[
+        list[dict[str, Any]],
+        Field(description='模块列表，每项包含 module_id 与可修改字段，例如 [{"module_id": "197797", "module_title": "新标题", "module_desc_richtext": "<p>描述</p>", "group_list": [...]}]'),
+    ],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """修改学习项目的模块信息.
+
+    可修改模块标题、模块描述、模块富文本描述、模块内课程顺序及是否必修。
+    group_list 中的 id 为模块课程关系 ID（module_group_id）。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.update_modules(program_id=program_id, modules=modules)
+        return _ok(data=result, next_action="proceed")
+    except Exception as e:
+        logger.exception("修改学习项目模块失败")
+        return _err("UPDATE_LEARNING_PROGRAM_MODULES_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_remove_courses_from_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    module_group_ids: Annotated[
+        list[str],
+        Field(description="模块课程关系 ID 列表（来自 group_list 中的 id）"),
+    ],
+    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
+) -> str:
+    """从学习项目中移除课程.
+
+    module_group_ids 可通过 tch_get_learning_program 获取模块内课程的 id 字段。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        builder = ProgramBuilder(client, client.base_url)
+        result = builder.remove_courses(program_id=program_id, module_group_ids=module_group_ids)
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="失败项可单独重试",
+        )
+    except Exception as e:
+        logger.exception("从学习项目移除课程失败")
+        return _err("REMOVE_COURSES_FROM_PROGRAM_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_list_program_participants(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    status_filter: Annotated[
+        str,
+        Field(
+            default="all",
+            description="学员完成状态筛选：all=全部, completed=已完成, uncompleted=未完成",
+        ),
+    ] = "all",
+    include_disabled: Annotated[
+        bool,
+        Field(default=True, description="是否包含已禁用账号，默认包含"),
+    ] = True,
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选会话 ID"),
+    ] = None,
+) -> str:
+    """查询学习项目的学员名单.
+
+    返回学习项目下所有学员的完成状态，支持按完成状态筛选和是否包含已禁用账号。
+    结果中的 modules / courses 字段已根据 table_head 动态列深度格式化。
+    讲师及以上权限角色可调用。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+            next_action="retry",
+        )
+
+    try:
+        manager = ProgramStudentManager(client, client.base_url)
+        result = manager.list_participants(
+            program_id=program_id,
+            status_filter=status_filter,
+            include_disabled=include_disabled,
+            page=page,
+            page_size=page_size,
+            fetch_all=fetch_all,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="如需查看学员在学习任务维度的详情，可调用 tch_list_program_learning_tasks",
+        )
+    except ValueError as e:
+        return _err(
+            error_code="INVALID_STATUS_FILTER",
+            error_message=str(e),
+            suggested_action="请使用 all、completed 或 uncompleted",
+            next_action="needs_user_input",
+        )
+    except Exception as e:
+        logger.exception("查询学习项目学员名单失败")
+        return _err("LIST_PROGRAM_PARTICIPANTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_list_program_learning_tasks(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    status_filter: Annotated[
+        str,
+        Field(
+            default="all",
+            description="学员完成状态筛选：all=全部, completed=已完成, uncompleted=未完成",
+        ),
+    ] = "all",
+    include_disabled: Annotated[
+        bool,
+        Field(default=True, description="是否包含已禁用账号，默认包含"),
+    ] = True,
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选会话 ID"),
+    ] = None,
+) -> str:
+    """查询学习项目的学习任务学员名单.
+
+    返回被分配给该学习项目作为学习任务的学员列表，支持按完成状态筛选和是否显示禁用账号。
+    结果中的 modules / courses 字段已根据 table_head 动态列深度格式化。
+    讲师及以上权限角色可调用。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+            next_action="retry",
+        )
+
+    try:
+        manager = ProgramStudentManager(client, client.base_url)
+        result = manager.list_learning_tasks(
+            program_id=program_id,
+            status_filter=status_filter,
+            include_disabled=include_disabled,
+            page=page,
+            page_size=page_size,
+            fetch_all=fetch_all,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="如需查看学员在项目维度的完成详情，可调用 tch_list_program_participants",
+        )
+    except ValueError as e:
+        return _err(
+            error_code="INVALID_STATUS_FILTER",
+            error_message=str(e),
+            suggested_action="请使用 all、completed 或 uncompleted",
+            next_action="needs_user_input",
+        )
+    except Exception as e:
+        logger.exception("查询学习项目学习任务学员名单失败")
+        return _err("LIST_PROGRAM_LEARNING_TASKS_FAILED", str(e))
+
+
 @mcp.tool()
 async def tch_list_course_collaborators(
     group_id: Annotated[str, Field(description="课程 ID")],
@@ -7308,6 +7912,574 @@ async def tch_list_course_collaborators(
     except Exception as e:
         logger.exception("列出课程协同者失败")
         return _err("LIST_COLLABORATORS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_list_course_learning_tasks(
+    group_id: Annotated[str, Field(description="课程 ID（group_id）")],
+    status_filter: Annotated[
+        str,
+        Field(
+            default="all",
+            description="学员完成状态筛选：all=全部, completed=已完成, uncompleted=未完成",
+        ),
+    ] = "all",
+    include_disabled: Annotated[
+        bool,
+        Field(default=True, description="是否包含已禁用账号，默认包含"),
+    ] = True,
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询课程的学习任务分配学员清单.
+
+    返回被分配给该课程作为学习任务的学员列表，支持按完成状态筛选和是否显示禁用账号。
+    讲师及以上权限角色可调用。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+            next_action="retry",
+        )
+
+    status_map = {"all": "0", "completed": "1", "uncompleted": "2"}
+    if status_filter not in status_map:
+        return _err(
+            error_code="INVALID_STATUS_FILTER",
+            error_message=f"status_filter 必须是 all/completed/uncompleted 之一，收到: {status_filter}",
+            suggested_action="请使用 all、completed 或 uncompleted",
+            next_action="needs_user_input",
+        )
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int, dict[str, Any], dict[str, Any]]:
+        resp = client.get(
+            client.desktop_url("/api/studentManage/getstudenttasklist"),
+            params={
+                "t": str(int(time.time() * 1000)),
+                "group_id": group_id,
+                "type": status_map[status_filter],
+                "filter_disabled_user": "0" if include_disabled else "1",
+                "is_enroll": "0",
+                "is_require": "0",
+                "only_enterprise_on_job": "0",
+                "student_only": "0",
+                "page": str(p),
+                "size": str(sz),
+                "sort_field": "1",
+                "sort_type": "2",
+            },
+        )
+
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取学习任务学员清单失败"))
+
+        data = resp.get("data", {})
+        page_info = data.get("table_body", {}).get("page_info", {})
+        student_list = data.get("table_body", {}).get("list", [])
+
+        formatted: list[dict[str, Any]] = []
+        for item in student_list:
+            formatted.append({
+                "student_id": item.get("student_id", ""),
+                "umu_id": item.get("umu_id", ""),
+                "user_name": item.get("user_name", ""),
+                "avatar": item.get("avatar", ""),
+                "task_count": item.get("task_count", 0),
+                "complete_num": item.get("complete_num", 0),
+                "complete_rate": item.get("complete_rate", 0),
+                "is_assign": item.get("is_assign", 0),
+                "assign_time": item.get("assign_time", 0),
+                "last_assign_time": item.get("last_assign_time", 0),
+                "complete_time": item.get("complete_time", 0),
+                "first_learning_time": item.get("first_learning_time", 0),
+                "last_learning_time": item.get("last_learning_time", 0),
+                "due_time": item.get("due_time", 0),
+            })
+
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return formatted, total_all, data.get("data_count", {}), page_info
+
+    def _build_summary(data_count: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "total": data_count.get("total_num", 0),
+            "completed": data_count.get("complete_num", 0),
+            "uncompleted": data_count.get("uncomplete_num", 0),
+            "completion_rate": data_count.get("complete_rate", 0),
+            "has_learning_task": bool(data_count.get("exist_learning_task", 0)),
+        }
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_students: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+            latest_data_count: dict[str, Any] = {}
+
+            while True:
+                page_items, total_all, data_count, _ = _fetch_page(current_page, batch_size)
+                all_students.extend(page_items)
+                latest_data_count = data_count
+
+                report_pagination_progress(
+                    "tch_list_course_learning_tasks",
+                    current_page,
+                    len(all_students),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_students) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_course_learning_tasks",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_course_learning_tasks",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            summary = _build_summary(latest_data_count)
+            return _ok(
+                data={
+                    "summary": summary,
+                    "students": all_students,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="如需查看某位学员的详细学习记录，可调用相关工具",
+            )
+
+        students, _, data_count, page_info = _fetch_page(page, page_size)
+        summary = _build_summary(data_count)
+        return _ok(
+            data={
+                "summary": summary,
+                "students": students,
+                "pagination": {
+                    "total": int(page_info.get("list_total_num", 0) or 0),
+                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
+                    "current_page": int(page_info.get("current_page", page)),
+                    "page_size": int(page_info.get("size", page_size)),
+                },
+            },
+            next_action="proceed",
+            suggested_action="如需获取全量数据，可设置 fetch_all=True",
+        )
+    except Exception as e:
+        logger.exception("获取课程学习任务学员清单失败")
+        return _err(
+            error_code="LIST_COURSE_LEARNING_TASKS_ERROR",
+            error_message=str(e),
+            suggested_action="请检查 group_id 是否正确，或稍后重试",
+        )
+
+
+@mcp.tool()
+async def tch_list_course_participants(
+    group_id: Annotated[str, Field(description="课程 ID（group_id）")],
+    status_filter: Annotated[
+        str,
+        Field(
+            default="all",
+            description="学员完成状态筛选：all=全部, completed=必修完成, uncompleted=必修未完成",
+        ),
+    ] = "all",
+    include_disabled: Annotated[
+        bool,
+        Field(default=True, description="是否包含已禁用账号，默认包含"),
+    ] = True,
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询指定课程的学员参与者名单.
+
+    返回课程的参训学员列表，支持按必修完成状态筛选和是否显示禁用账号。
+    返回结果包含每位学员每个必修/选修小节的完成状态、积分、得分等明细。
+    讲师及以上权限角色可调用。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+            next_action="retry",
+        )
+
+    status_map = {"all": "0", "completed": "1", "uncompleted": "2"}
+    if status_filter not in status_map:
+        return _err(
+            error_code="INVALID_STATUS_FILTER",
+            error_message=f"status_filter 必须是 all/completed/uncompleted 之一，收到: {status_filter}",
+            suggested_action="请使用 all、completed 或 uncompleted",
+            next_action="needs_user_input",
+        )
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int, dict[str, Any], dict[str, Any]]:
+        resp = client.get(
+            client.desktop_url("/api/studentManage/getstudentlist"),
+            params={
+                "t": str(int(time.time() * 1000)),
+                "group_id": group_id,
+                "type": status_map[status_filter],
+                "filter_disabled_user": "0" if include_disabled else "1",
+                "is_enroll": "0",
+                "is_require": "0",
+                "only_enterprise_on_job": "0",
+                "student_only": "0",
+                "page": str(p),
+                "size": str(sz),
+                "sort_field": "1",
+                "sort_type": "2",
+                "v": "1",
+            },
+        )
+
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取课程学员参与者名单失败"))
+
+        data = resp.get("data", {})
+        page_info = data.get("table_body", {}).get("page_info", {})
+        student_list = data.get("table_body", {}).get("list", [])
+
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return student_list, total_all, data.get("data_count", {}), page_info
+
+    def _build_summary(data_count: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "total": data_count.get("total_num", 0),
+            "completed": data_count.get("complete_num", 0),
+            "uncompleted": data_count.get("uncomplete_num", 0),
+            "completion_rate": data_count.get("complete_rate", 0),
+        }
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_students: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+            latest_data_count: dict[str, Any] = {}
+
+            while True:
+                page_items, total_all, data_count, _ = _fetch_page(current_page, batch_size)
+                all_students.extend(page_items)
+                latest_data_count = data_count
+
+                report_pagination_progress(
+                    "tch_list_course_participants",
+                    current_page,
+                    len(all_students),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_students) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_course_participants",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_course_participants",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            summary = _build_summary(latest_data_count)
+            return _ok(
+                data={
+                    "summary": summary,
+                    "students": all_students,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="如需查看学员学习时长，可调用 tch_list_course_learning_durations",
+            )
+
+        students, _, data_count, page_info = _fetch_page(page, page_size)
+        summary = _build_summary(data_count)
+        return _ok(
+            data={
+                "summary": summary,
+                "students": students,
+                "pagination": {
+                    "total": int(page_info.get("list_total_num", 0) or 0),
+                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
+                    "current_page": int(page_info.get("current_page", page)),
+                    "page_size": int(page_info.get("size", page_size)),
+                },
+            },
+            next_action="proceed",
+            suggested_action="如需获取全量数据，可设置 fetch_all=True",
+        )
+    except Exception as e:
+        logger.exception("获取课程学员参与者名单失败")
+        return _err(
+            error_code="LIST_COURSE_PARTICIPANTS_ERROR",
+            error_message=str(e),
+            suggested_action="请检查 group_id 是否正确，或稍后重试",
+        )
+
+
+@mcp.tool()
+async def tch_list_course_learning_durations(
+    group_id: Annotated[str, Field(description="课程 ID（group_id）")],
+    status_filter: Annotated[
+        str,
+        Field(
+            default="all",
+            description="学员完成状态筛选：all=全部, completed=必修完成, uncompleted=必修未完成",
+        ),
+    ] = "all",
+    include_disabled: Annotated[
+        bool,
+        Field(default=True, description="是否包含已禁用账号，默认包含"),
+    ] = True,
+    page: Annotated[int, Field(default=1, ge=1, description="页码，从 1 开始")] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=20, ge=1, le=100, description="每页数量，默认 20，最大 100"),
+    ] = 20,
+    fetch_all: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="是否自动获取全量数据。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        ),
+    ] = False,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询指定课程的学员学习时长名单.
+
+    返回课程的参训学员学习时长列表，支持按必修完成状态筛选和是否显示禁用账号。
+    返回结果包含每位学员的课程总学习时长，以及每个必修/选修小节的学习时长、首次/末次学习时间等明细。
+    讲师及以上权限角色可调用。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 完成登录后再重试",
+            next_action="retry",
+        )
+
+    status_map = {"all": "0", "completed": "1", "uncompleted": "2"}
+    if status_filter not in status_map:
+        return _err(
+            error_code="INVALID_STATUS_FILTER",
+            error_message=f"status_filter 必须是 all/completed/uncompleted 之一，收到: {status_filter}",
+            suggested_action="请使用 all、completed 或 uncompleted",
+            next_action="needs_user_input",
+        )
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int, dict[str, Any], dict[str, Any]]:
+        resp = client.get(
+            client.desktop_url("/api/studentManage/grouplearningtimelist"),
+            params={
+                "t": str(int(time.time() * 1000)),
+                "group_id": group_id,
+                "type": status_map[status_filter],
+                "filter_disabled_user": "0" if include_disabled else "1",
+                "is_enroll": "0",
+                "is_require": "0",
+                "only_enterprise_on_job": "0",
+                "student_only": "0",
+                "page": str(p),
+                "size": str(sz),
+                "sort_field": "1",
+                "sort_type": "2",
+                "v": "2",
+            },
+        )
+
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
+            raise RuntimeError(resp.get("error", "获取课程学员学习时长名单失败"))
+
+        data = resp.get("data", {})
+        page_info = data.get("table_body", {}).get("page_info", {})
+        student_list = data.get("table_body", {}).get("list", [])
+
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return student_list, total_all, data.get("data_count", {}), page_info
+
+    def _build_summary(data_count: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "total": data_count.get("total_num", 0),
+            "completed": data_count.get("complete_num", 0),
+            "uncompleted": data_count.get("uncomplete_num", 0),
+            "completion_rate": data_count.get("complete_rate", 0),
+            "avg_vlt": data_count.get("avg_vlt", ""),
+        }
+
+    try:
+        if fetch_all:
+            batch_size = 50
+            all_students: list[dict[str, Any]] = []
+            total_all = 0
+            current_page = 1
+            latest_data_count: dict[str, Any] = {}
+
+            while True:
+                page_items, total_all, data_count, _ = _fetch_page(current_page, batch_size)
+                all_students.extend(page_items)
+                latest_data_count = data_count
+
+                report_pagination_progress(
+                    "tch_list_course_learning_durations",
+                    current_page,
+                    len(all_students),
+                    total_all,
+                    batch_size,
+                )
+
+                if not page_items or len(all_students) >= total_all:
+                    report_pagination_progress(
+                        "tch_list_course_learning_durations",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_complete=True,
+                    )
+                    break
+
+                if current_page >= 50:
+                    report_pagination_progress(
+                        "tch_list_course_learning_durations",
+                        current_page,
+                        len(all_students),
+                        total_all,
+                        batch_size,
+                        is_safety_limit=True,
+                    )
+                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
+                    break
+
+                current_page += 1
+
+            summary = _build_summary(latest_data_count)
+            return _ok(
+                data={
+                    "summary": summary,
+                    "students": all_students,
+                    "pagination": {
+                        "total_all": total_all,
+                        "current_page": current_page,
+                        "page_size": batch_size,
+                    },
+                },
+                next_action="proceed",
+                suggested_action="如需查看学员完成状态，可调用 tch_list_course_participants",
+            )
+
+        students, _, data_count, page_info = _fetch_page(page, page_size)
+        summary = _build_summary(data_count)
+        return _ok(
+            data={
+                "summary": summary,
+                "students": students,
+                "pagination": {
+                    "total": int(page_info.get("list_total_num", 0) or 0),
+                    "total_pages": int(page_info.get("total_page_num", 0) or 0),
+                    "current_page": int(page_info.get("current_page", page)),
+                    "page_size": int(page_info.get("size", page_size)),
+                },
+            },
+            next_action="proceed",
+            suggested_action="如需获取全量数据，可设置 fetch_all=True",
+        )
+    except Exception as e:
+        logger.exception("获取课程学员学习时长名单失败")
+        return _err(
+            error_code="LIST_COURSE_LEARNING_DURATIONS_ERROR",
+            error_message=str(e),
+            suggested_action="请检查 group_id 是否正确，或稍后重试",
+        )
 
 
 @mcp.tool()
@@ -7638,6 +8810,640 @@ async def tch_transfer_course_owner(
 
 
 # ---------------------------------------------------------------------------
+# Tools: 课程访问权限
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def tch_set_course_access_permission(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    access_permission: Annotated[
+        int,
+        Field(
+            description="课程访问权限：0=关闭（任何人不可见），2=企业内公开，3=指定账户/班级/部门/分组可见",
+            ge=0,
+            le=3,
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """设置课程的整体访问权限.
+
+    支持三种状态：
+    - 0：关闭，任何人均不可访问
+    - 2：企业内公开，企业内成员均可访问
+    - 3：指定账户/班级/部门/分组可见，需要再调用 tch_add_course_access_accounts 添加可见对象
+
+    设置时会同步更新课程下所有小节的权限（update_session_permission=1）。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        detail = _set_obj_access_permission(
+            client, group_id, "group", access_permission, update_session_permission=True
+        )
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "access_permission": access_permission,
+                "permission_text": _permission_text(access_permission),
+                "update_session_permission": True,
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action=(
+                "access_permission=3 时，请继续调用 tch_add_course_access_accounts 添加可见账户"
+                if access_permission == 3 else ""
+            ),
+        )
+    except Exception as e:
+        logger.exception("设置课程访问权限失败")
+        return _err("SET_COURSE_ACCESS_PERMISSION_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_get_course_access_permission(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取课程当前的访问权限设置.
+
+    返回当前课程的 access_permission（0=关闭，2=企业内公开，3=指定账户/班级/部门/分组），
+    以及该课程可设置的所有权限选项。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        selected_int, options, detail = _get_obj_access_permission(client, group_id, "group")
+        permission_text = _permission_text(selected_int) if selected_int >= 0 else "未知"
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "access_permission": selected_int,
+                "permission_text": permission_text,
+                "permission_options": options,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取课程访问权限失败")
+        return _err("GET_COURSE_ACCESS_PERMISSION_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_get_course_access_list(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    page: Annotated[int, Field(default=1, description="页码", ge=1)] = 1,
+    size: Annotated[int, Field(default=20, description="每页数量", ge=1, le=100)] = 20,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取课程当前已授权的访问列表.
+
+    当课程 access_permission 为 3 时，返回已授权的账户/班级/部门/分组列表。
+    返回结果中的 account_type 字段标识对象类型：user/class/department/group。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        items, page_info = _get_obj_access_list(client, group_id, "group", page, size)
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "page": page,
+                "size": size,
+                "page_info": page_info,
+                "list": items,
+                "total": page_info.get("list_total_num", len(items)),
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取课程访问列表失败")
+        return _err("GET_COURSE_ACCESS_LIST_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_search_access_accounts(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    keyword: Annotated[str, Field(description="搜索关键词：账户邮箱、姓名、班级名称、部门名称或分组名称，支持模糊匹配")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """搜索可授权访问课程的账户、班级、部门或分组.
+
+    返回结果中 account_type 为 user 表示账户，class 表示班级，
+    department 表示部门，group 表示分组。
+    建议优先使用完整邮箱搜索账户，以提高匹配准确度。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        ok, accounts, err = _search_access_permission_account(client, group_id, "group", keyword)
+        if not ok:
+            return _err("SEARCH_ACCESS_ACCOUNTS_FAILED", err or "搜索可授权账户失败")
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "keyword": keyword,
+                "accounts": [_format_access_account(acc) for acc in accounts],
+                "total": len(accounts),
+            },
+            next_action="proceed",
+            suggested_action="请从结果中选择目标账户/班级，调用 tch_add_course_access_accounts 添加权限",
+        )
+    except Exception as e:
+        logger.exception("搜索可授权账户失败")
+        return _err("SEARCH_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_add_course_access_accounts(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要添加的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id（可调用 tch_search_access_accounts 获取）",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """为课程设置指定账户/班级/部门/分组可见权限.
+
+    前置条件：课程 access_permission 需为 3（指定账户可见）。
+    如当前不是该状态，工具会先自动调用 setgrouppermission 设置为 3，再添加对象。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    if not accounts:
+        return _err(
+            "NO_ACCOUNTS_PROVIDED",
+            "未提供要添加的账户/班级",
+            suggested_action="请先调用 tch_search_access_accounts 查询目标",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _add_obj_access_accounts(client, group_id, "group", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "added": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="可调用 tch_search_access_accounts 或查看 UMU 后台确认权限已生效",
+        )
+    except Exception as e:
+        logger.exception("添加课程指定账户失败")
+        return _err("ADD_COURSE_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_remove_course_access_accounts(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要移除的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """移除课程的指定账户/班级/部门/分组访问权限."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    if not accounts:
+        return _err(
+            "NO_ACCOUNTS_PROVIDED",
+            "未提供要移除的账户/班级",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _remove_obj_access_accounts(client, group_id, "group", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "removed": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("移除课程指定账户失败")
+        return _err("REMOVE_COURSE_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_cancel_all_assigned_permissions(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """取消课程的所有指定访问权限.
+
+    调用后会清空课程的指定账户/班级列表，常用于将课程还原为企业内公开前的清理。
+    如需同时设置为企业内公开，请在调用后继续调用 tch_set_course_access_permission。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        detail = _cancel_all_assigned_permissions(client, group_id, "group")
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="如需还原为企业内公开，请调用 tch_set_course_access_permission(group_id, access_permission=2)",
+        )
+    except Exception as e:
+        logger.exception("取消课程指定权限失败")
+        return _err("CANCEL_ASSIGNED_PERMISSIONS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_get_program_access_permission(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取学习项目当前的访问权限设置.
+
+    返回当前学习项目的 access_permission（0=关闭，2=企业内公开，3=指定账户/班级/部门/分组），
+    以及该学习项目可设置的所有权限选项。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        selected_int, options, detail = _get_obj_access_permission(client, program_id, "program")
+        permission_text = _permission_text(selected_int) if selected_int >= 0 else "未知"
+
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "access_permission": selected_int,
+                "permission_text": permission_text,
+                "permission_options": options,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取学习项目访问权限失败")
+        return _err("GET_PROGRAM_ACCESS_PERMISSION_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_set_program_access_permission(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    access_permission: Annotated[
+        int,
+        Field(description="权限：0=关闭，2=企业内公开，3=指定账户", ge=0, le=3),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """设置学习项目的整体访问权限.
+
+    access_permission 取值：
+      0 = 关闭（不可见）
+      2 = 企业内公开
+      3 = 指定账户/班级/部门/分组可见
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        detail = _set_obj_access_permission(
+            client, program_id, "program", access_permission, update_session_permission=True
+        )
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "access_permission": access_permission,
+                "permission_text": _permission_text(access_permission),
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action=(
+                "access_permission=3 时，请继续调用 tch_add_program_access_accounts 添加可见对象"
+                if access_permission == 3 else ""
+            ),
+        )
+    except Exception as e:
+        logger.exception("设置学习项目访问权限失败")
+        return _err("SET_PROGRAM_ACCESS_PERMISSION_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_get_program_access_list(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    page: Annotated[int, Field(default=1, description="页码", ge=1)] = 1,
+    size: Annotated[int, Field(default=20, description="每页数量", ge=1, le=100)] = 20,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取学习项目当前已授权的访问列表.
+
+    当学习项目 access_permission 为 3 时，返回已授权的账户/班级/部门/分组列表。
+    返回结果中的 account_type 字段标识对象类型：user/class/department/group。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        items, page_info = _get_obj_access_list(client, program_id, "program", page, size)
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "page": page,
+                "size": size,
+                "page_info": page_info,
+                "list": items,
+                "total": page_info.get("list_total_num", len(items)),
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("获取学习项目访问列表失败")
+        return _err("GET_PROGRAM_ACCESS_LIST_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_search_program_access_accounts(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    keyword: Annotated[str, Field(description="搜索关键词：账户邮箱、姓名、班级名称、部门名称或分组名称，支持模糊匹配")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """搜索可授权访问学习项目的账户、班级、部门或分组.
+
+    返回结果中 account_type 为 user 表示账户，class 表示班级，
+    department 表示部门，group 表示分组。
+    建议优先使用完整邮箱搜索账户，以提高匹配准确度。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        ok, accounts, err = _search_access_permission_account(client, program_id, "program", keyword)
+        if not ok:
+            return _err("SEARCH_PROGRAM_ACCESS_ACCOUNTS_FAILED", err or "搜索可授权账户失败")
+
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "keyword": keyword,
+                "accounts": [_format_access_account(acc) for acc in accounts],
+                "total": len(accounts),
+            },
+            next_action="proceed",
+            suggested_action="请从结果中选择目标账户/班级，调用 tch_add_program_access_accounts 添加权限",
+        )
+    except Exception as e:
+        logger.exception("搜索学习项目可授权账户失败")
+        return _err("SEARCH_PROGRAM_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_add_program_access_accounts(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要添加的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id（可调用 tch_search_program_access_accounts 获取）",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """为学习项目添加指定账户/班级/部门/分组可见权限.
+
+    前置条件：学习项目 access_permission 需为 3（指定账户可见）。
+    如当前不是该状态，工具会先自动调用 setprogrampermission 设置为 3，再添加对象。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    if not accounts:
+        return _err(
+            "NO_ACCOUNTS_PROVIDED",
+            "未提供要添加的账户/班级",
+            suggested_action="请先调用 tch_search_program_access_accounts 查询目标",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _add_obj_access_accounts(client, program_id, "program", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "added": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="可调用 tch_search_program_access_accounts 或查看 UMU 后台确认权限已生效",
+        )
+    except Exception as e:
+        logger.exception("添加学习项目指定账户失败")
+        return _err("ADD_PROGRAM_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_remove_program_access_accounts(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    accounts: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description="要移除的账户/班级/部门/分组列表，每个元素需包含 account、account_type(user/class/department/group)、id，"
+                        "class 类型还需包含 class_id，department 类型还需包含 department_id，"
+                        "group 类型还需包含 user_group_id",
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """移除学习项目的指定账户/班级/部门/分组访问权限."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    if not accounts:
+        return _err(
+            "NO_ACCOUNTS_PROVIDED",
+            "未提供要移除的账户/班级",
+            next_action="needs_user_input",
+        )
+
+    try:
+        detail = _remove_obj_access_accounts(client, program_id, "program", accounts, update_session_permission=True)
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "removed": len(accounts),
+                "accounts": accounts,
+                "detail": detail,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("移除学习项目指定账户失败")
+        return _err("REMOVE_PROGRAM_ACCESS_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_cancel_all_program_permissions(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """取消学习项目的所有指定访问权限.
+
+    调用后会清空学习项目的指定账户/班级列表，常用于将学习项目还原为企业内公开前的清理。
+    如需同时设置为企业内公开，请在调用后继续调用 tch_set_program_access_permission。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        detail = _cancel_all_assigned_permissions(client, program_id, "program")
+        return _ok(
+            data={
+                "program_id": str(program_id),
+                "detail": detail,
+            },
+            next_action="proceed",
+            suggested_action="如需还原为企业内公开，请调用 tch_set_program_access_permission(program_id, access_permission=2)",
+        )
+    except Exception as e:
+        logger.exception("取消学习项目指定权限失败")
+        return _err("CANCEL_PROGRAM_ACCESS_PERMISSIONS_FAILED", str(e))
+
+
+# ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 
@@ -7669,6 +9475,14 @@ def main() -> None:
     print("        tch_update_course_basic, tch_update_course_type,")
     print("        tch_update_course_category, tch_update_course_schedule,")
     print("        tch_update_course_images, tch_update_course_richtext,")
+    print("  课程权限: tch_set_course_access_permission, tch_get_course_access_permission,")
+    print("            tch_get_course_access_list, tch_search_access_accounts,")
+    print("            tch_add_course_access_accounts, tch_remove_course_access_accounts,")
+    print("            tch_cancel_all_assigned_permissions,")
+    print("  学习项目权限: tch_set_program_access_permission, tch_get_program_access_permission,")
+    print("                tch_get_program_access_list, tch_search_program_access_accounts,")
+    print("                tch_add_program_access_accounts, tch_remove_program_access_accounts,")
+    print("                tch_cancel_all_program_permissions,")
     print("  小节: tch_create_scorm_section, tch_create_document_section,")
     print("        tch_create_video_section, tch_create_article_section,")
     print("        tch_create_infographic_section, tch_create_survey_section,")
