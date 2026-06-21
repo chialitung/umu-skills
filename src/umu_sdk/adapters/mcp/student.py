@@ -21,12 +21,15 @@ Environment Variables:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncIterator
+from urllib.parse import parse_qs, urlparse
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -390,6 +393,125 @@ def _makeweikestatus_sequence(
         "failed_actions": [r["action"] for r in failed],
         "results": results,
     }
+
+
+def _format_scorm_total_time(seconds: int) -> str:
+    """将秒数转换为 SCORM 1.2 cmi.core.total_time 格式 HHHH:MM:SS.SS."""
+    seconds = max(0, seconds)
+    hours, rem = divmod(seconds, 3600)
+    mins, secs = divmod(rem, 60)
+    return f"{hours:04d}:{mins:02d}:{secs:02d}.00"
+
+
+def _parse_scorm_launch_url(url: str) -> dict[str, str]:
+    """从 SCORM launch URL 解析 Moodle 运行时参数。
+
+    返回 dict，包含 subdomain, a, scoid, course, sesskey, attempt。
+    """
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        raise ValueError("launch url 缺少 host")
+
+    parts = parsed.hostname.split(".")
+    subdomain = parts[0] if parts else ""
+
+    path_parts = parsed.path.strip("/").split("/")
+    # 期望路径: /scorm/{a}/launch/{scoid}/course/{course}/element/{base64_id}
+    if (
+        len(path_parts) >= 7
+        and path_parts[0] == "scorm"
+        and path_parts[2] == "launch"
+        and path_parts[4] == "course"
+        and path_parts[6] == "element"
+    ):
+        params: dict[str, str] = {
+            "a": path_parts[1],
+            "scoid": path_parts[3],
+            "course": path_parts[5],
+        }
+    else:
+        params = {}
+
+    qs = parse_qs(parsed.query)
+    params.update({k: v[0] for k, v in qs.items()})
+    params.setdefault("attempt", "1")
+    params["subdomain"] = subdomain
+
+    required = ["a", "scoid", "course", "sesskey"]
+    missing = [k for k in required if not params.get(k)]
+    if missing:
+        raise ValueError(f"launch url 缺少必要参数: {missing}")
+
+    return params
+
+
+def _post_scorm_datamodel(
+    client: UMUClient,
+    launch_params: dict[str, str],
+    extra_fields: dict[str, str],
+) -> str:
+    """向 Moodle datamodel.php 提交一条 CMI 记录。
+
+    datamodel.php 返回 text/plain，成功时以 true 开头，因此不能复用 client.post。
+    """
+    url = f'https://{launch_params["subdomain"]}.m.umu.cn/mod/scorm/datamodel.php'
+    form: dict[str, str] = {
+        "id": "",
+        "a": launch_params["a"],
+        "sesskey": launch_params["sesskey"],
+        "attempt": launch_params.get("attempt", "1"),
+        "scoid": launch_params["scoid"],
+    }
+    form.update(extra_fields)
+
+    headers = client.auth.get_auth_headers()
+    headers["Content-Type"] = "application/x-www-form-urlencoded"
+
+    response = client.http.post(url, data=form, headers=headers, follow_redirects=False)
+    text = (response.text or "").strip()
+    if not text.startswith("true"):
+        raise RuntimeError(f"datamodel.php 提交失败 ({response.status_code}): {text[:200]}")
+    return text
+
+
+def _resolve_scorm_launch_params(
+    client: UMUClient,
+    element_id: str,
+    provided_url: str | None = None,
+) -> dict[str, str]:
+    """解析 SCORM 启动参数。
+
+    优先使用调用方显式提供的 launch URL；否则尝试从 element 详情中查找 launch URL。
+    自动发现失败时抛出 ValueError。
+    """
+    if provided_url:
+        return _parse_scorm_launch_url(provided_url)
+
+    # 1. 尝试从 element 详情中读取 launch 相关字段
+    try:
+        r = client.get(client.desktop_url(f"/uapi/v1/element/{element_id}"))
+        element_data = r.get("data", {}) or {}
+        setup = element_data.get("setup", {}) or {}
+
+        for key in ("scorm_launch_url", "launch_url", "resource_url"):
+            url = element_data.get(key) or setup.get(key)
+            if url and "scorm" in url:
+                return _parse_scorm_launch_url(str(url))
+
+        # 2. 跟踪 share_url 重定向，看是否会落到 launch URL
+        share_url = element_data.get("share_url") or setup.get("share_url")
+        if share_url:
+            headers = client.auth.get_auth_headers()
+            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            resp = client.http.get(share_url, headers=headers, follow_redirects=False)
+            if resp.status_code in (301, 302, 307, 308):
+                location = resp.headers.get("location", "")
+                if "scorm" in location and "launch" in location:
+                    return _parse_scorm_launch_url(location)
+    except Exception as e:
+        print(f"[_resolve_scorm_launch_params] 自动发现失败: {e}", file=sys.stderr)
+
+    raise ValueError("无法自动发现 SCORM 启动参数，请提供 scorm_launch_url")
 
 
 # ---------------------------------------------------------------------------
