@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "umu-skills"
-version = "0.22.0"
+version = "0.23.0"
 description = "An unofficial, third-party AI Skill framework for UMU Learning Platform operations via MCP"
 readme = "README.md"
 requires-python = ">=3.10"

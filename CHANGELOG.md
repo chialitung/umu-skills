@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-06-27
+
+### Added
+- 新增 Kimi Code CLI 支持：
+  - 新增安装模块 `src/umu_sdk/skills/kimi/install.py`，支持一键安装到 Kimi Code CLI。
+  - 在 `~/.kimi-code/mcp.json` 注册 3 个 stdio MCP server：`umu-teacher`、`umu-student`、`umu-admin`。
+  - 提供 4 个 Kimi Skill：`umu`、`umu-teacher`、`umu-student`、`umu-admin`，安装到 `~/.kimi-code/skills/`。
+  - 支持 `/umu`、`/umu-teacher`（`/umut`）、`/umu-student`（`/umus`）、`/umu-admin`（`/umua`）斜杠命令调用。
+  - 安装脚本支持 `--check`、`--upgrade`、`--semantic-trigger`、`--kimi-code-home` 及 `alias` 子命令。
+  - 新增 PyPI console script：`umu-skills-install-kimi`。
+  - 新增测试 `tests/test_kimi_install.py`。
+  - 更新 `README.md` 与 `AGENTS.md`，补充 Kimi Code CLI 安装使用说明与最小化交付规则。
+
 ## [0.22.0] - 2026-06-21
 
 ### Changed
