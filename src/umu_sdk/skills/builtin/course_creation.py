@@ -86,10 +86,23 @@ async def create_course_with_scorm(
             "next_action": "retry",
         }
 
+    # 3. 获取课程访问码供学员端解析使用
+    ctx.logger.info("[create_course_with_scorm] 获取课程访问信息 %s", group_id)
+    course_info = await ctx.call_tool(
+        server="teacher",
+        tool="tch_get_course",
+        arguments={"group_id": group_id},
+    )
+    access_code = ""
+    if course_info.get("success"):
+        info_data = course_info.get("data") or {}
+        access_code = info_data.get("access_code") or ""
+
     return {
         "success": True,
         "data": {
             "group_id": group_id,
+            "access_code": access_code,
             "section_result": section_result.get("data"),
         },
         "error_code": "",

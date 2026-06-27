@@ -283,7 +283,10 @@ def _build_access_account_payload(
         "account_type": account_type,
         "id": str(account.get("id", "")),
     }
-    if account_type == "class":
+    if account_type == "user":
+        # 课程/项目访问权限接口要求用户必须提供 umu_id，仅 id 会被忽略。
+        payload["umu_id"] = str(account.get("umu_id", account.get("id", "")))
+    elif account_type == "class":
         payload["class_id"] = str(account.get("class_id", account.get("id", "")))
     elif account_type == "department":
         payload["department_id"] = str(account.get("department_id", account.get("id", "")))

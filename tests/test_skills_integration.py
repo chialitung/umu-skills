@@ -212,6 +212,7 @@ class TestTeacherCreateAndStudentLearn:
                     "scorm_resource_id": "res-scorm",
                 },
             ),
+            ("teacher", "tch_get_course", {"group_id": "g-course"}),
             (
                 "teacher",
                 "tch_create_video_section",

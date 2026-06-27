@@ -348,13 +348,8 @@ class CourseBuilder:
         self._mark_write()
         logger.info("课程创建成功: group_id=%s", group_id)
 
-        return {
-            "group_id": group_id,
-            "title": title,
-            "multimedia_id": multimedia_id,
-            "cover_url": cover_url,
-            "bg_url": bg_url,
-        }
+        # 返回完整课程详情（含 access_code、s_key、share_url 等）
+        return self.get_course(group_id)
 
     # ------------------------------------------------------------------
     # 获取课程信息
@@ -1039,11 +1034,10 @@ class CourseBuilder:
         self._mark_write()
         logger.info("课程修改成功: group_id=%s", group_id)
 
-        return {
-            "group_id": group_id,
-            "changes": list(changes.keys()),
-            "title": group_info.get("groupTitle", ""),
-        }
+        # 返回完整课程详情（含 access_code、s_key、share_url 等）
+        updated_info = self.get_course(group_id)
+        updated_info["changes"] = list(changes.keys())
+        return updated_info
 
     # ------------------------------------------------------------------
     # 辅助方法：处理富文本中的本地图片
@@ -3030,6 +3024,8 @@ class CourseBuilder:
             cover_resource_id = ""
             if section_arr:
                 extend = section_arr[0].get("questionInfo", {}).get("extend", {})
+                if not isinstance(extend, dict):
+                    extend = {}
                 video_id = extend.get("resource_video_id", "")
                 doc_id = extend.get("resource_id", "")
                 if video_id:

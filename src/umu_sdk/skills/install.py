@@ -55,9 +55,14 @@ def _get_claude_config_dir() -> Path:
     return Path.home() / ".claude"
 
 
-def _get_global_skill_dir() -> Path:
-    """返回 Claude Code 全局 skill 安装目录."""
-    return _get_claude_config_dir() / "skills" / "umu"
+def _get_global_skills_root() -> Path:
+    """返回 Claude Code 全局 skill 安装根目录."""
+    return _get_claude_config_dir() / "skills"
+
+
+def _get_global_skill_dir(skill_name: str = "umu") -> Path:
+    """返回指定 skill 的全局安装目录."""
+    return _get_global_skills_root() / skill_name
 
 
 def _get_credential_dir() -> Path:
@@ -70,9 +75,9 @@ def _get_old_credential_dir() -> Path:
     return _get_claude_config_dir() / "skills" / "umu"
 
 
-def _get_project_skill_dir() -> Path:
-    """返回项目中的 skill 源目录（开发模式优先使用）."""
-    return Path(__file__).resolve().parents[3] / ".claude" / "skills" / "umu"
+def _get_project_skills_root() -> Path:
+    """返回项目中的 skill 源根目录（开发模式优先使用）."""
+    return Path(__file__).resolve().parents[3] / ".claude" / "skills"
 
 
 # SKILL.md 模板中两套 description / 触发条件片段
@@ -127,13 +132,13 @@ _ALIAS_PATTERN = re.compile(r"^[\w\s一-鿿\-_.]+$")
 
 
 @contextlib.contextmanager
-def _get_bundled_skill_dir() -> Iterator[Path]:
-    """返回包内自带的 skill 源目录上下文.
+def _get_bundled_skills_root() -> Iterator[Path]:
+    """返回包内自带的 skill 源根目录上下文.
 
-    当脚本从 PyPI 安装的包中运行时，项目目录下的 `.claude/skills/umu`
+    当脚本从 PyPI 安装的包中运行时，项目目录下的 `.claude/skills`
     不存在，此时从 wheel 内嵌的 bundled 资源中提取。
     """
-    ref = resources.files("umu_sdk.skills.bundled") / "umu"
+    ref = resources.files("umu_sdk.skills.bundled")
     with resources.as_file(ref) as path:
         yield path
 
@@ -365,12 +370,21 @@ def _render_skill_md(
     skill_md_path.write_text(content, encoding="utf-8")
 
 
-def _perform_install(source: Path, semantic_trigger: bool | None = None) -> None:
-    """执行 skill 复制、settings 更新、凭证目录初始化和配置管理."""
-    target = _get_global_skill_dir()
+def _perform_install(source_root: Path, semantic_trigger: bool | None = None) -> list[str]:
+    """执行 skill 复制、settings 更新、凭证目录初始化和配置管理.
 
-    # 1. 读取已有配置（如果存在），用于保留用户选择
-    existing_config = _load_skill_config(target) if target.exists() else {}
+    Args:
+        source_root: skill 源根目录，其下每个子目录对应一个 skill。
+        semantic_trigger: 是否启用语义自动触发（仅影响 umu skill）。
+
+    Returns:
+        已安装的 skill 名称列表。
+    """
+    target_root = _get_global_skills_root()
+
+    # 1. 读取 umu skill 的已有配置（如果存在），用于保留用户选择
+    umu_target = _get_global_skill_dir("umu")
+    existing_config = _load_skill_config(umu_target) if umu_target.exists() else {}
 
     # 2. 确定最终开关值：CLI 参数 > 已有配置 > 默认 False
     final_semantic_trigger = semantic_trigger
@@ -382,25 +396,37 @@ def _perform_install(source: Path, semantic_trigger: bool | None = None) -> None
     if not isinstance(existing_aliases, list):
         existing_aliases = []
 
-    # 4. 合并并保存 config.json（保留未知字段以向前兼容）
-    config_to_save: dict = {
+    # 4. umu skill 的 config（保留未知字段以向前兼容）
+    umu_config_to_save: dict = {
         "semantic_trigger_enabled": final_semantic_trigger,
         "aliases": existing_aliases,
     }
     for key, value in existing_config.items():
-        if key not in config_to_save:
-            config_to_save[key] = value
+        if key not in umu_config_to_save:
+            umu_config_to_save[key] = value
 
-    # 5. 复制源文件（会清空 target）
-    _copy_skill(source, target)
+    # 5. 遍历并安装所有 skill（只处理包含 SKILL.md 的目录）
+    installed_skills: list[str] = []
+    for skill_dir in sorted(source_root.iterdir()):
+        if not skill_dir.is_dir():
+            continue
+        if not (skill_dir / "SKILL.md").exists():
+            continue
+        skill_name = skill_dir.name
+        target = target_root / skill_name
+        _copy_skill(skill_dir, target)
+        installed_skills.append(skill_name)
 
-    # 6. 写入 config.json 并渲染 SKILL.md
-    _save_skill_config(target, config_to_save)
-    _render_skill_md(
-        target,
-        semantic_trigger_enabled=final_semantic_trigger,
-        aliases=existing_aliases,
-    )
+        if skill_name == "umu":
+            _save_skill_config(target, umu_config_to_save)
+            _render_skill_md(
+                target,
+                semantic_trigger_enabled=final_semantic_trigger,
+                aliases=existing_aliases,
+            )
+        else:
+            # 显式角色入口不需要语义触发/别名，写入空配置占位
+            _save_skill_config(target, {})
 
     # 6. 更新 settings.json 和凭证目录
     settings = _load_settings()
@@ -408,6 +434,17 @@ def _perform_install(source: Path, semantic_trigger: bool | None = None) -> None
     _save_settings(settings)
 
     _init_credentials(_get_credential_dir())
+    return installed_skills
+
+
+def _has_skill_sources(source_root: Path) -> bool:
+    """判断目录下是否包含有效的 skill 源."""
+    if not source_root.exists():
+        return False
+    return any(
+        item.is_dir() and (item / "SKILL.md").exists()
+        for item in source_root.iterdir()
+    )
 
 
 def install(upgrade: bool = False, semantic_trigger: bool | None = None) -> None:
@@ -416,20 +453,21 @@ def install(upgrade: bool = False, semantic_trigger: bool | None = None) -> None
 
     _ensure_package_installed(upgrade=upgrade)
 
-    project_source = _get_project_skill_dir()
-    if project_source.exists():
+    project_source = _get_project_skills_root()
+    if _has_skill_sources(project_source):
         print(f"使用项目 skill 源: {project_source}\n")
-        _perform_install(project_source, semantic_trigger=semantic_trigger)
+        installed = _perform_install(project_source, semantic_trigger=semantic_trigger)
     else:
         print("使用包内自带的 skill 文件\n")
-        with _get_bundled_skill_dir() as source:
-            _perform_install(source, semantic_trigger=semantic_trigger)
+        with _get_bundled_skills_root() as source:
+            installed = _perform_install(source, semantic_trigger=semantic_trigger)
 
     print("\n=== 安装完成 ===")
-    print(f"Skill 目录: {_get_global_skill_dir()}")
+    print(f"已安装 Skill: {', '.join(installed)}")
+    print(f"Skill 根目录: {_get_global_skills_root()}")
     print(f"加密凭证目录: {_get_credential_dir()}")
     print(f"配置文件: {_get_settings_path()}")
-    print("\n下一步：重启 Claude Code，然后输入 /umu 触发 skill")
+    print("\n下一步：重启 Claude Code，然后输入 /umu /umua /umut /umus 触发对应 skill")
 
 
 def _check_installation() -> int:
@@ -448,12 +486,14 @@ def _check_installation() -> int:
         ok = False
 
     # 2. Skill 目录检查
-    skill_dir = _get_global_skill_dir()
-    if skill_dir.exists() and (skill_dir / "SKILL.md").exists():
-        print(f"✓ Skill 目录存在: {skill_dir}")
-    else:
-        print(f"✗ Skill 目录缺失: {skill_dir}")
-        ok = False
+    required_skills = ["umu", "umu-admin", "umu-teacher", "umu-student"]
+    for skill_name in required_skills:
+        skill_dir = _get_global_skill_dir(skill_name)
+        if skill_dir.exists() and (skill_dir / "SKILL.md").exists():
+            print(f"✓ Skill 目录存在: {skill_dir}")
+        else:
+            print(f"✗ Skill 目录缺失: {skill_dir}")
+            ok = False
 
     # 3. settings.json 检查
     settings_path = _get_settings_path()
@@ -497,14 +537,15 @@ def _check_installation() -> int:
     else:
         print(f"○ 尚未保存加密凭证，首次 /umu 会引导录入（{creds_dir}）")
 
-    # 5. 语义触发开关检查
-    skill_config = _load_skill_config(skill_dir)
+    # 5. 语义触发开关检查（仅 umu skill 支持）
+    umu_skill_dir = _get_global_skill_dir("umu")
+    skill_config = _load_skill_config(umu_skill_dir)
     semantic_enabled = skill_config.get("semantic_trigger_enabled", False)
     status = "已开启" if semantic_enabled else "已关闭"
     print(f"○ 语义自动触发: {status}")
 
     # 6. 别名检查
-    aliases = list_aliases(skill_dir)
+    aliases = list_aliases(umu_skill_dir)
     if aliases:
         print(f"○ 已配置别名: {', '.join(aliases)}")
     else:
@@ -512,7 +553,7 @@ def _check_installation() -> int:
 
     print()
     if ok:
-        print("状态正常，重启 Claude Code 后即可使用 /umu")
+        print("状态正常，重启 Claude Code 后即可使用 /umu /umua /umut /umus")
         return 0
     print("状态异常，请运行: python -m umu_sdk.skills.install")
     return 1

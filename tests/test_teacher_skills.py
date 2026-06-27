@@ -412,6 +412,18 @@ class TestManageCourseCollaborators:
                 "success": True,
                 "data": {"account": "a@example.com", "role_label": "编辑者"},
             },
+            # 邀请成功后实现会回查协同者列表以回填 cooperation_info_id
+            ("teacher", "tch_list_course_collaborators"): {
+                "success": True,
+                "data": {
+                    "collaborators": [
+                        {
+                            "teacher_email": "a@example.com",
+                            "cooperation_info_id": "coop-123",
+                        }
+                    ]
+                },
+            },
         }
         mock_mcp = MockMCPClientManager(responses)
         skills_server._skill_registry = registry_with_teacher_skills
@@ -428,12 +440,15 @@ class TestManageCourseCollaborators:
         )
         parsed = json.loads(result)
         assert parsed["success"] is True
+        # 实现应把列表里匹配到的 cooperation_info_id 回填进返回数据
+        assert parsed["data"]["cooperation_info_id"] == "coop-123"
         assert mock_mcp.calls == [
             (
                 "teacher",
                 "tch_invite_course_collaborator",
                 {"group_id": "g1", "keyword": "a@example.com", "role_type": "editor"},
             ),
+            ("teacher", "tch_list_course_collaborators", {"group_id": "g1"}),
         ]
 
     async def test_list_action(self, registry_with_teacher_skills: SkillRegistry) -> None:

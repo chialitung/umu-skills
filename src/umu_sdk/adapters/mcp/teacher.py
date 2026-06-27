@@ -2699,15 +2699,11 @@ async def tch_create_course(
 
         group_id = course["group_id"]
 
+        # 保留旧字段兼容性，同时补充 course_url
+        course["course_url"] = f"{client.base_url}/course/?groupId={group_id}"
+
         return _ok(
-            data={
-                "group_id": group_id,
-                "title": title,
-                "cover_url": cover_url,
-                "bg_url": bg_url,
-                "multimedia_id": course.get("multimedia_id", ""),
-                "course_url": f"{client.base_url}/course/?groupId={group_id}",
-            },
+            data=course,
             next_action="proceed",
             suggested_action="课程创建成功。调用 tch_create_scorm_section 添加 SCORM 小节",
         )

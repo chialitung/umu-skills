@@ -256,7 +256,10 @@ async def test_stu_complete_scorm_section_wrapper_success() -> None:
 
     mock_extract.assert_called_once()
     calls = mock_commit.call_args_list
-    assert len(calls) == 2
+    # UMU 自研 wrapper 单次 POST 完整 cmi 即生效（status==1），
+    # 不同于 Moodle 路径的「datamodel 增量 + 空 LMSCommit 收尾」两步协议，
+    # 因此 wrapper 路径只提交一次。
+    assert len(calls) == 1
     cmi = calls[0][0][2]
     assert cmi["core"]["lesson_status"] == "completed"
     assert cmi["core"]["score"]["raw"] == "95"

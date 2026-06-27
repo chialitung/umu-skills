@@ -61,6 +61,28 @@ async def manage_course_collaborators(
                 "role_type": role_type,
             },
         )
+        # 邀请成功后，列出协同者以获取 cooperation_info_id，供后续更新/移除使用
+        if result.get("success"):
+            list_result = await ctx.call_tool(
+                server="teacher",
+                tool="tch_list_course_collaborators",
+                arguments={"group_id": group_id},
+            )
+            if list_result.get("success"):
+                # tch_invite_course_collaborator 返回的 teacher_id 对应列表中的 umu_id
+                invited_account_id = result.get("data", {}).get("teacher_id") or result.get("data", {}).get("umu_id", "")
+                invited_account = result.get("data", {}).get("account", "")
+                for item in list_result.get("data", {}).get("collaborators", []):
+                    matched = False
+                    if invited_account_id and str(item.get("umu_id", "")) == str(invited_account_id):
+                        matched = True
+                    elif invited_account_id and str(item.get("teacher_id", "")) == str(invited_account_id):
+                        matched = True
+                    elif invited_account and item.get("teacher_email") == invited_account:
+                        matched = True
+                    if matched:
+                        result["data"]["cooperation_info_id"] = item.get("cooperation_info_id")
+                        break
     elif action == "update_role":
         if not cooperation_info_id or not role_type:
             return {

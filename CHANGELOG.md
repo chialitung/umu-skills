@@ -34,8 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.20.1] - 2026-06-20
 
-### Changed
-- `README.md`：将 WorkBuddy 使用章节前置到 Python SDK 章节之前；将所有 `Cline` 替换为 `WorkBuddy`，并在客户端列表中置于 `Cursor` 之前。
+- 
 
 ## [0.20.0] - 2026-06-20
 

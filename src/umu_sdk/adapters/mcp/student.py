@@ -263,9 +263,28 @@ def _get_html(client: UMUClient, url: str) -> str:
     return resp.text
 
 
+def _extract_group_and_skey(url: str) -> tuple[str | None, str | None]:
+    """从 URL 字符串中提取 group_id 和 s_key.
+
+    支持从 access-denied 等中间页的 from_url 参数递归解析。
+    """
+    parsed_match = re.search(r"groupId[=:](\d+)", url, re.IGNORECASE)
+    skey_match = re.search(r"sKey[=:]([a-zA-Z0-9]+)", url, re.IGNORECASE)
+    if parsed_match:
+        return parsed_match.group(1), skey_match.group(1) if skey_match else ""
+
+    # 某些拦截页会把真实课程链接放在 from_url 查询参数中
+    query = urlparse(url).query
+    from_url = parse_qs(query).get("from_url", [""])[0]
+    if from_url:
+        return _extract_group_and_skey(from_url)
+
+    return None, None
+
+
 def _resolve_course_identifier(
     client: UMUClient, identifier: str
-) -> tuple[str, str, str]:
+) -> tuple[str, str | None, str]:
     """解析课程标识符，提取 group_id 和 s_key.
 
     支持三种输入格式：
@@ -297,12 +316,8 @@ def _resolve_course_identifier(
     # 而 sKey 是报名检测的必需参数。请使用访问码、短域名或带 sKey 的完整 URL。
 
     # 尝试从 URL 中提取参数
-    parsed_match = re.search(r"groupId[=:](\d+)", url, re.IGNORECASE)
-    skey_match = re.search(r"sKey[=:]([a-zA-Z0-9]+)", url, re.IGNORECASE)
-
-    if parsed_match:
-        group_id = parsed_match.group(1)
-        s_key = skey_match.group(1) if skey_match else ""
+    group_id, s_key = _extract_group_and_skey(url)
+    if group_id:
         return group_id, s_key, url
 
     # 需要通过 HTTP 请求获取重定向后的真实 URL
@@ -312,12 +327,8 @@ def _resolve_course_identifier(
         resp = client.http.get(url, headers=h, timeout=client.timeout)
         final_url = str(resp.url)
 
-        parsed_match = re.search(r"groupId[=:](\d+)", final_url, re.IGNORECASE)
-        skey_match = re.search(r"sKey[=:]([a-zA-Z0-9]+)", final_url, re.IGNORECASE)
-
-        if parsed_match:
-            group_id = parsed_match.group(1)
-            s_key = skey_match.group(1) if skey_match else ""
+        group_id, s_key = _extract_group_and_skey(final_url)
+        if group_id:
             return group_id, s_key, final_url
     except Exception:
         pass
@@ -458,14 +469,47 @@ def _format_scorm_total_time(seconds: int) -> str:
 
 
 def _extract_page_data_json(html: str) -> dict[str, Any] | None:
-    """从 HTML 中提取 `var pageData = {...};` 并解析为 dict。"""
-    m = re.search(r"var\s+pageData\s*=\s*(\{.*?\});?\s*<\/script>", html, re.DOTALL)
-    if not m:
+    """从 HTML 中提取 `window.pageData = {...}` 或 `var pageData = {...}` 并解析为 dict。"""
+    for marker in ("window.pageData=", "var pageData=", "window.pageData =", "var pageData ="):
+        idx = html.find(marker)
+        if idx >= 0:
+            i = idx + len(marker)
+            break
+    else:
         return None
-    try:
-        return json.loads(m.group(1))
-    except Exception:
+
+    # 跳过空白
+    while i < len(html) and html[i] in " \t\n\r":
+        i += 1
+    if i >= len(html) or html[i] != "{":
         return None
+
+    # 使用大括号深度计数提取完整 JSON 对象（忽略字符串内的大括号）
+    depth = 0
+    in_string = False
+    escape = False
+    for j in range(i, len(html)):
+        c = html[j]
+        if in_string:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_string = False
+            continue
+        if c == '"':
+            in_string = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(html[i : j + 1])
+                except Exception:
+                    return None
+    return None
 
 
 def _extract_uscorm_runtime(
@@ -1184,11 +1228,11 @@ async def stu_get_my_courses(
     def _format_course(c: dict[str, Any]) -> dict[str, Any]:
         return {
             "group_id": str(c.get("group_id", c.get("id", ""))),
-            "title": c.get("title", ""),
-            "cover_url": c.get("cover_url", c.get("cover", "")),
-            "status": c.get("status", ""),
-            "is_finished": c.get("is_finished", False),
-            "complete_rate": c.get("complete_rate", 0),
+            "title": c.get("group_title", c.get("title", "")),
+            "cover_url": c.get("show_pic", c.get("cover_url", c.get("cover", ""))),
+            "status": c.get("learn_status", c.get("status", "")),
+            "is_finished": c.get("learn_status") == 3 or c.get("is_finished", False),
+            "complete_rate": c.get("finish_ratio", c.get("complete_rate", 0)),
         }
 
     def _fetch_page(
@@ -1199,8 +1243,8 @@ async def stu_get_my_courses(
             endpoints_to_try = [preferred_endpoint]
         else:
             endpoints_to_try = [
+                client.desktop_url(f"/api/group/getmyparticipatedgrouplist?t={int(time.time()*1000)}&learn_status=0&page={p}&size={sz}"),
                 client.desktop_url(f"/uapi/v1/course/list-my-course?page={p}&size={sz}"),
-                client.mobile_url(f"/uapi/v2/course/list-my-course?page={p}&size={sz}"),
                 client.desktop_url(f"/uapi/v1/course/my-courses?page={p}&size={sz}"),
             ]
 
@@ -1208,7 +1252,7 @@ async def stu_get_my_courses(
         for url in endpoints_to_try:
             try:
                 r = client.get(url)
-                if r.get("error_code") == 0:
+                if r.get("error_code") == 0 or r.get("status") in (True, "true"):
                     data = r.get("data", {})
                     items = data.get("list", []) if isinstance(data, dict) else data
                     courses = [_format_course(c) for c in items]
@@ -1216,7 +1260,7 @@ async def stu_get_my_courses(
                     total_all = int(page_info.get("list_total_num", 0) or 0)
                     return courses, total_all, url
                 else:
-                    last_error = r.get("message", "未知错误")
+                    last_error = r.get("message", r.get("error", "未知错误"))
             except Exception as e:
                 last_error = str(e)
                 continue
@@ -1549,8 +1593,6 @@ async def stu_complete_scorm_section(
                 suspend_data_json=suspend_data_json,
             )
             _post_uscorm_commit(client, launch_params, cmi)
-            # 空 commit，模拟 LMSCommit("")
-            _post_uscorm_commit(client, launch_params, {})
         else:
             extra: dict[str, str] = {"cmi__core__lesson_status": status}
             if score is not None:
@@ -1709,10 +1751,10 @@ def _question_type_name(qtype: int | None, is_exam: bool = False) -> str:
 
     问卷 API 和考试 API 返回的 type 值不同:
     - 问卷: 2=单选, 3=多选, 4=文本, 5=评分
-    - 考试: 0=单选, 1=多选, 3=文本
+    - 考试: 0=单选, 1=多选, 2=文本/开放题, 3=文本/开放题
     """
     if is_exam:
-        names = {0: "单选", 1: "多选", 3: "文本"}
+        names = {0: "单选", 1: "多选", 2: "文本", 3: "文本"}
     else:
         names = {2: "单选", 3: "多选", 4: "文本", 5: "评分"}
     return names.get(qtype or 0, "未知")
@@ -1979,12 +2021,19 @@ def _validate_answers_against_questions(
                 )
             continue  # 选填题目跳过验证
 
-        # 统一处理问卷和考试的单选/多选类型
-        # 问卷: 2=单选, 3=多选 | 考试: 0=单选, 1=多选
-        is_single = qtype == 2 or (for_exam and qtype == 0)
-        is_multi = qtype == 3 or (for_exam and qtype == 1)
+        # 问卷和考试的 type 码值不同，需分开判断
+        # 问卷: 2=单选, 3=多选, 4=文本, 5=数值
+        # 考试: 0=单选, 1=多选, 2=文本/开放题, 3=文本/开放题
+        if for_exam:
+            is_single = qtype == 0
+            is_multi = qtype == 1
+            is_open = qtype in (2, 3)
+        else:
+            is_single = qtype == 2
+            is_multi = qtype == 3
+            is_open = qtype == 4
 
-        if is_single:  # 单选（问卷type=2 或 考试type=0）
+        if is_single:  # 单选
             if len(a) != 1:
                 return False, (
                     f"第{i + 1}题「{q_title}」为单选题，答案应为单个字母"
@@ -2004,7 +2053,7 @@ def _validate_answers_against_questions(
                     f"请将答案改为 A-{opt_max_label} 中的一个。"
                 )
 
-        elif is_multi:  # 多选（问卷type=3 或 考试type=1）
+        elif is_multi:  # 多选
             if opt_count == 0:
                 # 无选项的多选题（如考试中标记为多选但实际是开放式问题），
                 # 跳过字母/范围验证，将答案当作文本处理
@@ -2031,15 +2080,10 @@ def _validate_answers_against_questions(
                     )
                 seen.add(ch.upper())
 
-        elif qtype == 4 or (for_exam and qtype == 3):  # 开放题（问卷type=4 或 考试type=3）
+        elif is_open:  # 开放题
             pass  # 非空已在上面检查
 
-        elif qtype == 5:  # 数值/评分（仅问卷）
-            if for_exam:
-                return False, (
-                    f"第{i + 1}题「{q_title}」为数值题，但考试暂不支持数值题。"
-                    f"请检查答案配置是否对应正确的小节。"
-                )
+        elif qtype == 5 and not for_exam:  # 数值/评分（仅问卷）
             try:
                 float(a)
             except ValueError:
@@ -2122,8 +2166,8 @@ def _build_exam_answers_json(
     Returns:
         考试 saveAnswer API 需要的 answer_list 数组
     """
-    # 考试 API 的题目类型: 0=单选, 1=多选, 3=文本
-    type_map = {0: "radio", 1: "checkbox", 3: "textarea"}
+    # 考试 API 的题目类型: 0=单选, 1=多选, 2=文本/开放题, 3=文本/开放题
+    type_map = {0: "radio", 1: "checkbox", 2: "textarea", 3: "textarea"}
     result: list[dict[str, Any]] = []
 
     for q, a in zip(questions, answers):
@@ -2160,7 +2204,7 @@ def _build_exam_answers_json(
                 entry["content"] = a
                 entry["pic_url"] = []
 
-        elif qtype == 3:  # 文本/开放题
+        elif qtype in (2, 3):  # 文本/开放题
             entry["answer_ids"] = []
             entry["content"] = a
             entry["pic_url"] = []
@@ -2836,14 +2880,16 @@ async def stu_submit_exam_with_config(
                     )
                 type_name = _question_type_name(qtype, is_exam=True)
                 req_tag = "必填" if _is_question_required(q) else "选填"
-                # 构造该题的可接受答案格式提示
-                if qtype == 2:
+                # 构造该题的可接受答案格式提示（考试类型: 0=单选, 1=多选, 2/3=开放题）
+                if qtype == 0:
                     fmt_hint = f"单个字母(A-{chr(ord('A') + len(options) - 1)})"
-                elif qtype == 3:
+                elif qtype == 1:
                     if options:
                         fmt_hint = f"连续字母(如 AB, A-{chr(ord('A') + len(options) - 1)})"
                     else:
                         fmt_hint = "直接文本"
+                elif qtype in (2, 3):
+                    fmt_hint = "直接文本"
                 elif qtype == 4:
                     fmt_hint = "直接文本"
                 elif qtype == 5:

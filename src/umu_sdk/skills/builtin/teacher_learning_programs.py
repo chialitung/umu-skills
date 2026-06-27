@@ -220,13 +220,13 @@ async def create_learning_program(
         }
 
     program_id = create_result.get("data", {}).get("program_id")
-    if not program_id:
+    if not program_id or str(program_id) in ("0", ""):
         return {
             "success": False,
             "data": create_result.get("data"),
             "error_code": "MISSING_PROGRAM_ID",
-            "error_message": "创建学习项目成功，但响应中无 program_id",
-            "suggested_action": "请检查 tch_create_learning_program 返回结构",
+            "error_message": "创建学习项目成功，但响应中无有效 program_id",
+            "suggested_action": "请检查 tch_create_learning_program 返回结构或 API 是否可用",
             "next_action": "needs_user_input",
         }
 
