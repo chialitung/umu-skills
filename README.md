@@ -14,7 +14,7 @@
 >
 > UMU 的接口随时可能变更，本项目不保证长期可用。
 
-UMU Skills 是一个 AI 技能框架，它将 UMU 学习平台的管理操作封装为可供 AI 助手调用的工具。它通过 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 与 Claude、WorkBuddy、Cursor 等 AI 客户端集成。
+UMU Skills 是一个 AI 技能框架，它将 UMU 学习平台的管理操作封装为可供 AI 助手调用的工具。它通过 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 与 Claude Code、WorkBuddy、Kimi Code CLI、Cursor 等 AI 客户端集成。
 
 ## 功能特性
 
@@ -65,17 +65,6 @@ umu_skills/
 
 **设计原则**：业务逻辑（tools）与协议适配器（adapters）分离。新增一个 AI 平台只需添加新的适配器即可。
 
-## 安装
-
-```bash
-pip install umu-skills
-```
-
-> 如果你正在修改本仓库源码，使用开发模式安装：
-> ```bash
-> pip install -e ".[dev,mcp]"
-> ```
-
 ## 快速开始
 
 ### 3 分钟在 Claude Code 中使用 `/umu`（推荐）
@@ -109,6 +98,8 @@ python -m umu_sdk.skills.install --check
 # 强制升级到最新版
 python -m umu_sdk.skills.install --upgrade
 ```
+
+> **老用户升级提示**：升级 `umu-skills` 包后，必须重新运行 `python -m umu_sdk.skills.install --upgrade`，否则 `~/.claude/skills/` 下的 skill 文件不会自动更新，新的 `/umua`、`/umut`、`/umus` 等 slash command 将无法识别。安装完成后请重启 Claude Code。
 
 #### 3. 重启 Claude Code
 
@@ -179,6 +170,74 @@ Skill 文件仍位于各 AI 工具默认目录（Claude Code 为 `~/.claude/skil
 ```
 
 支持的别名：`/umua` = `/umuadmin`，`/umut` = `/umuteacher`，`/umus` = `/umustudent`。
+
+## 在 Kimi Code CLI 中使用
+
+Kimi Code CLI 安装后，可以通过 `/umu` 斜杠命令操作 UMU 平台。
+
+### 安装
+
+```bash
+python -m umu_sdk.skills.kimi.install
+```
+
+或使用 PyPI 安装后的命令：
+
+```bash
+umu-skills-install-kimi
+```
+
+安装脚本会：
+
+1. 检查并安装 `umu-skills[mcp]` 包。
+2. 将 4 个 skill 复制到 `~/.kimi-code/skills/`。
+3. 在 `~/.kimi-code/mcp.json` 注册 `umu-teacher`、`umu-student`、`umu-admin` 三个 MCP server。
+4. 初始化加密凭证目录 `~/.umu_skills/`。
+
+### 启用语义自动触发（可选）
+
+默认只有输入 `/umu` 时才触发。如果你想让 Kimi 在识别到 UMU 操作意图时自动调用，可运行：
+
+```bash
+python -m umu_sdk.skills.kimi.install --semantic-trigger
+```
+
+关闭：
+
+```bash
+python -m umu_sdk.skills.kimi.install --no-semantic-trigger
+```
+
+### 重启 Kimi Code CLI
+
+安装完成后**必须重启 Kimi Code CLI**，新 skill 和 MCP server 才会生效。
+
+### 配置账号
+
+首次触发 `/umu` 时，会引导你录入至少一个角色的账号和密码。账号信息加密保存在 `~/.umu_skills/credentials.enc`。
+
+### 使用示例
+
+```
+/umu 帮我创建一个课程
+/umu-teacher 上传 SCORM 课件
+/umu-student 帮我报名课程 aet504
+/umu-admin 查询最近的学习记录
+```
+
+### 故障排查
+
+运行检查命令：
+
+```bash
+python -m umu_sdk.skills.kimi.install --check
+```
+
+如需强制更新：
+
+```bash
+python -m umu_sdk.skills.kimi.install --upgrade
+```
 
 ### 在腾讯 WorkBuddy 中使用
 
