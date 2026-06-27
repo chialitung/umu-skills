@@ -1,6 +1,6 @@
 """发布就绪检查脚本.
 
-在最小发布流程中运行，自动核对 README.md 与项目实际代码保持一致，
+在最小发布流程中运行，自动核对项目状态与交付物是否满足最小化交付规则。
 任何一项失败都会以非零退出码报告：
 
 1. pyproject.toml 的 version 必须与 CHANGELOG.md 最新小节版本一致。
@@ -8,6 +8,8 @@
    @mcp.tool() 实际定义的工具名称集合一致，且数量标题一致。
 3. README.md 中列出的内置 Skill 名称集合必须与代码中 @skill() 实际定义的
    Skill 名称集合一致，且数量标题一致。
+4. 工作目录必须干净，无未跟踪/未提交文件（本地发布时）。
+5. 构建后的 sdist 不得包含非 SDK 交付物（如 .superpowers、.github、临时脚本等）。
 
 该脚本是阻塞项：未通过前不得执行 release commit 和推送。
 """
@@ -16,8 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import re
+import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 
@@ -183,11 +188,136 @@ def extract_readme_skill_count_and_names() -> tuple[int, set[str]]:
     return count, names
 
 
+def check_git_status() -> None:
+    """检查工作目录是否干净，确保不会把未跟踪文件带入发布."""
+    # CI 环境通常由 checkout 提供干净工作区，允许跳过
+    if os.getenv("CI") == "true":
+        info("CI 环境，跳过 git status 检查")
+        return
+
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        fail("无法执行 git status")
+
+    dirty = [line for line in result.stdout.strip().splitlines() if line.strip()]
+    if dirty:
+        fail(f"工作目录不干净，请先提交或清理以下文件：\n" + "\n".join(dirty))
+    info("工作目录干净")
+
+
+def check_tracked_exclusions() -> None:
+    """检查是否有不应被跟踪的文件仍然留在版本库中."""
+    forbidden_patterns = [
+        r"^export_[^/]+\.py$",
+        r"^\.superpowers/",
+        r"^docs/",
+        r"^dev-tools/",
+        r"^workbench/",
+        r"^scripts/",
+        r"^mcp-config/",
+        r"^\.claude/",
+        r"^\.codegraph/",
+    ]
+
+    result = subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        fail("无法执行 git ls-files")
+
+    offenders: list[str] = []
+    for line in result.stdout.strip().splitlines():
+        line = line.strip()
+        for pattern in forbidden_patterns:
+            if re.search(pattern, line):
+                offenders.append(line)
+                break
+
+    if offenders:
+        fail(
+            "以下文件/目录不应纳入版本控制，请先从仓库中移除：\n"
+            + "\n".join(f"  - {p}" for p in offenders)
+        )
+    info("无禁止跟踪的文件")
+
+
+def check_sdist_contents() -> None:
+    """构建并检查 sdist 是否包含非 SDK 交付物."""
+    import shutil
+
+    if shutil.which("python") is None:
+        fail("未找到 python 命令，无法构建 sdist")
+
+    build_result = subprocess.run(
+        [sys.executable, "-m", "build", "--sdist"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if build_result.returncode != 0:
+        fail(f"构建 sdist 失败：\n{build_result.stderr}")
+
+    dist_dir = ROOT / "dist"
+    version = get_pyproject_version()
+    sdist_files = list(dist_dir.glob(f"umu_skills-{version}*.tar.gz"))
+    if not sdist_files:
+        fail(f"构建后未找到版本 {version} 的 sdist 文件")
+
+    sdist = sdist_files[0]
+    forbidden_prefixes = (
+        "/.github/",
+        "/.superpowers/",
+        "/tests/",
+        "/dev-tools/",
+        "/workbench/",
+        "/docs/",
+        "/scripts/",
+        "/mcp-config/",
+        "/.claude/",
+        "/.codegraph/",
+    )
+    forbidden_files = ("/export_", "/umu.skill")
+
+    offenders: list[str] = []
+    with tarfile.open(sdist, "r:gz") as tf:
+        for member in tf.getmembers():
+            # 成员名形如 umu_skills-x.y.z/...
+            normalized = "/" + "/".join(Path(member.name).parts[1:]) + "/"
+            if any(prefix in normalized for prefix in forbidden_prefixes):
+                offenders.append(member.name)
+                continue
+            if any(member.name.endswith(suffix) for suffix in forbidden_files):
+                offenders.append(member.name)
+
+    if offenders:
+        fail(
+            f"sdist `{sdist.name}` 包含非 SDK 交付物，请检查 pyproject.toml 的 "
+            f"[tool.hatch.build.targets.sdist] 排除规则：\n"
+            + "\n".join(f"  - {p}" for p in offenders)
+        )
+    info(f"sdist `{sdist.name}` 内容检查通过")
+
+
 def main() -> int:
     """执行所有检查."""
     info("开始发布就绪检查...")
 
-    # 1. 版本一致性
+    # 1. 工作目录干净且无不属于 SDK 的跟踪文件
+    check_git_status()
+    check_tracked_exclusions()
+
+    # 2. 版本一致性
     pyproject_version = get_pyproject_version()
     changelog_version = get_changelog_latest_version()
     if pyproject_version != changelog_version:
@@ -254,6 +384,9 @@ def main() -> int:
         fail(f"Skill 列表与代码不一致：{'；'.join(messages)}")
 
     info(f"Skill 列表一致：{len(actual_skill_names)} 个")
+
+    # 5. 构建产物检查（sdist 不得包含非 SDK 交付物）
+    check_sdist_contents()
 
     print("\n[PASS] 所有发布就绪检查通过，可以继续执行 release commit。")
     return 0

@@ -33,6 +33,35 @@ jobs:
       - name: Build package
         run: python -m build
 
+      - name: Verify sdist contents
+        run: |
+          python - <<'PY'
+          import re, sys, tarfile
+          from pathlib import Path
+
+          sdist = next(Path("dist").glob("*.tar.gz"))
+          forbidden_prefixes = (
+              "/.github/", "/.superpowers/", "/tests/", "/dev-tools/",
+              "/workbench/", "/docs/", "/scripts/", "/mcp-config/",
+              "/.claude/", "/.codegraph/",
+          )
+          forbidden_suffixes = ("/export_", "/umu.skill")
+          offenders = []
+          with tarfile.open(sdist, "r:gz") as tf:
+              for m in tf.getmembers():
+                  normalized = "/" + "/".join(Path(m.name).parts[1:]) + "/"
+                  if any(p in normalized for p in forbidden_prefixes):
+                      offenders.append(m.name)
+                  elif any(m.name.endswith(s) for s in forbidden_suffixes):
+                      offenders.append(m.name)
+          if offenders:
+              print(f"sdist `{sdist.name}` contains non-deliverables:")
+              for o in offenders:
+                  print(f"  - {o}")
+              sys.exit(1)
+          print(f"sdist `{sdist.name}` content OK")
+          PY
+
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__

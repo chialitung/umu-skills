@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.1] - 2026-06-27
+
+### Fixed
+- 修复 `0.24.0` 发布包混入非 SDK 交付物的问题：
+  - 从版本控制中移除根目录临时脚本 `export_teacher_course_permissions.py`。
+  - 从版本控制中移除 `docs/` 目录（已在 `.gitignore` 中声明忽略）。
+  - 在 `pyproject.toml` 新增 `[tool.hatch.build.targets.sdist]` 排除规则，禁止 `.github`、`.superpowers`、`tests`、`dev-tools`、`workbench`、`docs`、`scripts`、`mcp-config`、`.claude`、`.codegraph`、`export_*.py`、`umu.skill` 等进入 sdist。
+  - 扩展 `.github/scripts/check_release_readiness.py`：新增工作目录干净性检查、禁止跟踪文件检查、sdist 内容检查。
+  - 扩展 `.github/workflows/release.yml`：在发布前增加 sdist 内容校验步骤。
+
 ## [0.24.0] - 2026-06-27
 
 ### Added

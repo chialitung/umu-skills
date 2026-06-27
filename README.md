@@ -381,7 +381,7 @@ python -m umu_sdk.adapters.mcp.admin
 
 ## 可用工具
 
-### 管理员工具（53）
+### 管理员工具（55）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -395,23 +395,24 @@ python -m umu_sdk.adapters.mcp.admin
 | 班级 | `adm_list_classes` |
 | 课程/学习项目 | `adm_list_courses`, `adm_list_learning_programs`, `adm_list_personal_learning_programs`, `adm_set_course_auto_close`, `adm_cancel_course_auto_close` |
 | 课程审核 | `adm_list_course_audit_records`, `adm_audit_course`, `adm_list_course_categories`, `adm_list_course_blacklist`, `adm_save_course_blacklist` |
-| 学习记录 | `adm_list_learning_records` |
+| 学习记录 | `adm_list_learning_records`, `adm_export_learning_records` |
+| 导出 | `adm_export_accounts` |
 | 用户任务 | `adm_list_user_tasks` |
 | 讲师 | `adm_list_instructors` |
 | 授课记录 | `adm_list_teaching_records` |
 
-### 教师工具（90）
+### 教师工具（93）
 
 | 分类 | 工具 |
 |----------|-------|
 | 认证 | `tch_login`, `tch_check_auth` |
 | 会话 | `tch_create_session`, `tch_list_sessions`, `tch_destroy_session` |
-| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext`, `tch_submit_course_for_audit` |
+| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext`, `tch_submit_course_for_audit`, `tch_set_course_enrollment` |
 | 课程列表 | `tch_list_created_courses`, `tch_list_cooperated_courses`, `tch_list_participated_courses`, `tch_list_learning_programs` |
 | 学习项目 | `tch_create_learning_program`, `tch_get_learning_program`, `tch_update_learning_program`, `tch_update_learning_program_modules`, `tch_remove_courses_from_learning_program`, `tch_add_courses_to_learning_program`, `tch_configure_program_certificate`, `tch_set_program_points_status`, `tch_search_courses_for_program`, `tch_list_program_participants`, `tch_list_program_learning_tasks` |
 | 课程学员 | `tch_list_course_learning_tasks`, `tch_list_course_participants`, `tch_list_course_learning_durations` |
 | 课程协同 | `tch_list_course_collaborators`, `tch_search_collaborator_accounts`, `tch_invite_course_collaborator`, `tch_update_collaborator_role`, `tch_remove_course_collaborator`, `tch_transfer_course_owner` |
-| 课程权限 | `tch_set_course_access_permission`, `tch_get_course_access_permission`, `tch_get_course_access_list`, `tch_search_access_accounts`, `tch_add_course_access_accounts`, `tch_remove_course_access_accounts`, `tch_cancel_all_assigned_permissions`, `tch_set_program_access_permission`, `tch_get_program_access_permission`, `tch_get_program_access_list`, `tch_search_program_access_accounts`, `tch_add_program_access_accounts`, `tch_remove_program_access_accounts`, `tch_cancel_all_program_permissions` |
+| 课程权限 | `tch_set_course_access_permission`, `tch_get_course_access_permission`, `tch_get_course_access_list`, `tch_search_access_accounts`, `tch_add_course_access_accounts`, `tch_remove_course_access_accounts`, `tch_cancel_all_assigned_permissions`, `tch_set_program_access_permission`, `tch_get_program_access_permission`, `tch_get_program_access_list`, `tch_search_program_access_accounts`, `tch_add_program_access_accounts`, `tch_remove_program_access_accounts`, `tch_cancel_all_program_permissions`, `tch_export_course_permissions`, `tch_export_program_permissions` |
 | 课程分类 | `tch_get_categories` |
 | 环节 | `tch_create_scorm_section`, `tch_create_video_section`, `tch_create_article_section`, `tch_create_infographic_section`, `tch_create_document_section`, `tch_create_survey_section`, `tch_create_exam_section`, `tch_create_signin_section` |
 | 环节修改 | `tch_update_scorm_section`, `tch_update_video_section`, `tch_update_article_section`, `tch_update_infographic_section`, `tch_update_document_section`, `tch_update_survey_section`, `tch_update_exam_section`, `tch_update_signin_section` |
