@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-06-27
+
+### Added
+- 新增教师课程权限导出功能：
+  - 新增 `src/umu_sdk/adapters/mcp/export_engine.py`，支持导出课程访问权限明细。
+  - 在 `teacher.py` 中新增 `tch_export_course_permissions` 与相关工具实现。
+  - 新增 `export_teacher_course_permissions.py` 命令行脚本。
+  - 新增回归测试 `tests/adapters/mcp/test_export_engine.py`、`tests/test_teacher_course_permissions_regression.py` 与 `tests/test_admin_export_tools_regression.py`。
+  - 更新 `umu`、`umu-teacher`、`umu-student`、`umu-admin` Skill 文档，补充导出相关说明。
+
 ## [0.23.0] - 2026-06-27
 
 ### Added
