@@ -51,12 +51,23 @@ if sys.platform == "win32":
         pass
 
 
+_kimi_code_home_override: Path | None = None
+
+
 def _get_kimi_code_home() -> Path:
     """返回 Kimi Code CLI 主目录."""
+    if _kimi_code_home_override is not None:
+        return _kimi_code_home_override
     env_home = os.getenv("KIMI_CODE_HOME")
     if env_home:
         return Path(env_home).expanduser()
     return Path.home() / ".kimi-code"
+
+
+def _set_kimi_code_home(path: Path | None) -> None:
+    """设置 Kimi Code CLI 主目录覆盖（用于 CLI 参数）."""
+    global _kimi_code_home_override
+    _kimi_code_home_override = path
 
 
 def _get_global_skills_root() -> Path:
@@ -81,7 +92,7 @@ def _get_old_credential_dir() -> Path:
 
 def _get_project_skills_root() -> Path:
     """返回项目中的 skill 源根目录（开发模式优先使用）."""
-    return Path(__file__).resolve().parents[3] / ".kimi-code" / "skills"
+    return Path(__file__).resolve().parent / "bundled"
 
 
 @contextlib.contextmanager
@@ -96,6 +107,21 @@ def _get_bundled_skills_root() -> Iterator[Path]:
         yield path
 
 
+def _is_editable_install() -> bool:
+    """检查 umu-skills 是否以 editable 模式安装."""
+    try:
+        from importlib.metadata import Distribution
+
+        dist = Distribution.from_name("umu-skills")
+        direct_url = dist.read_text("direct_url.json")
+        if direct_url:
+            data = json.loads(direct_url)
+            return data.get("dir_info", {}).get("editable", False)
+    except Exception:
+        pass
+    return False
+
+
 def _ensure_package_installed(upgrade: bool = False) -> None:
     """确保 umu-skills 包已安装."""
     is_installed = False
@@ -108,6 +134,10 @@ def _ensure_package_installed(upgrade: bool = False) -> None:
             return
     except ImportError:
         pass
+
+    if upgrade and _is_editable_install():
+        print("检测到 umu-skills 为 editable 开发安装，跳过 PyPI 升级")
+        return
 
     action = "升级" if is_installed else "安装"
     print(f"正在{action} umu-skills...")
@@ -548,7 +578,7 @@ def _check_installation() -> int:
     return 1
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="安装 UMU Skills 到 Kimi Code CLI")
     parser.add_argument(
         "--upgrade",
@@ -566,6 +596,12 @@ def main() -> int:
         default=None,
         help="安装时是否启用语义自动触发（默认保留已有配置，首次安装为关闭）",
     )
+    parser.add_argument(
+        "--kimi-code-home",
+        type=Path,
+        default=None,
+        help="手动指定 Kimi Code CLI 主目录",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="附加命令")
     alias_parser = subparsers.add_parser("alias", help="管理 UMU 平台别名")
@@ -579,9 +615,12 @@ def main() -> int:
 
     alias_sub.add_parser("list", help="列出别名")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
+        if args.kimi_code_home:
+            _set_kimi_code_home(args.kimi_code_home.expanduser().resolve())
+
         if args.command == "alias":
             skill_dir = _get_global_skill_dir()
             if args.alias_action == "add":

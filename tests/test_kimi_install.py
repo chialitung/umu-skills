@@ -13,14 +13,18 @@ from umu_sdk.skills.kimi.install import (
     _configure_mcp_servers,
     _copy_skill,
     _get_credential_dir,
+    _ensure_package_installed,
     _get_global_skill_dir,
     _get_kimi_code_home,
     _get_mcp_servers_path,
+    _get_project_skills_root,
     _load_mcp_servers,
     _perform_install,
     _save_mcp_servers,
+    _set_kimi_code_home,
     add_alias,
     list_aliases,
+    main,
     remove_alias,
 )
 
@@ -326,3 +330,56 @@ class TestCheckInstallation:
 
         assert code == 0
         assert "状态正常" in captured.out
+
+
+class TestProjectSkillsRoot:
+    def test_points_to_bundled_directory(self) -> None:
+        root = _get_project_skills_root()
+        assert root.name == "bundled"
+        assert root.parent.name == "kimi"
+
+
+class TestKimiCodeHomeOverride:
+    def test_cli_argument_overrides_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "umu").mkdir()
+        (source / "umu" / "SKILL.md").write_text("---\nname: umu\n---\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_project_skills_root", lambda: source
+        )
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_credential_dir", lambda: tmp_path / ".umu_skills"
+        )
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._ensure_package_installed", lambda **kwargs: None
+        )
+
+        code = main(["--kimi-code-home", str(tmp_path)])
+        captured = capsys.readouterr()
+
+        assert code == 0
+        assert _get_kimi_code_home() == tmp_path
+        assert (tmp_path / "skills" / "umu" / "SKILL.md").exists()
+        assert (tmp_path / "mcp.json").exists()
+        assert str(tmp_path) in captured.out
+        # Clean up the override so other tests are not affected
+        _set_kimi_code_home(None)
+
+
+class TestPackageInstall:
+    def test_upgrade_skips_editable_install(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._is_editable_install", lambda: True
+        )
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install.subprocess.run",
+            lambda *args, **kwargs: pytest.fail("pip should not be called for editable install"),
+        )
+
+        _ensure_package_installed(upgrade=True)
+        captured = capsys.readouterr()
+
+        assert "editable" in captured.out
+        assert "跳过" in captured.out
