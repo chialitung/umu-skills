@@ -65,6 +65,17 @@ umu_skills/
 
 **设计原则**：业务逻辑（tools）与协议适配器（adapters）分离。新增一个 AI 平台只需添加新的适配器即可。
 
+## 安装
+
+```bash
+pip install umu-skills
+```
+
+> 如果你正在修改本仓库源码，使用开发模式安装：
+> ```bash
+> pip install -e ".[dev,mcp]"
+> ```
+
 ## 快速开始
 
 ### 3 分钟在 Claude Code 中使用 `/umu`（推荐）
@@ -98,8 +109,6 @@ python -m umu_sdk.skills.install --check
 # 强制升级到最新版
 python -m umu_sdk.skills.install --upgrade
 ```
-
-> **老用户升级提示**：升级 `umu-skills` 包后，必须重新运行 `python -m umu_sdk.skills.install --upgrade`，否则 `~/.claude/skills/` 下的 skill 文件不会自动更新，新的 `/umua`、`/umut`、`/umus` 等 slash command 将无法识别。安装完成后请重启 Claude Code。
 
 #### 3. 重启 Claude Code
 
@@ -238,6 +247,7 @@ python -m umu_sdk.skills.kimi.install --check
 ```bash
 python -m umu_sdk.skills.kimi.install --upgrade
 ```
+
 
 ### 在腾讯 WorkBuddy 中使用
 
