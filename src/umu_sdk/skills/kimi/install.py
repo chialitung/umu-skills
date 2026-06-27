@@ -382,6 +382,7 @@ def _render_skill_md(
 def _perform_install(source_root: Path, semantic_trigger: bool | None = None) -> list[str]:
     """执行 skill 复制、mcp.json 更新、凭证目录初始化和配置管理."""
     target_root = _get_global_skills_root()
+    target_root.parent.mkdir(parents=True, exist_ok=True)
 
     umu_target = _get_global_skill_dir("umu")
     existing_config = _load_skill_config(umu_target) if umu_target.exists() else {}

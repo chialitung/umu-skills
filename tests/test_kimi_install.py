@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from umu_sdk.skills.kimi.install import (
     _check_installation,
     _configure_mcp_servers,
@@ -88,14 +90,14 @@ class TestInstallPaths:
 
 
 class TestMcpServersPersistence:
-    def test_load_missing_file_returns_empty(self, tmp_path: Path, monkeypatch) -> None:
+    def test_load_missing_file_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "umu_sdk.skills.kimi.install._get_mcp_servers_path", lambda: tmp_path / "mcp.json"
         )
         result = _load_mcp_servers()
         assert result == {"mcpServers": {}}
 
-    def test_load_corrupt_file_returns_empty(self, tmp_path: Path, monkeypatch) -> None:
+    def test_load_corrupt_file_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         path = tmp_path / "mcp.json"
         path.write_text("not json", encoding="utf-8")
         monkeypatch.setattr(
@@ -104,7 +106,7 @@ class TestMcpServersPersistence:
         result = _load_mcp_servers()
         assert result == {"mcpServers": {}}
 
-    def test_save_creates_parent_dirs(self, tmp_path: Path, monkeypatch) -> None:
+    def test_save_creates_parent_dirs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "umu_sdk.skills.kimi.install._get_mcp_servers_path",
             lambda: tmp_path / "nested" / "mcp.json",
@@ -206,7 +208,7 @@ class TestAliasManagement:
 
 
 class TestPerformInstall:
-    def test_installs_all_skills(self, tmp_path: Path, monkeypatch) -> None:
+    def test_installs_all_skills(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         source = tmp_path / "source"
         target = tmp_path / "target"
         source.mkdir()
@@ -236,7 +238,7 @@ class TestPerformInstall:
         assert (target / "umu-teacher" / "SKILL.md").exists()
         assert (tmp_path / "mcp.json").exists()
 
-    def test_preserves_semantic_config_on_reinstall(self, tmp_path: Path, monkeypatch) -> None:
+    def test_preserves_semantic_config_on_reinstall(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         source = tmp_path / "source"
         target = tmp_path / "target"
         source.mkdir()
@@ -272,7 +274,7 @@ class TestPerformInstall:
 
 
 class TestCheckInstallation:
-    def test_check_reports_missing(self, tmp_path: Path, monkeypatch, capsys) -> None:
+    def test_check_reports_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         monkeypatch.setattr(
             "umu_sdk.skills.kimi.install._get_kimi_code_home", lambda: tmp_path
         )
@@ -286,7 +288,7 @@ class TestCheckInstallation:
         assert code == 1
         assert "mcp.json 不存在" in captured.out
 
-    def test_check_reports_ok(self, tmp_path: Path, monkeypatch, capsys) -> None:
+    def test_check_reports_ok(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         home = tmp_path
         skills = home / "skills"
         for name in ("umu", "umu-teacher", "umu-student", "umu-admin"):
