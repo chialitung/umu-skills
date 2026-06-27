@@ -51,6 +51,7 @@ umu-skills-teacher = "umu_sdk.adapters.mcp.teacher:main"
 umu-skills-admin = "umu_sdk.adapters.mcp.admin:main"
 umu-skills-orchestrator = "umu_sdk.skills.server:main"
 umu-skills-install-workbuddy = "umu_sdk.skills.workbuddy.install:main"
+umu-skills-install-kimi = "umu_sdk.skills.kimi.install:main"
 
 [project.urls]
 Homepage = "https://github.com/your-org/umu-skills"
@@ -63,6 +64,7 @@ packages = ["src/umu_sdk"]
 include = [
     "src/umu_sdk/skills/bundled/**/*",
     "src/umu_sdk/skills/workbuddy/bundled/**/*",
+    "src/umu_sdk/skills/kimi/bundled/**/*",
 ]
 
 [tool.ruff]
