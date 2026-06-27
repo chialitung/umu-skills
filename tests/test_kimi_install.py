@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from umu_sdk.skills.kimi.install import (
+    _check_installation,
     _configure_mcp_servers,
     _copy_skill,
     _get_credential_dir,
@@ -14,7 +15,11 @@ from umu_sdk.skills.kimi.install import (
     _get_kimi_code_home,
     _get_mcp_servers_path,
     _load_mcp_servers,
+    _perform_install,
     _save_mcp_servers,
+    add_alias,
+    list_aliases,
+    remove_alias,
 )
 
 
@@ -142,3 +147,180 @@ class TestCopySkill:
 
         assert (target / "SKILL.md").read_text(encoding="utf-8") == "new"
         assert not (target / "stale.txt").exists()
+
+
+class TestAliasManagement:
+    def test_add_alias_success(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "umu"
+        success, msg = add_alias(skill_dir, "敏学社")
+
+        assert success is True
+        assert "敏学社" in msg
+        assert list_aliases(skill_dir) == ["敏学社"]
+
+    def test_add_alias_duplicate(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "umu"
+        add_alias(skill_dir, "敏学社")
+
+        success, msg = add_alias(skill_dir, "敏学社")
+
+        assert success is False
+        assert "已存在" in msg
+
+    def test_add_alias_empty(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "umu"
+        assert add_alias(skill_dir, "")[0] is False
+        assert add_alias(skill_dir, "   ")[0] is False
+
+    def test_add_alias_too_long(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "umu"
+        long_alias = "a" * 51
+
+        success, msg = add_alias(skill_dir, long_alias)
+
+        assert success is False
+        assert "长度不能超过" in msg
+
+    def test_add_alias_invalid_characters(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "umu"
+        success, msg = add_alias(skill_dir, "敏学社!")
+
+        assert success is False
+        assert "只能包含" in msg
+
+    def test_remove_alias_success(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "umu"
+        add_alias(skill_dir, "敏学社")
+
+        success, msg = remove_alias(skill_dir, "敏学社")
+
+        assert success is True
+        assert list_aliases(skill_dir) == []
+
+    def test_remove_alias_not_found(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "umu"
+        success, msg = remove_alias(skill_dir, "不存在")
+
+        assert success is False
+        assert "不存在" in msg
+
+
+class TestPerformInstall:
+    def test_installs_all_skills(self, tmp_path: Path, monkeypatch) -> None:
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        source.mkdir()
+        target.mkdir()
+
+        for name in ("umu", "umu-teacher", "umu-student", "umu-admin"):
+            (source / name).mkdir()
+            (source / name / "SKILL.md").write_text(
+                "---\nname: " + name + "\ndescription: test\n---\n", encoding="utf-8"
+            )
+
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_global_skills_root", lambda: target
+        )
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_mcp_servers_path",
+            lambda: tmp_path / "mcp.json",
+        )
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_credential_dir", lambda: tmp_path / ".umu_skills"
+        )
+
+        installed = _perform_install(source)
+
+        assert set(installed) == {"umu", "umu-admin", "umu-teacher", "umu-student"}
+        assert (target / "umu" / "SKILL.md").exists()
+        assert (target / "umu-teacher" / "SKILL.md").exists()
+        assert (tmp_path / "mcp.json").exists()
+
+    def test_preserves_semantic_config_on_reinstall(self, tmp_path: Path, monkeypatch) -> None:
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        source.mkdir()
+        target.mkdir()
+
+        (source / "umu").mkdir()
+        (source / "umu" / "SKILL.md").write_text(
+            "---\nname: umu\ndescription: |\n  <!-- BEGIN_DESCRIPTION -->\n  desc\n  <!-- END_DESCRIPTION -->\n---\n"
+            "<!-- BEGIN_TRIGGER -->\ntrigger\n<!-- END_TRIGGER -->",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_global_skills_root", lambda: target
+        )
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_mcp_servers_path",
+            lambda: tmp_path / "mcp.json",
+        )
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_credential_dir", lambda: tmp_path / ".umu_skills"
+        )
+
+        # 先安装一次并开启语义触发
+        _perform_install(source, semantic_trigger=True)
+        config = json.loads((target / "umu" / "config.json").read_text(encoding="utf-8"))
+        assert config["semantic_trigger_enabled"] is True
+
+        # 再次安装不传参数，应保留开启状态
+        _perform_install(source)
+        config = json.loads((target / "umu" / "config.json").read_text(encoding="utf-8"))
+        assert config["semantic_trigger_enabled"] is True
+
+
+class TestCheckInstallation:
+    def test_check_reports_missing(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_kimi_code_home", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_credential_dir", lambda: tmp_path / ".umu_skills"
+        )
+
+        code = _check_installation()
+        captured = capsys.readouterr()
+
+        assert code == 1
+        assert "mcp.json 不存在" in captured.out
+
+    def test_check_reports_ok(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        home = tmp_path
+        skills = home / "skills"
+        for name in ("umu", "umu-teacher", "umu-student", "umu-admin"):
+            (skills / name).mkdir(parents=True)
+            (skills / name / "SKILL.md").write_text("---\nname: " + name + "\n---\n", encoding="utf-8")
+
+        mcp = {
+            "mcpServers": {
+                "umu-teacher": {
+                    "command": sys.executable,
+                    "args": ["-m", "umu_sdk.adapters.mcp.teacher"],
+                },
+                "umu-student": {
+                    "command": sys.executable,
+                    "args": ["-m", "umu_sdk.adapters.mcp.student"],
+                },
+                "umu-admin": {
+                    "command": sys.executable,
+                    "args": ["-m", "umu_sdk.adapters.mcp.admin"],
+                },
+            }
+        }
+        mcp_path = home / "mcp.json"
+        mcp_path.write_text(json.dumps(mcp), encoding="utf-8")
+
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_kimi_code_home", lambda: home
+        )
+        monkeypatch.setattr(
+            "umu_sdk.skills.kimi.install._get_credential_dir", lambda: tmp_path / ".umu_skills"
+        )
+
+        code = _check_installation()
+        captured = capsys.readouterr()
+
+        assert code == 0
+        assert "状态正常" in captured.out
