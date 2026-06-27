@@ -660,6 +660,7 @@ class CourseBuilder:
         is_important: bool | None = None,
         is_lock: bool | None = None,
         is_repetitive_mode: bool | None = None,
+        enroll_status: int | str | None = None,
         setup: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """增量修改课程信息.
@@ -704,6 +705,7 @@ class CourseBuilder:
             is_important: 是否重要课程
             is_lock: 是否锁定
             is_repetitive_mode: 是否重复模式
+            enroll_status: 报名设置，0=不需要报名，1=需要报名
             setup: 课程设置字典（高级用法）
 
         Returns:
@@ -908,6 +910,12 @@ class CourseBuilder:
             changes["is_lock"] = "1" if is_lock else "0"
         if is_repetitive_mode is not None:
             changes["is_repetitive_mode"] = "1" if is_repetitive_mode else "0"
+        if enroll_status is not None:
+            logger.warning(
+                "enroll_status 通过 e_saveGroup 不会持久化，"
+                "请使用 CourseBuilder.set_course_enrollment 设置报名"
+            )
+            changes["enrollStatus"] = str(enroll_status)
         if setup is not None:
             changes["setup"] = setup
 
@@ -1038,6 +1046,147 @@ class CourseBuilder:
         updated_info = self.get_course(group_id)
         updated_info["changes"] = list(changes.keys())
         return updated_info
+
+    # ------------------------------------------------------------------
+    # 设置课程报名
+    # ------------------------------------------------------------------
+
+    # 默认报名联系信息字段（与 UMU 后台默认保持一致）
+    _DEFAULT_ENROLL_CONTACT_INFO: list[dict[str, Any]] = [
+        {"key": "username", "questionTitle": "姓名", "defaultPlaceHolder": "输入真实姓名", "domType": "text"},
+        {"key": "mobile", "questionTitle": "手机号", "defaultPlaceHolder": "输入手机号码", "domType": "text"},
+        {"key": "company", "questionTitle": "公司", "defaultPlaceHolder": "您的公司", "domType": "text"},
+        {"key": "department", "questionTitle": "部门", "defaultPlaceHolder": "您的部门", "domType": "text"},
+        {"key": "position", "questionTitle": "职位", "defaultPlaceHolder": "您的职位", "domType": "text"},
+        {"key": "job_number", "questionTitle": "员工号", "defaultPlaceHolder": "您的工号", "domType": "text"},
+        {"key": "city", "questionTitle": "城市", "defaultPlaceHolder": "您所在的城市", "domType": "text"},
+        {"key": "address", "questionTitle": "地址", "defaultPlaceHolder": "请输入您的地址", "domType": "text"},
+        {"key": "sex", "questionTitle": "性别", "defaultPlaceHolder": "", "domType": "radio",
+         "questionDefaultValue": [{"value": "2", "text": "女"}, {"value": "1", "text": "男"}]},
+        {"key": "email", "questionTitle": "邮箱", "defaultPlaceHolder": "请输入您的邮箱", "domType": "text"},
+        {"key": "phone", "questionTitle": "电话号码", "defaultPlaceHolder": "请输入您的电话", "domType": "text"},
+        {"key": "qq", "questionTitle": "QQ", "defaultPlaceHolder": "请输入您的QQ", "domType": "text"},
+        {"key": "weixin", "questionTitle": "微信", "defaultPlaceHolder": "请输入您的微信", "domType": "text"},
+        {"key": "remark", "questionTitle": "备注", "defaultPlaceHolder": "请输入备注", "domType": "text"},
+    ]
+
+    def set_course_enrollment(
+        self,
+        group_id: str,
+        enabled: bool = True,
+        auto_check: bool = True,
+        title: str | None = None,
+        desc: str = "",
+        contact_info: list[dict[str, Any]] | None = None,
+        allow_cancel: bool = False,
+        user_quota: int = -1,
+        begin_time: int | str = 0,
+        end_time: int | str = 0,
+        enroll_id: str = "",
+    ) -> dict[str, Any]:
+        """设置课程报名开关及报名信息.
+
+        UMU 的报名开关不通过 e_saveGroup 持久化，必须调用独立的
+        /api/enroll/saveenroll 接口。
+
+        Args:
+            group_id: 课程 ID
+            enabled: True=开启报名，False=关闭报名
+            auto_check: 是否自动审核报名（默认 True）
+            title: 报名标题，默认使用课程标题
+            desc: 报名说明
+            contact_info: 自定义报名联系信息字段，None 使用默认字段
+            allow_cancel: 是否允许学员取消报名
+            user_quota: 报名人数上限，-1 表示不限制
+            begin_time: 报名开始时间（Unix 时间戳或 0 表示不限制）
+            end_time: 报名结束时间（Unix 时间戳或 0 表示不限制）
+            enroll_id: 现有报名 ID（修改时传入，新建留空）
+
+        Returns:
+            包含 enroll_id 等字段的字典
+
+        Raises:
+            RuntimeError: 设置失败
+        """
+        if not group_id:
+            raise ValueError("group_id 不能为空")
+
+        # 获取课程标题（如果未提供）
+        course_title = title
+        if course_title is None:
+            course_info = self.get_course(group_id)
+            course_title = course_info.get("title", "")
+
+        # 构造联系信息字段
+        fields = contact_info if contact_info is not None else self._DEFAULT_ENROLL_CONTACT_INFO
+        formatted_contact_info = []
+        for field in fields:
+            default_value = field.get("questionDefaultValue", [{"value": "", "text": ""}])
+            formatted_contact_info.append({
+                "isMustKey": "0",
+                "canMove": "1",
+                "domType": field.get("domType", "text"),
+                "isRequired": "1" if field.get("isRequired", True) else "0",
+                "isSelected": "0",
+                "questionTitle": field["questionTitle"],
+                "defaultPlaceHolder": field.get("defaultPlaceHolder", ""),
+                "questionDefaultValue": default_value,
+                "questionValue": "",
+                "key": field["key"],
+            })
+
+        enroll_payload: dict[str, Any] = {
+            "enrollId": str(enroll_id),
+            "title": course_title,
+            "autoCheck": 1 if auto_check else 0,
+            "desc": desc,
+            "shareUrl": 0,
+            "inUse": 0,
+            "sessionType": "9",
+            "payment": {"switch_status": 0, "amount": 0},
+            "contactInfo": formatted_contact_info,
+            "questionArr": [],
+            "sectionArr": [],
+            "status": 1 if enabled else 0,
+            "multimedia_type": "1",
+            "group_id": str(group_id),
+            "setup": {
+                "allow_cancel": "1" if allow_cancel else "0",
+                "user_quota": str(user_quota),
+                "begin_time": str(begin_time),
+                "end_time": str(end_time),
+            },
+        }
+
+        self._write_cooldown()
+        logger.info(
+            "设置课程报名: group_id=%s, enabled=%s, auto_check=%s",
+            group_id,
+            enabled,
+            auto_check,
+        )
+
+        resp = self.client.post(
+            self.client.desktop_url("/api/enroll/saveenroll"),
+            data={"enroll": json.dumps(enroll_payload, ensure_ascii=False)},
+        )
+
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
+            err_msg = resp.get("errMsg") or resp.get("error", "unknown")
+            raise RuntimeError(f"设置课程报名失败: {err_msg}")
+
+        self._mark_write()
+
+        data = resp.get("data", {})
+        enroll_id_returned = str(data.get("enrollId", enroll_id))
+        logger.info("课程报名设置成功: group_id=%s, enroll_id=%s", group_id, enroll_id_returned)
+
+        return {
+            "group_id": group_id,
+            "enroll_id": enroll_id_returned,
+            "enabled": enabled,
+            "auto_check": auto_check,
+        }
 
     # ------------------------------------------------------------------
     # 辅助方法：处理富文本中的本地图片

@@ -64,6 +64,7 @@ from .document_upload import (
     DocumentUploader,
     validate_document_path,
 )
+from .export_engine import ExportEngine
 from .image_upload import ImageUploader
 from .program_builder import ProgramBuilder
 from .program_student_manager import ProgramStudentManager
@@ -205,6 +206,8 @@ mcp = FastMCP(
   - tch_update_course_schedule — 有效期和上课时段（语义化时间参数）
   - tch_update_course_images — 封面图/背景图上传替换
   - tch_update_course_richtext — 富文本介绍（含图片上传）
+- 设置课程报名（tch_set_course_enrollment）：开启/关闭报名、自动审核、报名名额等
+  - 注意：UMU 报名开关不走 e_saveGroup，本工具已封装独立的 /api/enroll/saveenroll 调用
 - 提交课程至企业知识库审核（tch_submit_course_for_audit，管理员审核后可被推荐和搜索）
 - 添加 SCORM 小节到课程（支持使用已有资源或上传新 SCORM 包）
 - 列出课程小节（获取所有小节的 ID、标题、资源绑定等信息）
@@ -6190,6 +6193,10 @@ async def tch_update_course(
         bool | None,
         Field(default=None, description="是否标记为重要课程"),
     ] = None,
+    enroll_status: Annotated[
+        int | None,
+        Field(default=None, description="报名设置: 0=不需要报名, 1=需要报名"),
+    ] = None,
     setup: Annotated[
         dict[str, Any] | None,
         Field(default=None, description="高级课程设置字典（如需修改特定 setup 字段时使用）"),
@@ -6212,6 +6219,8 @@ async def tch_update_course(
     - 所有参数均为可选，但至少需要传入一个要修改的字段
     - 修改封面/背景图时会自动上传到 COS
     - 修改富文本时会自动处理图片上传
+    - 报名设置（enroll_status）会走独立的 /api/enroll/saveenroll 接口，
+      不再通过 e_saveGroup 提交，因此会真正生效
 
     标准使用流程：
     1. 调用 tch_get_course(group_id) 查看当前配置
@@ -6249,6 +6258,7 @@ async def tch_update_course(
         "max_online_user": max_online_user,
         "max_user_count": max_user_count,
         "is_important": is_important,
+        "enroll_status": enroll_status,
         "setup": setup,
     }
     provided = {k: v for k, v in all_params.items() if v is not None}
@@ -6262,35 +6272,55 @@ async def tch_update_course(
 
     try:
         builder = CourseBuilder(client)
-        result = builder.update_course(
-            group_id=group_id,
-            title=title,
-            desc=desc,
-            remark=remark,
-            lesson_type=lesson_type,
-            other_lesson_type=other_lesson_type,
-            category_ids=category_ids,
-            category_names=category_names,
-            tags=tags,
-            start_time=start_time,
-            end_time=end_time,
-            cover_image_path=cover_image_path,
-            bg_image_path=bg_image_path,
-            desc_richtext=desc_richtext,
-            desc_richtext_images=desc_richtext_images,
-            province=province,
-            city=city,
-            town=town,
-            address=address,
-            contact=contact,
-            contact_phone=contact_phone,
-            customer_name=customer_name,
-            course_person=course_person,
-            max_online_user=max_online_user,
-            max_user_count=max_user_count,
-            is_important=is_important,
-            setup=setup,
-        )
+        enroll_result: dict[str, Any] | None = None
+
+        # 报名设置有独立的 API，不通过 e_saveGroup 持久化
+        if enroll_status is not None:
+            enroll_result = builder.set_course_enrollment(
+                group_id=group_id,
+                enabled=bool(enroll_status),
+            )
+
+        # 其他字段通过 update_course 修改（不包含 enroll_status）
+        other_params = {
+            "group_id": group_id,
+            "title": title,
+            "desc": desc,
+            "remark": remark,
+            "lesson_type": lesson_type,
+            "other_lesson_type": other_lesson_type,
+            "category_ids": category_ids,
+            "category_names": category_names,
+            "tags": tags,
+            "start_time": start_time,
+            "end_time": end_time,
+            "cover_image_path": cover_image_path,
+            "bg_image_path": bg_image_path,
+            "desc_richtext": desc_richtext,
+            "desc_richtext_images": desc_richtext_images,
+            "province": province,
+            "city": city,
+            "town": town,
+            "address": address,
+            "contact": contact,
+            "contact_phone": contact_phone,
+            "customer_name": customer_name,
+            "course_person": course_person,
+            "max_online_user": max_online_user,
+            "max_user_count": max_user_count,
+            "is_important": is_important,
+            "setup": setup,
+        }
+        other_provided = {k: v for k, v in other_params.items() if v is not None and k != "group_id"}
+
+        if other_provided:
+            result = builder.update_course(**other_params)
+        else:
+            result = {"group_id": group_id, "changes": []}
+
+        if enroll_result:
+            result["enroll"] = enroll_result
+            result["changes"] = result.get("changes", []) + ["enroll_status"]
 
         return _ok(
             data=result,
@@ -6303,6 +6333,106 @@ async def tch_update_course(
             error_code="UPDATE_COURSE_FAILED",
             error_message=str(e),
             suggested_action="请检查参数和网络后重试",
+        )
+
+
+@mcp.tool()
+async def tch_set_course_enrollment(
+    group_id: Annotated[str, Field(description="课程 ID，要设置报名的课程")],
+    enabled: Annotated[
+        bool,
+        Field(default=True, description="是否开启报名: True=开启, False=关闭"),
+    ] = True,
+    auto_check: Annotated[
+        bool,
+        Field(default=True, description="是否自动审核报名"),
+    ] = True,
+    title: Annotated[
+        str | None,
+        Field(default=None, description="报名标题，默认使用课程标题"),
+    ] = None,
+    desc: Annotated[
+        str,
+        Field(default="", description="报名说明"),
+    ] = "",
+    allow_cancel: Annotated[
+        bool,
+        Field(default=False, description="是否允许学员取消报名"),
+    ] = False,
+    user_quota: Annotated[
+        int,
+        Field(default=-1, description="报名人数上限，-1 表示不限制"),
+    ] = -1,
+    begin_time: Annotated[
+        int | str,
+        Field(default=0, description="报名开始时间（Unix 时间戳或 0 表示不限制）"),
+    ] = 0,
+    end_time: Annotated[
+        int | str,
+        Field(default=0, description="报名结束时间（Unix 时间戳或 0 表示不限制）"),
+    ] = 0,
+    contact_info_json: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description='自定义报名联系信息字段 JSON，格式: [{"key": "...", "questionTitle": "...", "defaultPlaceHolder": "...", "domType": "text"}]。'
+                        "不传则使用系统默认字段。",
+        ),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """设置课程报名开关及报名信息.
+
+    触发条件：需要开启或关闭课程报名时调用。
+    前置依赖：需先调用 tch_login 完成登录，且课程已存在。
+
+    注意：UMU 的报名开关不通过 e_saveGroup 持久化，必须使用独立的
+    /api/enroll/saveenroll 接口，本工具已封装该调用。
+    """
+    client = _get_client(session_id)
+
+    contact_info = None
+    if contact_info_json:
+        try:
+            contact_info = json.loads(contact_info_json)
+        except json.JSONDecodeError as e:
+            return _err(
+                error_code="INVALID_JSON",
+                error_message=f"contact_info_json 不是有效 JSON: {e}",
+                suggested_action="请检查 JSON 格式",
+            )
+
+    try:
+        builder = CourseBuilder(client)
+        result = builder.set_course_enrollment(
+            group_id=group_id,
+            enabled=enabled,
+            auto_check=auto_check,
+            title=title,
+            desc=desc,
+            allow_cancel=allow_cancel,
+            user_quota=user_quota,
+            begin_time=begin_time,
+            end_time=end_time,
+            contact_info=contact_info,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="可调用 tch_get_course 查看 enroll_status 字段验证结果",
+        )
+    except Exception as e:
+        logger.exception("设置课程报名失败")
+        return _err(
+            error_code="SET_ENROLLMENT_FAILED",
+            error_message=str(e),
+            suggested_action="请检查 group_id 和网络后重试",
         )
 
 
@@ -9126,6 +9256,155 @@ async def tch_cancel_all_assigned_permissions(
     except Exception as e:
         logger.exception("取消课程指定权限失败")
         return _err("CANCEL_ASSIGNED_PERMISSIONS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_export_course_permissions(
+    output_path: Annotated[
+        str,
+        Field(
+            default="~/Desktop/umu_course_permissions.xlsx",
+            description="输出文件路径，默认桌面。支持 .xlsx 或 .csv 扩展名。",
+        ),
+    ] = "~/Desktop/umu_course_permissions.xlsx",
+    file_format: Annotated[
+        str,
+        Field(
+            default="xlsx",
+            pattern="^(xlsx|csv)$",
+            description="文件格式：xlsx 或 csv。",
+        ),
+    ] = "xlsx",
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """导出当前讲师创建的所有课程的访问权限明细到 Excel/CSV.
+
+    每门课程一行基础记录；对于指定账户可见（access_permission=3）的课程，
+    会额外为每个授权对象生成一行，方便筛选和统计。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    # 处理路径中的 ~ 和环境变量
+    output_path = os.path.expanduser(os.path.expandvars(output_path))
+
+    # 根据 file_format 确保扩展名正确
+    base, ext = os.path.splitext(output_path)
+    if file_format == "csv":
+        if ext.lower() != ".csv":
+            output_path = f"{base}.csv"
+    else:
+        if ext.lower() != ".xlsx":
+            output_path = f"{base}.xlsx"
+
+    # 确保输出目录存在
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
+    try:
+        engine = ExportEngine(client)
+        result = engine.export_course_permissions(output_path)
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="文件已生成，可直接在本地打开查看。",
+        )
+    except Exception as e:
+        logger.exception("导出课程访问权限失败")
+        return _err("EXPORT_COURSE_PERMISSIONS_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_export_program_permissions(
+    output_path: Annotated[
+        str,
+        Field(
+            default="~/Desktop/umu_program_permissions.xlsx",
+            description="输出文件路径，默认桌面。支持 .xlsx 或 .csv 扩展名。",
+        ),
+    ] = "~/Desktop/umu_program_permissions.xlsx",
+    file_format: Annotated[
+        str,
+        Field(
+            default="xlsx",
+            pattern="^(xlsx|csv)$",
+            description="文件格式：xlsx 或 csv。",
+        ),
+    ] = "xlsx",
+    scope: Annotated[
+        str,
+        Field(
+            default="owned",
+            pattern="^(owned|cooperated|enrolled)$",
+            description="列表视角：owned=我拥有的, cooperated=协同给我的, enrolled=我报名的。",
+        ),
+    ] = "owned",
+    keywords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="按标题/访问码模糊搜索。",
+        ),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """导出当前讲师的学习项目访问权限明细到 Excel/CSV.
+
+    每个学习项目一行基础记录；对于指定账户可见（access_permission=3）的项目，
+    会额外为每个授权对象生成一行，方便筛选和统计。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    # 处理路径中的 ~ 和环境变量
+    output_path = os.path.expanduser(os.path.expandvars(output_path))
+
+    # 根据 file_format 确保扩展名正确
+    base, ext = os.path.splitext(output_path)
+    if file_format == "csv":
+        if ext.lower() != ".csv":
+            output_path = f"{base}.csv"
+    else:
+        if ext.lower() != ".xlsx":
+            output_path = f"{base}.xlsx"
+
+    # 确保输出目录存在
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
+    try:
+        engine = ExportEngine(client)
+        result = engine.export_program_permissions(
+            output_path,
+            scope=scope,
+            keywords=keywords,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="文件已生成，可直接在本地打开查看。",
+        )
+    except Exception as e:
+        logger.exception("导出学习项目访问权限失败")
+        return _err("EXPORT_PROGRAM_PERMISSIONS_FAILED", str(e))
 
 
 @mcp.tool()

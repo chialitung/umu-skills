@@ -8,9 +8,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import os
+import tempfile
+
 from umu_sdk.adapters.mcp.teacher import (
     tch_add_course_access_accounts,
     tch_cancel_all_assigned_permissions,
+    tch_export_course_permissions,
+    tch_export_program_permissions,
     tch_get_course_access_list,
     tch_get_course_access_permission,
     tch_remove_course_access_accounts,
@@ -129,4 +134,108 @@ class TestCourseAccessPermissionRegression:
         with _auth_patch(mock_client):
             result = json.loads(await tch_cancel_all_assigned_permissions("123"))
         assert result["success"] is True
+
+    async def test_export_course_permissions(self, mock_client, tmp_path):
+        def _mock_get(url: str, params: dict | None = None, **kwargs):
+            if "/api/group/getgrouplist" in url:
+                return {
+                    "status": True,
+                    "data": {
+                        "page_info": {"list_total_num": 2},
+                        "list": [
+                            {"groupInfo": {"id": "1", "title": "Course 1", "access_code": "abc"}},
+                            {"groupInfo": {"id": "2", "title": "Course 2", "access_code": "def"}},
+                        ],
+                    },
+                }
+            if "/api/group/getAccessPermissionOption" in url:
+                group_id = params.get("obj_id") if params else None
+                selected = "3" if group_id == "1" else "2"
+                return {
+                    "status": True,
+                    "data": {
+                        "selected_option": selected,
+                        "permission_option": ["2", "3", "0"],
+                    },
+                }
+            if "/api/manage/getcourseaccesslist" in url:
+                return {
+                    "status": True,
+                    "data": {
+                        "page_info": {"list_total_num": 1},
+                        "list": [{
+                            "id": "100",
+                            "account": "user@umu.cn",
+                            "account_type": "user",
+                            "is_exist": 1,
+                        }],
+                    },
+                }
+            return {"status": False, "error": f"unexpected url: {url}"}
+
+        mock_client.get.side_effect = _mock_get
+        output_path = str(tmp_path / "course_permissions.xlsx")
+
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_export_course_permissions(output_path=output_path))
+
+        assert result["success"] is True
+        assert result["data"]["file_path"] == output_path
+        assert result["data"]["total_courses"] == 2
+        # Course 1 展开 1 条授权记录，Course 2 企业内公开占 1 行
+        assert result["data"]["total_records"] == 2
+        assert os.path.exists(output_path)
+        assert os.path.getsize(output_path) > 0
+
+    async def test_export_program_permissions(self, mock_client, tmp_path):
+        def _mock_get(url: str, params: dict | None = None, **kwargs):
+            if "/api/program/getlist" in url:
+                return {
+                    "status": True,
+                    "data": {
+                        "page_info": {"list_total_num": 2},
+                        "list": [
+                            {"program_id": "1", "program_title": "Program 1", "access_code": "abc"},
+                            {"program_id": "2", "program_title": "Program 2", "access_code": "def"},
+                        ],
+                    },
+                }
+            if "/api/group/getAccessPermissionOption" in url:
+                program_id = params.get("obj_id") if params else None
+                selected = "3" if program_id == "1" else "2"
+                return {
+                    "status": True,
+                    "data": {
+                        "selected_option": selected,
+                        "permission_option": ["2", "3", "0"],
+                    },
+                }
+            if "/api/manage/getcourseaccesslist" in url:
+                return {
+                    "status": True,
+                    "data": {
+                        "page_info": {"list_total_num": 1},
+                        "list": [{
+                            "id": "100",
+                            "account": "user@umu.cn",
+                            "account_type": "user",
+                            "is_exist": 1,
+                        }],
+                    },
+                }
+            return {"status": False, "error": f"unexpected url: {url}"}
+
+        mock_client.get.side_effect = _mock_get
+        output_path = str(tmp_path / "program_permissions.xlsx")
+
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_export_program_permissions(output_path=output_path))
+
+        assert result["success"] is True
+        assert result["data"]["file_path"] == output_path
+        assert result["data"]["total_programs"] == 2
+        # Program 1 展开 1 条授权记录，Program 2 企业内公开占 1 行
+        assert result["data"]["total_records"] == 2
+        assert os.path.exists(output_path)
+        assert os.path.getsize(output_path) > 0
 

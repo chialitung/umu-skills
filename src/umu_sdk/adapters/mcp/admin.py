@@ -72,6 +72,7 @@ from .session import SessionManager
 from .shared_access_permissions import (
     _parse_access_permission_response as _parse_business_response,
 )
+from .export_engine import ExportEngine
 from .shared_session_tools import (
     SessionToolConfig,
     make_check_auth_tool,
@@ -8345,6 +8346,189 @@ def adm_learning_records_guide() -> str:
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def adm_export_accounts(
+    output_path: Annotated[
+        str,
+        Field(
+            default="~/Desktop/umu_accounts.xlsx",
+            description="输出文件路径，默认桌面。支持 .xlsx 或 .csv 扩展名。",
+        ),
+    ] = "~/Desktop/umu_accounts.xlsx",
+    file_format: Annotated[
+        str,
+        Field(
+            default="xlsx",
+            pattern="^(xlsx|csv)$",
+            description="文件格式：xlsx 或 csv。",
+        ),
+    ] = "xlsx",
+    keywords: Annotated[
+        str | None,
+        Field(default=None, description="搜索关键词（姓名、邮箱、手机号、用户名），服务端模糊匹配。"),
+    ] = None,
+    group_ids: Annotated[
+        str | None,
+        Field(default=None, description="分组ID列表，多个用逗号分隔，如 '177124,177125'。"),
+    ] = None,
+    group_operator: Annotated[
+        str,
+        Field(
+            default="intersection",
+            description='多分组关系："intersection"=交集，"union"=并集。',
+        ),
+    ] = "intersection",
+    role_type: Annotated[
+        int | None,
+        Field(default=None, description="角色筛选：1=学员, 2=讲师, 3=学习负责人, 4=系统管理员, 5=子管理员。"),
+    ] = None,
+    account_status: Annotated[
+        int | None,
+        Field(default=None, description="状态筛选：0=待加入, 1=已启用, 2=已禁用, 3=定时禁用。"),
+    ] = None,
+    is_manager: Annotated[
+        int,
+        Field(default=0, description="0=返回全部账号，1=仅返回管理视角账号。"),
+    ] = 0,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID。"),
+    ] = None,
+) -> str:
+    """导出企业账号列表到 Excel/CSV."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    output_path = os.path.expanduser(os.path.expandvars(output_path))
+    base, ext = os.path.splitext(output_path)
+    if file_format == "csv":
+        if ext.lower() != ".csv":
+            output_path = f"{base}.csv"
+    else:
+        if ext.lower() != ".xlsx":
+            output_path = f"{base}.xlsx"
+
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
+    try:
+        engine = ExportEngine(client)
+        result = engine.export_admin_accounts(
+            output_path,
+            keywords=keywords,
+            group_ids=group_ids,
+            group_operator=group_operator,
+            role_type=role_type,
+            account_status=account_status,
+            is_manager=is_manager,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="文件已生成，可直接在本地打开查看。",
+        )
+    except Exception as e:
+        logger.exception("导出账号列表失败")
+        return _err("EXPORT_ACCOUNTS_FAILED", str(e))
+
+
+@mcp.tool()
+async def adm_export_learning_records(
+    output_path: Annotated[
+        str,
+        Field(
+            default="~/Desktop/umu_learning_records.xlsx",
+            description="输出文件路径，默认桌面。支持 .xlsx 或 .csv 扩展名。",
+        ),
+    ] = "~/Desktop/umu_learning_records.xlsx",
+    file_format: Annotated[
+        str,
+        Field(
+            default="xlsx",
+            pattern="^(xlsx|csv)$",
+            description="文件格式：xlsx 或 csv。",
+        ),
+    ] = "xlsx",
+    start_day: Annotated[
+        str | None,
+        Field(default=None, description="最后学习时间起始日期，格式 YYYY-MM-DD。"),
+    ] = None,
+    end_day: Annotated[
+        str | None,
+        Field(default=None, description="最后学习时间结束日期，格式 YYYY-MM-DD。"),
+    ] = None,
+    uids: Annotated[
+        str | None,
+        Field(default=None, description="学员 UMU ID 列表，多个用逗号分隔。"),
+    ] = None,
+    course_title: Annotated[
+        str | None,
+        Field(default=None, description="课程名称模糊搜索关键词。"),
+    ] = None,
+    department_ids: Annotated[
+        str | None,
+        Field(default=None, description="部门ID列表，多个用逗号分隔。"),
+    ] = None,
+    group_ids: Annotated[
+        str | None,
+        Field(default=None, description="企业分组ID列表，多个用逗号分隔。"),
+    ] = None,
+    class_ids: Annotated[
+        str | None,
+        Field(default=None, description="班级ID列表，多个用逗号分隔。"),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID。"),
+    ] = None,
+) -> str:
+    """导出企业账号的课程学习明细到 Excel/CSV."""
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    output_path = os.path.expanduser(os.path.expandvars(output_path))
+    base, ext = os.path.splitext(output_path)
+    if file_format == "csv":
+        if ext.lower() != ".csv":
+            output_path = f"{base}.csv"
+    else:
+        if ext.lower() != ".xlsx":
+            output_path = f"{base}.xlsx"
+
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
+    uid_list = [u.strip() for u in uids.split(",") if u.strip()] if uids else None
+    class_id_list = [c.strip() for c in class_ids.split(",") if c.strip()] if class_ids else None
+
+    try:
+        engine = ExportEngine(client)
+        result = engine.export_learning_records(
+            output_path,
+            start_day=start_day,
+            end_day=end_day,
+            uids=uid_list,
+            course_title=course_title,
+            department_ids=department_ids,
+            group_ids=group_ids,
+            class_ids=class_id_list,
+        )
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="文件已生成，可直接在本地打开查看。",
+        )
+    except Exception as e:
+        logger.exception("导出学习记录失败")
+        return _err("EXPORT_LEARNING_RECORDS_FAILED", str(e))
 
 
 def main() -> None:
