@@ -468,7 +468,7 @@ python -m umu_sdk.skills.server
 - 返回与 Skill 统一的标准信封格式
 - AI 应优先使用 `skill_run` 调用已封装 Skill，仅在工具未覆盖时使用透传
 
-内置 Skill 覆盖高频场景（共 115），并支持通过 `/umu`、`/umua`、`/umut`、`/umus` 斜杠命令直接触发：
+内置 Skill 覆盖高频场景（共 118），并支持通过 `/umu`、`/umua`、`/umut`、`/umus` 斜杠命令直接触发：
 
 | Skill | 涉及子 MCP | 说明 |
 |-------|-----------|------|
@@ -520,7 +520,10 @@ python -m umu_sdk.skills.server
 | `add_program_access_accounts` | teacher | 为学习项目设置指定账户、班级、部门或分组的访问权限 |
 | `remove_program_access_accounts` | teacher | 移除学习项目的指定账户、班级、部门或分组访问权限 |
 | `cancel_program_access_permissions` | teacher | 取消学习项目的所有指定访问权限 |
-| `enroll_course` | student | 学员报名课程 |
+| `enroll_course` | student | 学员报名课程，支持需要填写联系信息/单选/多选/开放题的特殊报名表单 |
+| `get_course_enroll_form` | student | 获取课程复杂报名表单结构 |
+| `submit_course_enroll_form` | student | 提交课程报名信息（联系信息 + 报名问题） |
+| `learn_course` | student | 一站式学习课程：报名（如需）、完成可自动完成的小节 |
 | `get_course_progress` | student | 查询学员课程进度 |
 | `resolve_course_identifier` | student | 解析课程访问码/短域名/URL |
 | `list_my_courses_student` | student | 列出学员的课程 |

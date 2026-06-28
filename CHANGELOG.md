@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.4] - 2026-06-28
+
+### Added
+- 课程报名能力全面升级，支持复杂报名表单：
+  - `CourseBuilder.set_course_enrollment` 支持勾选联系信息字段、自定义报名问题（单选/多选/开放题/数值/段落）、报名价格、审核人设置。
+  - Teacher MCP `tch_set_course_enrollment` 暴露 `selected_contact_fields`、`section_questions_json`、`approval_setting_json`、`price_amount`、`enroll_id` 等参数。
+  - Student MCP 新增 `stu_get_enroll_form` 获取报名表单结构、`stu_submit_enroll_form` 提交报名信息。
+  - `stu_get_course_structure` 与 `stu_enroll_course` 可识别"已预报名但未填表"状态，并返回 `next_action="needs_enroll_form"`。
+  - Skill `enroll_course` 与 `student_course_completion` 自动处理复杂报名表单流程。
+  - 新增/补充相关单元测试覆盖报名表单解析、校验、提交与 Skill 编排。
+
 ## [0.24.3] - 2026-06-28
 
 ### Fixed
