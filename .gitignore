@@ -67,5 +67,9 @@ progress.md
 # CodeGraph 索引
 .codegraph/
 
+# Git worktrees
+.worktrees/
+worktrees/
+
 # 文档目录（仅本地开发维护，不属于 SDK 交付物）
 docs/
