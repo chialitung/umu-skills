@@ -345,6 +345,55 @@ class TestSetCourseEnrollment:
         with pytest.raises(RuntimeError, match="设置课程报名失败"):
             builder.set_course_enrollment(group_id="7339916", enabled=True)
 
+    def test_set_course_enrollment_setup_fields_complete(self, builder, mock_client):
+        mock_client.get.return_value = _course_info_response()
+        mock_client.post.return_value = _enroll_save_response("580237")
+
+        builder.set_course_enrollment(group_id="7339916", enabled=True)
+
+        payload = json.loads(mock_client.post.call_args.kwargs["data"]["enroll"])
+        setup = payload["setup"]
+        assert setup["switch_status"] == "0"
+        assert setup["amount"] == "0"
+        assert setup["allow_upd_enroll_switch"] == "1"
+        assert setup["max_user_quota"] == "-1"
+        assert setup["allow_reject_participate_user"] == "1"
+        assert setup["allow_clear"] == "1"
+        assert setup["enable_expiry"] == "0"
+        assert setup["expiry_days"] == "0"
+        assert payload["setupInfo"]["payment"]["switch_status"] == "0"
+        assert payload["setupInfo"]["payment"]["amount"] == "0"
+
+    def test_set_course_enrollment_merge_existing_config(self, builder, mock_client):
+        def _get_side_effect(url, **kwargs):
+            if "enroll-info" in str(url):
+                return _enroll_info_response()
+            return _course_info_response("测试课程")
+
+        mock_client.get.side_effect = _get_side_effect
+        mock_client.post.return_value = _enroll_save_response("580263")
+
+        result = builder.set_course_enrollment(
+            group_id="7343171",
+            enroll_id="580263",
+            enabled=True,
+            allow_cancel=True,
+            user_quota=3,
+        )
+
+        assert result["enroll_id"] == "580263"
+        calls = mock_client.post.call_args_list
+        assert len(calls) == 1
+        payload = json.loads(calls[0].kwargs["data"]["enroll"])
+
+        assert payload["title"] == "测试报名标题"  # 未传则保留
+        assert payload["desc"] == ""
+        assert payload["create_time"] == "2026-06-28 14:15:06"
+        assert payload["multimedia_id"] == "77201794"
+        assert payload["setup"]["allow_cancel"] == "1"  # 显式覆盖
+        assert payload["setup"]["user_quota"] == "3"
+        assert payload["setup"]["allow_upd_enroll_switch"] == "1"  # 未传保留
+
     def test_set_course_enrollment_empty_group_id(self, builder, mock_client):
         with pytest.raises(ValueError, match="group_id 不能为空"):
             builder.set_course_enrollment(group_id="", enabled=True)

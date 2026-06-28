@@ -1179,6 +1179,9 @@ class CourseBuilder:
         UMU 的报名开关不通过 e_saveGroup 持久化，必须调用独立的
         /api/enroll/saveenroll 接口。
 
+        当传入 enroll_id 时，会先调用 /uapi/v1/course/enroll-info 读取现有报名
+        配置，再与用户传入的参数做增量合并，保留 create_time 等未变更字段。
+
         Args:
             group_id: 课程 ID
             enabled: True=开启报名，False=关闭报名
@@ -1212,95 +1215,118 @@ class CourseBuilder:
 
         # 获取课程基础信息（标题、讲师 ID、分享链接等）
         base_info = self._get_enrollment_base_info(group_id)
-        course_title = title if title is not None else base_info["title"]
-        teacher_id = base_info["teacher_id"]
-        share_url = base_info.get("share_url", "")
-        share_qrc = base_info.get("share_qrc", "")
-
-        # 构造联系信息字段
-        fields = contact_info if contact_info is not None else self._DEFAULT_ENROLL_CONTACT_INFO
-        selected_keys = set(selected_contact_fields or [])
-        formatted_contact_info = []
-        for field in fields:
-            default_value = field.get("questionDefaultValue", [{"value": "", "text": ""}])
-            # 支持 isSelected/selected 两种写法
-            is_selected_raw = field.get("isSelected", field.get("selected"))
-            if is_selected_raw is None:
-                is_selected = field.get("key", "") in selected_keys
-            else:
-                is_selected = str(is_selected_raw) in ("1", "true", "True", True)
-            is_required = str(field.get("isRequired", field.get("required", True))) in (
-                "1",
-                "true",
-                "True",
-                True,
-            )
-            formatted_contact_info.append({
-                "isMustKey": "0",
-                "canMove": "1",
-                "domType": field.get("domType", "text"),
-                "isRequired": "1" if is_required else "0",
-                "isSelected": "1" if is_selected else "0",
-                "questionTitle": field["questionTitle"],
-                "defaultPlaceHolder": field.get("defaultPlaceHolder", ""),
-                "placeHolder": field.get("placeHolder", field.get("defaultPlaceHolder", "")),
-                "questionDefaultValue": default_value,
-                "questionValue": "",
-                "key": field["key"],
-            })
-
-        # 构造报名问题 sectionArr
-        formatted_sections: list[dict[str, Any]] = []
-        if section_questions:
-            for idx, q in enumerate(section_questions, start=1):
-                formatted_sections.append(self._format_section_question(q, idx))
-
-        payment_switch = 1 if price_amount and price_amount > 0 else 0
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        enroll_payload: dict[str, Any] = {
-            "group_id": str(group_id),
-            "obj_id": str(group_id),
-            "obj_type": "1",
-            "teacher_id": teacher_id,
-            "title": course_title,
-            "status": "1" if enabled else "0",
-            "source_mark": "1",
-            "multimedia_id": "0",
-            "multimedia_type": 0,
-            "create_time": now_str,
-            "update_time": now_str,
-            "shareUrl": share_url,
-            "shareQrc": share_qrc,
-            "totalUserCount": 0,
-            "count": [0, 0, 0, 0, 0, 0],
-            "inUse": False,
-            "enrollId": str(enroll_id),
-            "autoCheck": "1" if auto_check else "0",
-            "desc": desc,
-            "payment": {"switch_status": payment_switch, "amount": int(price_amount or 0)},
-            "totalAmount": "0",
-            "sectionArr": formatted_sections,
-            "contactInfo": formatted_contact_info,
-            "setupInfo": {
-                "share": {
-                    "shareStatus": 1,
-                    "shareStart": "",
-                    "shareEnd": "",
-                    "wxShareTitle": "",
-                    "wxShareDesc": "",
+
+        # 修改报名时先加载现有配置，作为增量合并的基底
+        existing: dict[str, Any] | None = None
+        if enroll_id:
+            try:
+                existing = self.get_course_enrollment(group_id)
+                # 若传入的 enroll_id 与接口返回不一致，以传入为准
+                existing["enrollId"] = str(enroll_id)
+            except Exception as e:
+                logger.warning("读取现有报名配置失败，将使用新建逻辑: %s", e)
+                existing = None
+
+        if existing:
+            payload = copy.deepcopy(existing)
+        else:
+            payload = {
+                "group_id": str(group_id),
+                "obj_id": str(group_id),
+                "obj_type": "1",
+                "teacher_id": base_info["teacher_id"],
+                "title": base_info["title"],
+                "status": "1",
+                "source_mark": "1",
+                "multimedia_id": "0",
+                "multimedia_type": 0,
+                "create_time": now_str,
+                "shareUrl": base_info.get("share_url", ""),
+                "shareQrc": base_info.get("share_qrc", ""),
+                "totalUserCount": 0,
+                "count": [0, 0, 0, 0, 0, 0],
+                "inUse": False,
+                "enrollId": str(enroll_id),
+                "autoCheck": "1",
+                "desc": "",
+                "payment": {"switch_status": 0, "amount": 0},
+                "totalAmount": "0",
+                "sectionArr": [],
+                "contactInfo": [],
+                "setupInfo": {
+                    "share": {
+                        "shareStatus": 1,
+                        "shareStart": "",
+                        "shareEnd": "",
+                        "wxShareTitle": "",
+                        "wxShareDesc": "",
+                    },
+                    "payment": {"switch_status": "0", "amount": "0"},
                 },
-                "payment": {
-                    "switch_status": str(payment_switch),
-                    "amount": str(int(price_amount or 0)),
-                },
-            },
-            "setup": {
-                "allow_cancel": "1" if allow_cancel else "0",
-                "user_quota": str(user_quota),
-                "begin_time": str(begin_time),
-                "end_time": str(end_time),
-            },
+                "setup": {},
+            }
+
+        # 应用顶层覆盖
+        if title is not None:
+            payload["title"] = title
+        elif not existing:
+            payload["title"] = base_info["title"]
+
+        payload["status"] = "1" if enabled else "0"
+        payload["autoCheck"] = "1" if auto_check else "0"
+        payload["desc"] = desc
+        payment_switch = 1 if price_amount and price_amount > 0 else 0
+        payload["payment"] = {"switch_status": payment_switch, "amount": int(price_amount or 0)}
+        payload["update_time"] = now_str
+
+        # setup 合并：显式参数覆盖，缺失字段使用 HAR 默认值补齐
+        setup_defaults = {
+            "switch_status": "0",
+            "amount": "0",
+            "begin_time": str(begin_time),
+            "end_time": str(end_time),
+            "user_quota": str(user_quota),
+            "allow_upd_enroll_switch": "1",
+            "max_user_quota": "-1",
+            "allow_reject_participate_user": "1",
+            "allow_clear": "1",
+            "enable_expiry": "0",
+            "expiry_days": "0",
+            "allow_cancel": "1" if allow_cancel else "0",
         }
+        payload.setdefault("setup", {})
+        for key, default_value in setup_defaults.items():
+            if key in ("begin_time", "end_time", "user_quota", "allow_cancel"):
+                payload["setup"][key] = default_value
+            else:
+                payload["setup"].setdefault(key, default_value)
+
+        # setupInfo 固定结构，与 HAR 一致，不跟随 price_amount
+        payload["setupInfo"] = {
+            "share": {
+                "shareStatus": 1,
+                "shareStart": "",
+                "shareEnd": "",
+                "wxShareTitle": "",
+                "wxShareDesc": "",
+            },
+            "payment": {"switch_status": "0", "amount": "0"},
+        }
+
+        # contactInfo：用户传入则替换，否则保留 existing（新建时为空）
+        if contact_info is not None or selected_contact_fields is not None:
+            payload["contactInfo"] = self._format_contact_info(
+                contact_info, selected_contact_fields
+            )
+        elif not existing:
+            payload["contactInfo"] = self._format_contact_info(None, None)
+
+        # sectionArr：用户传入则按索引合并，保留原有问题/选项 ID
+        if section_questions is not None:
+            payload["sectionArr"] = self._merge_section_arr(
+                payload.get("sectionArr", []), section_questions
+            )
 
         self._write_cooldown()
         logger.info(
@@ -1309,12 +1335,12 @@ class CourseBuilder:
             enabled,
             auto_check,
             price_amount,
-            len(formatted_sections),
+            len(payload.get("sectionArr", [])),
         )
 
         resp = self.client.post(
             self.client.desktop_url("/api/enroll/saveenroll"),
-            data={"enroll": json.dumps(enroll_payload, ensure_ascii=False)},
+            data={"enroll": json.dumps(payload, ensure_ascii=False)},
         )
 
         if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
@@ -1337,6 +1363,70 @@ class CourseBuilder:
             "enabled": enabled,
             "auto_check": auto_check,
         }
+
+    def _format_contact_info(
+        self,
+        contact_info: list[dict[str, Any]] | None,
+        selected_contact_fields: list[str] | None,
+    ) -> list[dict[str, Any]]:
+        """构造报名联系信息字段."""
+        fields = contact_info if contact_info is not None else self._DEFAULT_ENROLL_CONTACT_INFO
+        selected_keys = set(selected_contact_fields or [])
+        formatted = []
+        for field in fields:
+            default_value = field.get("questionDefaultValue", [{"value": "", "text": ""}])
+            is_selected_raw = field.get("isSelected", field.get("selected"))
+            if is_selected_raw is None:
+                is_selected = field.get("key", "") in selected_keys
+            else:
+                is_selected = str(is_selected_raw) in ("1", "true", "True", True)
+            is_required = str(field.get("isRequired", field.get("required", True))) in (
+                "1",
+                "true",
+                "True",
+                True,
+            )
+            formatted.append({
+                "isMustKey": "0",
+                "canMove": "1",
+                "domType": field.get("domType", "text"),
+                "isRequired": "1" if is_required else "0",
+                "isSelected": "1" if is_selected else "0",
+                "questionTitle": field["questionTitle"],
+                "defaultPlaceHolder": field.get("defaultPlaceHolder", ""),
+                "placeHolder": field.get("placeHolder", field.get("defaultPlaceHolder", "")),
+                "questionDefaultValue": default_value,
+                "questionValue": "",
+                "key": field["key"],
+            })
+        return formatted
+
+    def _merge_section_arr(
+        self,
+        existing_sections: list[dict[str, Any]],
+        questions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """将简化问题列表与现有 sectionArr 合并，保留原有问题/选项 ID."""
+        result = []
+        for idx, q in enumerate(questions, start=1):
+            new_section = self._format_section_question(q, idx)
+            if idx <= len(existing_sections):
+                old = existing_sections[idx - 1]
+                old_info = old.get("questionInfo", {})
+                new_info = new_section["questionInfo"]
+                # 同位置且类型相同则保留原有 ID
+                if old_info.get("domType") == new_info.get("domType"):
+                    new_info["questionId"] = old_info.get("questionId", "")
+                    new_info["sessionId"] = old_info.get("sessionId", "")
+                    new_info["enrollId"] = old_info.get("enrollId", "")
+                    old_answers = old.get("answerArr", [])
+                    new_answers = new_section["answerArr"]
+                    for a_idx, new_a in enumerate(new_answers):
+                        if a_idx < len(old_answers):
+                            new_a["answerId"] = old_answers[a_idx].get("answerId", "")
+                            new_a["questionId"] = old_answers[a_idx].get("questionId", "")
+            result.append(new_section)
+        return result
 
     def _format_section_question(self, q: dict[str, Any], index: int) -> dict[str, Any]:
         """将简化的报名问题格式转换为 UMU sectionArr 格式.
