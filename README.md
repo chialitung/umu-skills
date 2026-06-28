@@ -401,13 +401,13 @@ python -m umu_sdk.adapters.mcp.admin
 | 讲师 | `adm_list_instructors` |
 | 授课记录 | `adm_list_teaching_records` |
 
-### 教师工具（96）
+### 教师工具（97）
 
 | 分类 | 工具 |
 |----------|-------|
 | 认证 | `tch_login`, `tch_check_auth` |
 | 会话 | `tch_create_session`, `tch_list_sessions`, `tch_destroy_session` |
-| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext`, `tch_submit_course_for_audit`, `tch_set_course_enrollment`, `tch_get_course_auto_close`, `tch_set_course_auto_close`, `tch_cancel_course_auto_close` |
+| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext`, `tch_submit_course_for_audit`, `tch_get_course_enrollment`, `tch_set_course_enrollment`, `tch_get_course_auto_close`, `tch_set_course_auto_close`, `tch_cancel_course_auto_close` |
 | 课程列表 | `tch_list_created_courses`, `tch_list_cooperated_courses`, `tch_list_participated_courses`, `tch_list_learning_programs` |
 | 学习项目 | `tch_create_learning_program`, `tch_get_learning_program`, `tch_update_learning_program`, `tch_update_learning_program_modules`, `tch_remove_courses_from_learning_program`, `tch_add_courses_to_learning_program`, `tch_configure_program_certificate`, `tch_set_program_points_status`, `tch_search_courses_for_program`, `tch_list_program_participants`, `tch_list_program_learning_tasks` |
 | 课程学员 | `tch_list_course_learning_tasks`, `tch_list_course_participants`, `tch_list_course_learning_durations` |
