@@ -6339,6 +6339,44 @@ async def tch_update_course(
 
 
 @mcp.tool()
+async def tch_get_course_enrollment(
+    group_id: Annotated[str, Field(description="课程 ID，要查询报名的课程")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取课程当前报名配置.
+
+    触发条件：需要查看课程报名开关、标题、名额、时间、价格、联系信息、
+    自定义问题等配置时调用。
+
+    返回字段包含：enroll_id、title、status、auto_check、multimedia_id、
+    setup（限额/时间/开关等）、setupInfo（share/payment）、sectionArr、
+    contactInfo 等。
+    """
+    client = _get_client(session_id)
+    try:
+        builder = CourseBuilder(client)
+        result = builder.get_course_enrollment(group_id)
+        return _ok(
+            data=result,
+            next_action="proceed",
+            suggested_action="可调用 tch_set_course_enrollment 修改报名配置",
+        )
+    except Exception as e:
+        logger.exception("获取课程报名配置失败")
+        return _err(
+            error_code="GET_ENROLLMENT_FAILED",
+            error_message=str(e),
+            suggested_action="请检查 group_id 和登录状态后重试",
+        )
+
+
+@mcp.tool()
 async def tch_set_course_enrollment(
     group_id: Annotated[str, Field(description="课程 ID，要设置报名的课程")],
     enabled: Annotated[

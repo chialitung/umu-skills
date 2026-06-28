@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from umu_sdk.adapters.mcp.course_builder import CourseBuilder
-from umu_sdk.adapters.mcp.teacher import tch_set_course_enrollment, tch_update_course
+from umu_sdk.adapters.mcp.teacher import (
+    tch_get_course_enrollment,
+    tch_set_course_enrollment,
+    tch_update_course,
+)
 
 
 @pytest.fixture
@@ -407,6 +411,23 @@ def _auth_patch(mock_client):
 
 
 class TestTeacherEnrollmentTools:
+    async def test_tch_get_course_enrollment_tool(self, mock_client):
+        mock_client.get.return_value = _enroll_info_response()
+
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_get_course_enrollment("7343171"))
+
+        assert result["success"] is True
+        assert result["data"]["enroll_id"] == "580263"
+        assert result["data"]["title"] == "测试报名标题"
+        assert result["data"]["setup"]["user_quota"] == "-1"
+        assert "share" not in result["data"]["setup"]
+        assert "payment" not in result["data"]["setup"]
+
+        calls = mock_client.get.call_args_list
+        assert len(calls) == 1
+        assert calls[0].args[0] == "https://www.umu.cn/uapi/v1/course/enroll-info"
+
     async def test_tch_set_course_enrollment_tool(self, mock_client):
         mock_client.get.return_value = _course_info_response()
         mock_client.post.return_value = _enroll_save_response("580237")
