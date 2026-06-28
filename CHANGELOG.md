@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.3] - 2026-06-28
+
+### Fixed
+- 重新发布 `0.24.2`：
+  - 已上传到 PyPI 的 `0.24.2` wheel 为旧构建产物，未包含本次发布的完整变更（教师课程自动关闭工具、学员复杂报名表单工具等）。
+  - PyPI 不允许覆盖同名文件，因此 bump 版本至 `0.24.3` 重新发布。
+
 ## [0.24.2] - 2026-06-28
 
 ### Fixed
