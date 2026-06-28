@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.2] - 2026-06-28
+
+### Fixed
+- 修复 `0.24.1` 引入的发布包回归：
+  - `pyproject.toml` 中 `sdist` 的排除规则 `export_*.py` 过于宽泛，误将 `src/umu_sdk/adapters/mcp/export_engine.py` 排除在发布包之外。
+  - 将规则修正为 `/export_*.py`，仅排除仓库根目录的临时导出脚本。
+  - 该问题导致 `umu-teacher` 与 `umu-admin` MCP server 启动时报 `ModuleNotFoundError: No module named 'umu_sdk.adapters.mcp.export_engine'`。
+
 ## [0.24.1] - 2026-06-27
 
 ### Fixed

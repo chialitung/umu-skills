@@ -9,6 +9,7 @@ from __future__ import annotations
 import difflib
 import sys
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ...core.client import UMUClient
@@ -124,6 +125,65 @@ def report_pagination_progress(
     )
 
 
+_BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def _parse_auto_close_time(close_time: str) -> datetime:
+    """解析自动关闭时间为北京时间 datetime 对象.
+
+    支持的输入格式示例：
+    - 2026-06-30T10:00:00
+    - 2026-06-30 10:00:00
+    - 2026-06-30T10:00
+    - 2026-06-30 10:00
+    - 2026/06/30 10:00
+    - 2026年06月30日10点
+    - 2026年6月30日10点
+
+    返回带 Beijing (+08:00) 时区信息的 datetime。
+    """
+    close_time = close_time.strip()
+    formats = [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M",
+        "%Y年%m月%d日%H点",
+    ]
+    parsed: datetime | None = None
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(close_time, fmt)
+            break
+        except ValueError:
+            continue
+    # 兼容 "2026年6月30日10点" 等非零填充中文格式
+    if parsed is None and "年" in close_time and "月" in close_time and "日" in close_time:
+        import re
+        normalized = re.sub(r"(\D)(\d{1,2})(?=月|日)", lambda m: f"{m.group(1)}{int(m.group(2)):02d}", close_time)
+        normalized = re.sub(r"(\D)(\d{1,2})(?=点)", lambda m: f"{m.group(1)}{int(m.group(2)):02d}", normalized)
+        try:
+            parsed = datetime.strptime(normalized, "%Y年%m月%d日%H点")
+        except ValueError:
+            parsed = None
+    if parsed is None:
+        raise ValueError(
+            f"无法解析关闭时间: {close_time}，支持的格式如 2026-06-30 10:00"
+        )
+    return parsed.replace(tzinfo=_BEIJING_TZ)
+
+
+def _format_auto_close_tips(close_time: str) -> str:
+    """将关闭时间格式化为 UMU 前端展示文本.
+
+    输出固定为：课程开启自动关闭时间，将在YYYY年M月D日H点关闭
+    """
+    parsed = _parse_auto_close_time(close_time)
+    formatted = f"{parsed.year}年{parsed.month}月{parsed.day}日{parsed.hour}点关闭"
+    return f"课程开启自动关闭时间，将在{formatted}"
+
+
 __all__ = [
     "get_login_identity",
     "format_login_summary",
@@ -131,6 +191,8 @@ __all__ = [
     "compute_similarity",
     "fuzzy_filter_items",
     "fuzzy_filter_items_multi_key",
+    "_parse_auto_close_time",
+    "_format_auto_close_tips",
 ]
 
 

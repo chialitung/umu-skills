@@ -8,7 +8,7 @@ import pytest
 
 from umu_sdk.skills.decorators import SkillContext
 from umu_sdk.skills.mcp_client import ToolCallResult
-from umu_sdk.skills.slash._runner import run_umu_command
+from umu_sdk.skills.slash._runner import run_umu_command, select_target
 from umu_sdk.skills.slash.umu_admin import umu_admin
 from umu_sdk.skills.slash.umu_student import umu_student
 from umu_sdk.skills.slash.umu_teacher import umu_teacher
@@ -108,4 +108,47 @@ class TestRunUmuCommandSignature:
         assert "remember_choice" in sig.parameters
 
 
-__all__ = ["TestUmuTeacher"]
+class TestAutoCloseDispatch:
+    def test_set_course_auto_close_with_iso_datetime(self):
+        target = select_target("使用teacher权限设置课程 7339916 的自动关闭时间为 2028-05-21 12:30")
+        assert target is not None
+        assert target.skill_name == "set_course_auto_close"
+        assert target.capability == "teacher"
+        assert target.arguments == {"group_id": "7339916", "close_time": "2028-05-21 12:30"}
+        assert target.missing_args == []
+
+    def test_set_course_auto_close_with_slash_datetime(self):
+        target = select_target("把课程7339916的关闭时间改成2028/05/21 12:30")
+        assert target is not None
+        assert target.skill_name == "set_course_auto_close"
+        assert target.arguments == {"group_id": "7339916", "close_time": "2028/05/21 12:30"}
+
+    def test_set_course_auto_close_missing_time(self):
+        target = select_target("设置课程7339916的自动关闭")
+        assert target is not None
+        assert target.skill_name == "set_course_auto_close"
+        assert target.arguments == {"group_id": "7339916"}
+        assert "close_time" in target.missing_args
+
+    def test_cancel_course_auto_close(self):
+        target = select_target("取消课程 7339916 的自动关闭")
+        assert target is not None
+        assert target.skill_name == "cancel_course_auto_close"
+        assert target.arguments == {"group_id": "7339916"}
+
+    def test_get_course_auto_close(self):
+        target = select_target("查询课程 7339916 的自动关闭时间")
+        assert target is not None
+        assert target.skill_name == "get_course_auto_close"
+        assert target.arguments == {"group_id": "7339916"}
+
+    def test_auto_close_does_not_match_access_permission(self):
+        target = select_target("设置课程 7339916 的访问权限为企业内公开")
+        assert target is None or target.skill_name != "set_course_auto_close"
+
+    def test_auto_close_does_not_match_enrollment(self):
+        target = select_target("开启课程 7339916 的报名")
+        assert target is None or "auto_close" not in target.skill_name
+
+
+__all__ = ["TestUmuTeacher", "TestAutoCloseDispatch"]

@@ -71,6 +71,12 @@ class AuthManager:
         if self.base_url:
             logger.debug("目标环境: %s", self.base_url)
 
+        # 清除旧认证状态，避免已登录会话的 Cookie 污染登录请求。
+        # UMU 服务端对携带有效 estuidtoken Cookie 的 /passport/ajax/account/login
+        # 请求会返回 401，表现为重复登录失败。
+        self.logout()
+        self.http.cookies.clear()
+
         # 加密密码
         encrypted_password = encrypt_password(pwd)
 

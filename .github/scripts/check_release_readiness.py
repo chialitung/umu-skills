@@ -252,7 +252,7 @@ def check_tracked_exclusions() -> None:
 
 
 def check_sdist_contents() -> None:
-    """构建并检查 sdist 是否包含非 SDK 交付物."""
+    """构建并检查 sdist 是否包含非 SDK 交付物，且包含所有 SDK 源文件."""
     import shutil
 
     if shutil.which("python") is None:
@@ -290,6 +290,7 @@ def check_sdist_contents() -> None:
     forbidden_files = ("/export_", "/umu.skill")
 
     offenders: list[str] = []
+    sdist_py_files: set[str] = set()
     with tarfile.open(sdist, "r:gz") as tf:
         for member in tf.getmembers():
             # 成员名形如 umu_skills-x.y.z/...
@@ -299,6 +300,10 @@ def check_sdist_contents() -> None:
                 continue
             if any(member.name.endswith(suffix) for suffix in forbidden_files):
                 offenders.append(member.name)
+            # 收集 sdist 中的 SDK Python 文件（去掉顶层目录前缀）
+            parts = Path(member.name).parts
+            if len(parts) > 1 and parts[1] == "src" and member.name.endswith(".py"):
+                sdist_py_files.add("/".join(parts[1:]))
 
     if offenders:
         fail(
@@ -306,7 +311,28 @@ def check_sdist_contents() -> None:
             f"[tool.hatch.build.targets.sdist] 排除规则：\n"
             + "\n".join(f"  - {p}" for p in offenders)
         )
-    info(f"sdist `{sdist.name}` 内容检查通过")
+
+    # 检查所有跟踪的 SDK 源文件是否都在 sdist 中
+    tracked_result = subprocess.run(
+        ["git", "ls-files", "src/umu_sdk/"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if tracked_result.returncode != 0:
+        fail("无法执行 git ls-files src/umu_sdk/")
+
+    tracked_py_files = {line.strip() for line in tracked_result.stdout.splitlines() if line.strip().endswith(".py")}
+    missing = tracked_py_files - sdist_py_files
+    if missing:
+        fail(
+            f"sdist `{sdist.name}` 遗漏以下 SDK 源文件，请检查 pyproject.toml 的 "
+            f"[tool.hatch.build.targets.sdist] 排除规则是否过宽：\n"
+            + "\n".join(f"  - {p}" for p in sorted(missing))
+        )
+
+    info(f"sdist `{sdist.name}` 内容检查通过，包含 {len(tracked_py_files)} 个 SDK 源文件")
 
 
 def main() -> int:

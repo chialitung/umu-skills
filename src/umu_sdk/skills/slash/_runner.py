@@ -233,6 +233,90 @@ def _dispatch_get_course_progress(intent: str) -> DispatchTarget | None:
     return None
 
 
+_AUTO_CLOSE_KEYWORDS = ("自动关闭", "定时关闭", "关闭时间", "到期时间")
+
+
+def _extract_course_group_id(intent: str) -> str | None:
+    """从意图中提取课程 ID（group_id）."""
+    group_id = (
+        _extract_named(intent, "group_id")
+        or _extract_named(intent, "课程")
+        or _extract_named(intent, "course")
+    )
+    if group_id:
+        return group_id
+    # 兜底：提取 5 位以上连续数字作为课程 ID
+    match = re.search(r"(?<!\d)\d{5,}(?!\d)", intent)
+    return match.group(0) if match else None
+
+
+def _extract_close_time(intent: str) -> str | None:
+    """从意图中提取自动关闭时间字符串."""
+    # ISO / 斜杠格式：2028-05-21 12:30 或 2028/05/21 12:30
+    match = re.search(
+        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?",
+        intent,
+    )
+    if match:
+        return match.group(0)
+    # 中文格式：2028年5月21日12点 或 2028年05月21日12点30分
+    match = re.search(
+        r"\d{4}年\d{1,2}月\d{1,2}日\d{1,2}点(?:\d{1,2}分)?",
+        intent,
+    )
+    return match.group(0) if match else None
+
+
+def _dispatch_get_course_auto_close(intent: str) -> DispatchTarget | None:
+    if any(k in intent for k in _AUTO_CLOSE_KEYWORDS) and any(
+        k in intent for k in ("查询", "查看", "获取", "什么", "几点", "何时", "状态")
+    ):
+        group_id = _extract_course_group_id(intent)
+        args: dict[str, Any] = {}
+        missing: list[str] = []
+        if group_id:
+            args["group_id"] = group_id
+        else:
+            missing.append("group_id")
+        return DispatchTarget("get_course_auto_close", "teacher", args, missing)
+    return None
+
+
+def _dispatch_set_course_auto_close(intent: str) -> DispatchTarget | None:
+    if any(k in intent for k in _AUTO_CLOSE_KEYWORDS) and any(
+        k in intent for k in ("设置", "设定", "修改", "更新", "设为", "改成", "调整")
+    ):
+        group_id = _extract_course_group_id(intent)
+        close_time = _extract_close_time(intent)
+        args: dict[str, Any] = {}
+        missing: list[str] = []
+        if group_id:
+            args["group_id"] = group_id
+        else:
+            missing.append("group_id")
+        if close_time:
+            args["close_time"] = close_time
+        else:
+            missing.append("close_time")
+        return DispatchTarget("set_course_auto_close", "teacher", args, missing)
+    return None
+
+
+def _dispatch_cancel_course_auto_close(intent: str) -> DispatchTarget | None:
+    if any(k in intent for k in _AUTO_CLOSE_KEYWORDS) and any(
+        k in intent for k in ("取消", "撤销", "关掉", "关闭")
+    ):
+        group_id = _extract_course_group_id(intent)
+        args: dict[str, Any] = {}
+        missing: list[str] = []
+        if group_id:
+            args["group_id"] = group_id
+        else:
+            missing.append("group_id")
+        return DispatchTarget("cancel_course_auto_close", "teacher", args, missing)
+    return None
+
+
 def _dispatch_list_admin_courses(intent: str) -> DispatchTarget | None:
     if any(k in intent for k in ("企业课程", "所有课程")):
         return DispatchTarget("list_courses", "admin", {}, [])
@@ -262,6 +346,9 @@ _DISPATCHERS: list[Dispatcher] = [
     _dispatch_submit_course_for_audit,
     _dispatch_enroll_course,
     _dispatch_get_course_progress,
+    _dispatch_set_course_auto_close,
+    _dispatch_get_course_auto_close,
+    _dispatch_cancel_course_auto_close,
     _dispatch_list_admin_courses,
     _dispatch_list_admin_learning_programs,
     _dispatch_list_teacher_learning_programs,

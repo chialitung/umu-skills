@@ -381,7 +381,7 @@ python -m umu_sdk.adapters.mcp.admin
 
 ## 可用工具
 
-### 管理员工具（55）
+### 管理员工具（53）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -393,7 +393,7 @@ python -m umu_sdk.adapters.mcp.admin
 | 组织架构 | `adm_list_departments`, `adm_get_department_tree`, `adm_get_department`, `adm_get_child_departments`, `adm_list_department_members`, `adm_search_department_members`, `adm_create_department`, `adm_update_department`（可设置部门负责人）, `adm_sort_departments`, `adm_add_department_members`, `adm_move_department_members`, `adm_remove_department_members`, `adm_delete_departments`, `adm_list_groups` |
 | 分组 | `adm_create_group`, `adm_update_group`, `adm_delete_groups`, `adm_get_group`, `adm_list_group_members`, `adm_list_group_managers`, `adm_add_group_members`, `adm_remove_group_members`, `adm_add_group_managers`, `adm_remove_group_managers` |
 | 班级 | `adm_list_classes` |
-| 课程/学习项目 | `adm_list_courses`, `adm_list_learning_programs`, `adm_list_personal_learning_programs`, `adm_set_course_auto_close`, `adm_cancel_course_auto_close` |
+| 课程/学习项目 | `adm_list_courses`, `adm_list_learning_programs`, `adm_list_personal_learning_programs` |
 | 课程审核 | `adm_list_course_audit_records`, `adm_audit_course`, `adm_list_course_categories`, `adm_list_course_blacklist`, `adm_save_course_blacklist` |
 | 学习记录 | `adm_list_learning_records`, `adm_export_learning_records` |
 | 导出 | `adm_export_accounts` |
@@ -401,13 +401,13 @@ python -m umu_sdk.adapters.mcp.admin
 | 讲师 | `adm_list_instructors` |
 | 授课记录 | `adm_list_teaching_records` |
 
-### 教师工具（93）
+### 教师工具（96）
 
 | 分类 | 工具 |
 |----------|-------|
 | 认证 | `tch_login`, `tch_check_auth` |
 | 会话 | `tch_create_session`, `tch_list_sessions`, `tch_destroy_session` |
-| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext`, `tch_submit_course_for_audit`, `tch_set_course_enrollment` |
+| 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext`, `tch_submit_course_for_audit`, `tch_set_course_enrollment`, `tch_get_course_auto_close`, `tch_set_course_auto_close`, `tch_cancel_course_auto_close` |
 | 课程列表 | `tch_list_created_courses`, `tch_list_cooperated_courses`, `tch_list_participated_courses`, `tch_list_learning_programs` |
 | 学习项目 | `tch_create_learning_program`, `tch_get_learning_program`, `tch_update_learning_program`, `tch_update_learning_program_modules`, `tch_remove_courses_from_learning_program`, `tch_add_courses_to_learning_program`, `tch_configure_program_certificate`, `tch_set_program_points_status`, `tch_search_courses_for_program`, `tch_list_program_participants`, `tch_list_program_learning_tasks` |
 | 课程学员 | `tch_list_course_learning_tasks`, `tch_list_course_participants`, `tch_list_course_learning_durations` |
@@ -421,7 +421,7 @@ python -m umu_sdk.adapters.mcp.admin
 | 资源（文档） | `tch_upload_document`, `tch_list_documents`, `tch_rename_document`, `tch_delete_document`, `tch_upload_documents_batch`, `tch_delete_documents_batch` |
 | 资源（音视频） | `tch_upload_audio_video`, `tch_list_audio_videos`, `tch_rename_audio_video`, `tch_delete_audio_video` |
 
-### 学生工具（25）
+### 学生工具（27）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -429,6 +429,7 @@ python -m umu_sdk.adapters.mcp.admin
 | 会话 | `stu_create_session`, `stu_list_sessions`, `stu_destroy_session` |
 | 课程 | `stu_get_my_courses`, `stu_list_participated_courses`, `stu_get_course_structure`, `stu_get_learning_progress`, `stu_resolve_course_url` |
 | 学习 | `stu_enroll_course`, `stu_browse_lesson`, `stu_complete_scorm_section`, `stu_get_questionnaire_questions`, `stu_submit_questionnaire`, `stu_submit_questionnaire_with_config`, `stu_check_in`, `stu_check_in_with_rating`, `stu_start_exam`, `stu_submit_exam`, `stu_submit_exam_with_config`, `stu_get_lesson_status` |
+| 报名 | `stu_get_enroll_form`, `stu_submit_enroll_form` |
 | 完成课程 | `stu_complete_course`, `stu_batch_complete_course` |
 | 批量 | `stu_batch_import_accounts` |
 
@@ -467,7 +468,7 @@ python -m umu_sdk.skills.server
 - 返回与 Skill 统一的标准信封格式
 - AI 应优先使用 `skill_run` 调用已封装 Skill，仅在工具未覆盖时使用透传
 
-内置 Skill 覆盖高频场景（共 113），并支持通过 `/umu`、`/umua`、`/umut`、`/umus` 斜杠命令直接触发：
+内置 Skill 覆盖高频场景（共 115），并支持通过 `/umu`、`/umua`、`/umut`、`/umus` 斜杠命令直接触发：
 
 | Skill | 涉及子 MCP | 说明 |
 |-------|-----------|------|
@@ -501,6 +502,7 @@ python -m umu_sdk.skills.server
 | `add_course_access_accounts` | teacher | 为课程设置指定账户、班级、部门或分组的访问权限 |
 | `remove_course_access_accounts` | teacher | 移除课程的指定账户、班级、部门或分组访问权限 |
 | `cancel_course_access_permissions` | teacher | 取消课程的所有指定访问权限 |
+| `get_course_auto_close` | teacher | 获取课程定时自动关闭设置 |
 | `set_course_auto_close` | teacher | 设置课程定时自动关闭时间 |
 | `cancel_course_auto_close` | teacher | 取消课程定时自动关闭 |
 | `list_teacher_learning_programs` | teacher | 列出讲师的学习项目（支持多种类型） |
@@ -566,6 +568,7 @@ python -m umu_sdk.skills.server
 | `audit_course` | admin | 对企业知识库课程执行通过、拒绝或撤销提交操作 |
 | `list_course_blacklist` | admin | 查询课程提交黑名单 |
 | `manage_course_blacklist` | admin | 将用户加入或移出课程提交黑名单 |
+| `get_course_auto_close_admin` | admin | 获取课程定时自动关闭设置 |
 | `set_course_auto_close_admin` | admin | 设置课程定时自动关闭时间 |
 | `cancel_course_auto_close_admin` | admin | 取消课程定时自动关闭 |
 | `list_learning_programs` | admin | 查询企业学习项目清单 |

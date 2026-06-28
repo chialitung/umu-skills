@@ -8,7 +8,11 @@
 Teacher / Student / Admin 子 MCP 的原子工具。
 """
 
-from .admin_courses import cancel_course_auto_close_admin, set_course_auto_close_admin
+from .admin_courses import (
+    cancel_course_auto_close_admin,
+    get_course_auto_close_admin,
+    set_course_auto_close_admin,
+)
 from .admin_learning_programs_personal import (
     list_admin_personal_learning_programs,
     list_cooperated_learning_programs_admin,
@@ -23,6 +27,7 @@ from .course_permissions import (
     cancel_course_auto_close,
     get_course_access_list,
     get_course_access_permission,
+    get_course_auto_close,
     remove_course_access_accounts,
     search_course_access_accounts,
     set_course_access_permission,
@@ -53,6 +58,8 @@ __all__ = [
     "cancel_program_access_permissions",
     "get_course_access_list",
     "get_course_access_permission",
+    "get_course_auto_close",
+    "get_course_auto_close_admin",
     "get_program_access_list",
     "get_program_access_permission",
     "get_teaching_records",

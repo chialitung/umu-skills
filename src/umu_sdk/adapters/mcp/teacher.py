@@ -48,6 +48,8 @@ from pydantic import Field
 from ...core.client import UMUClient
 from ...core.credential_loader import load_credentials_with_source
 from .utils import (
+    _format_auto_close_tips,
+    _parse_auto_close_time,
     format_login_summary,
     fuzzy_filter_items,
     fuzzy_filter_items_multi_key,
@@ -9256,6 +9258,227 @@ async def tch_cancel_all_assigned_permissions(
     except Exception as e:
         logger.exception("取消课程指定权限失败")
         return _err("CANCEL_ASSIGNED_PERMISSIONS_FAILED", str(e))
+
+
+# ---------------------------------------------------------------------------
+# 课程自动关闭
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def tch_get_course_auto_close(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """查询课程自动关闭时间设置.
+
+    返回当前课程的 open_time、close_time、open_access_permission。
+    close_time 为 0 表示未设置自动关闭。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/course/get-timing-switch"),
+            params={"course_id": str(group_id)},
+        )
+        if not isinstance(resp, dict) or resp.get("error_code") != 0:
+            return _err(
+                "GET_COURSE_AUTO_CLOSE_FAILED",
+                resp.get("error_message") or "查询课程自动关闭时间失败",
+            )
+
+        data = resp.get("data", {})
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "open_time": data.get("open_time", 0),
+                "close_time": data.get("close_time", 0),
+                "open_access_permission": data.get("open_access_permission", 0),
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("查询课程自动关闭时间失败")
+        return _err("GET_COURSE_AUTO_CLOSE_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_set_course_auto_close(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    close_time: Annotated[
+        str,
+        Field(
+            description="自动关闭时间，支持格式如 2026-06-30 10:00、2026-06-30T10:00:00、2026年6月30日10点"
+        ),
+    ],
+    custom_tips: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="自定义提示文本；若提供则直接作为 accessPermissionTips，忽略 close_time 的默认格式化",
+        ),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """设置课程自动关闭时间.
+
+    会先调用 /uapi/v1/course/set-timing-switch 设置真实的关闭时间戳，
+    再保存 group_setup.accessPermissionTips 作为前端展示文案。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        parsed = _parse_auto_close_time(close_time)
+        close_timestamp = int(parsed.timestamp())
+    except ValueError as e:
+        return _err("INVALID_CLOSE_TIME", str(e), next_action="needs_user_input")
+
+    try:
+        resp = client.post(
+            client.desktop_url("/uapi/v1/course/set-timing-switch"),
+            data={
+                "course_id": str(group_id),
+                "open_time": "0",
+                "close_time": str(close_timestamp),
+            },
+        )
+        if not isinstance(resp, dict) or resp.get("error_code") != 0:
+            return _err(
+                "SET_COURSE_AUTO_CLOSE_FAILED",
+                resp.get("error_message") or "设置课程自动关闭时间失败",
+            )
+
+        tips = custom_tips.strip() if custom_tips else _format_auto_close_tips(close_time)
+        group_setup = {
+            "accessPermissionTips": tips,
+            "access_permission_tips": tips,
+            "enable_mini_program": 0,
+            "learn_within_mini_program": 0,
+        }
+        setup_resp = client.post(
+            client.desktop_url("/api/group/savesetup"),
+            data={
+                "group_id": str(group_id),
+                "group_setup": json.dumps(group_setup, ensure_ascii=False),
+            },
+        )
+        if not isinstance(setup_resp, dict):
+            return _err("SET_COURSE_AUTO_CLOSE_FAILED", "保存自动关闭提示文案失败")
+        if setup_resp.get("status") not in (True, "true") and setup_resp.get("error_code") != 0:
+            return _err(
+                "SET_COURSE_AUTO_CLOSE_FAILED",
+                setup_resp.get("error") or setup_resp.get("error_message") or "保存自动关闭提示文案失败",
+            )
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "close_time": close_timestamp,
+                "access_permission_tips": tips,
+            },
+            next_action="proceed",
+            suggested_action="可通过 UMU 后台查看课程的自动关闭提示",
+        )
+    except Exception as e:
+        logger.exception("设置课程自动关闭时间失败")
+        return _err("SET_COURSE_AUTO_CLOSE_FAILED", str(e))
+
+
+@mcp.tool()
+async def tch_cancel_course_auto_close(
+    group_id: Annotated[str, Field(description="课程 ID")],
+    clear_tips: Annotated[
+        bool,
+        Field(
+            default=True,
+            description="是否同时清空自动关闭提示文案",
+        ),
+    ] = True,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """取消课程自动关闭时间.
+
+    调用 /uapi/v1/course/set-timing-switch 将 close_time 置为 0，
+    默认同时清空 accessPermissionTips 提示文案。
+    """
+    client = _get_client(session_id)
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err("NOT_AUTHENTICATED", auth_err, next_action="retry")
+
+    try:
+        resp = client.post(
+            client.desktop_url("/uapi/v1/course/set-timing-switch"),
+            data={
+                "course_id": str(group_id),
+                "open_time": "0",
+                "close_time": "0",
+            },
+        )
+        if not isinstance(resp, dict) or resp.get("error_code") != 0:
+            return _err(
+                "CANCEL_COURSE_AUTO_CLOSE_FAILED",
+                resp.get("error_message") or "取消课程自动关闭时间失败",
+            )
+
+        if clear_tips:
+            group_setup = {
+                "accessPermissionTips": "",
+                "access_permission_tips": "",
+                "enable_mini_program": 0,
+                "learn_within_mini_program": 0,
+            }
+            setup_resp = client.post(
+                client.desktop_url("/api/group/savesetup"),
+                data={
+                    "group_id": str(group_id),
+                    "group_setup": json.dumps(group_setup, ensure_ascii=False),
+                },
+            )
+            if not isinstance(setup_resp, dict):
+                return _err("CANCEL_COURSE_AUTO_CLOSE_FAILED", "清空自动关闭提示文案失败")
+            if setup_resp.get("status") not in (True, "true") and setup_resp.get("error_code") != 0:
+                return _err(
+                    "CANCEL_COURSE_AUTO_CLOSE_FAILED",
+                    setup_resp.get("error") or setup_resp.get("error_message") or "清空自动关闭提示文案失败",
+                )
+
+        return _ok(
+            data={
+                "group_id": str(group_id),
+                "close_time": 0,
+                "cleared_tips": clear_tips,
+            },
+            next_action="proceed",
+        )
+    except Exception as e:
+        logger.exception("取消课程自动关闭时间失败")
+        return _err("CANCEL_COURSE_AUTO_CLOSE_FAILED", str(e))
 
 
 @mcp.tool()

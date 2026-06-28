@@ -12,6 +12,7 @@ from umu_sdk.skills.builtin.course_permissions import (
     cancel_course_auto_close,
     get_course_access_list,
     get_course_access_permission,
+    get_course_auto_close,
     remove_course_access_accounts,
     search_course_access_accounts,
     set_course_access_permission,
@@ -74,12 +75,28 @@ class TestCoursePermissionsSkills:
         call = ctx.call_tool.call_args
         assert call.kwargs["tool"] == "tch_get_course_access_list"
 
-    async def test_set_course_auto_close(self, ctx):
-        await set_course_auto_close(ctx, "g1", "2026-06-30 10:00")
+    async def test_get_course_auto_close(self, ctx):
+        result = await get_course_auto_close(ctx, "g1")
+        assert result["success"] is True
         call = ctx.call_tool.call_args
-        assert call.kwargs["tool"] == "tch_set_course_auto_close"
+        assert call.kwargs["server"] == "teacher"
+        assert call.kwargs["tool"] == "tch_get_course_auto_close"
+        assert call.kwargs["arguments"]["group_id"] == "g1"
+
+    async def test_set_course_auto_close(self, ctx):
+        result = await set_course_auto_close(ctx, "g1", "2026-06-30 10:00")
+        assert result["success"] is True
+        calls = ctx.call_tool.call_args_list
+        assert calls[0].kwargs["tool"] == "tch_get_course_auto_close"
+        assert calls[1].kwargs["tool"] == "tch_set_course_auto_close"
+        assert calls[1].kwargs["arguments"]["group_id"] == "g1"
+        assert calls[1].kwargs["arguments"]["close_time"] == "2026-06-30 10:00"
 
     async def test_cancel_course_auto_close(self, ctx):
-        await cancel_course_auto_close(ctx, "g1")
-        call = ctx.call_tool.call_args
-        assert call.kwargs["tool"] == "tch_cancel_course_auto_close"
+        result = await cancel_course_auto_close(ctx, "g1")
+        assert result["success"] is True
+        calls = ctx.call_tool.call_args_list
+        assert calls[0].kwargs["tool"] == "tch_get_course_auto_close"
+        assert calls[1].kwargs["tool"] == "tch_cancel_course_auto_close"
+        assert calls[1].kwargs["arguments"]["group_id"] == "g1"
+        assert calls[1].kwargs["arguments"]["clear_tips"] is True

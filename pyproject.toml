@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "umu-skills"
-version = "0.24.1"
+version = "0.24.2"
 description = "An unofficial, third-party AI Skill framework for UMU Learning Platform operations via MCP"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -82,7 +82,7 @@ exclude = [
     "/.codegraph",
     "*.py[cod]",
     "*.egg-info",
-    "export_*.py",
+    "/export_*.py",
     "umu.skill",
 ]
 
@@ -100,3 +100,7 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 disable_error_code = ["type-arg", "no-any-return", "var-annotated", "attr-defined", "arg-type", "assignment", "unused-coroutine", "call-arg", "valid-type"]
+
+[[tool.mypy.overrides]]
+module = "openpyxl.*"
+ignore_missing_imports = true

@@ -151,12 +151,16 @@ mcp = FastMCP(
 - 课程结构查询（报名状态、小节列表）
 - 学习进度查询
 - 获取我参与的课程列表（支持按学习状态筛选：已学习/学习中/待学习）
-- 课程报名
+- 课程报名（支持简单报名和复杂报名表单）
+- 复杂报名表单查询与提交（联系信息、文本题、单选、多选）
 - 小节完成（浏览、问卷、签到、考试）
 - 状态验证
 
-AI 使用本服务时，应先调用 stu_get_course_structure 获取课程结构，
-然后逐个完成未完成的小节，每次操作后验证状态。
+AI 使用本服务时，应先调用 stu_get_course_structure 获取课程结构。
+若课程需要报名且 stu_enroll_course 无法直接完成（如需要填写姓名、公司、
+职场地址、部门等），则调用 stu_get_enroll_form 获取表单结构，
+再调用 stu_submit_enroll_form 提交答案，最后继续完成小节。
+每次操作后建议验证状态。
 """,
     lifespan=app_lifespan,
 )
@@ -510,6 +514,239 @@ def _extract_page_data_json(html: str) -> dict[str, Any] | None:
                 except Exception:
                     return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# 复杂报名表单辅助函数
+# ---------------------------------------------------------------------------
+def _get_enroll_short_url(
+    client: UMUClient, group_id: str, s_key: str | None = None
+) -> tuple[str | None, str | None]:
+    """访问 course/pay 页面，提取 enroll_id 和报名短链 enrollUrl。
+
+    Args:
+        group_id: 课程组 ID
+        s_key: 课程 URL 中的 sKey
+
+    Returns:
+        (enroll_id, enroll_url) 或 (None, None)
+    """
+    pay_url = client.mobile_url(f"/course/pay?groupId={group_id}")
+    if s_key:
+        pay_url += f"&sKey={s_key}"
+
+    headers = client.auth.get_auth_headers()
+    headers["Accept"] = "text/html"
+    try:
+        resp = client.http.get(pay_url, headers=headers, timeout=client.timeout)
+        page_data = _extract_page_data_json(resp.text)
+        if not page_data:
+            return None, None
+
+        data = page_data.get("data", {})
+        # 数据结构可能在 data.enroll 或 data.info.enroll
+        enroll = data.get("enroll") or data.get("info", {}).get("enroll") or {}
+        enroll_id = enroll.get("enrollId") or data.get("enrollId")
+        enroll_url = data.get("enrollUrl") or enroll.get("shareUrl")
+        return str(enroll_id) if enroll_id else None, enroll_url
+    except Exception:
+        return None, None
+
+
+def _fetch_enroll_form_page(client: UMUClient, enroll_url: str) -> dict[str, Any] | None:
+    """访问报名短链对应的 /model/{short_url}?enroll 页面，解析报名表单结构。"""
+    parsed = urlparse(enroll_url)
+    short_path = parsed.path.strip("/")
+    if not short_path:
+        return None
+
+    form_url = client.mobile_url(f"/model/{short_path}?enroll")
+    headers = client.auth.get_auth_headers()
+    headers["Accept"] = "text/html"
+    try:
+        resp = client.http.get(form_url, headers=headers, timeout=client.timeout)
+        return _extract_page_data_json(resp.text)
+    except Exception:
+        return None
+
+
+def _parse_enroll_form(page_data: dict[str, Any]) -> dict[str, Any]:
+    """从 pageData 解析 contactInfo 和 sectionArr，返回结构化表单。"""
+    data = page_data.get("data", {})
+    enroll = data.get("enrollData") or data.get("info", {}).get("enroll") or {}
+
+    contact_info = enroll.get("contactInfo", []) or []
+    section_arr = enroll.get("sectionArr", []) or []
+
+    contact_fields: list[dict[str, Any]] = []
+    for item in contact_info:
+        field = {
+            "key": item.get("key", ""),
+            "title": item.get("questionTitle", ""),
+            "type": item.get("domType", "text"),
+            "required": str(item.get("isRequired", "0")) == "1",
+            "selected": str(item.get("isSelected", "0")) == "1",
+        }
+        if field["type"] in ("radio", "checkbox"):
+            field["options"] = [
+                {"value": opt.get("value", ""), "text": opt.get("text", "")}
+                for opt in item.get("questionDefaultValue", []) or []
+            ]
+        contact_fields.append(field)
+
+    section_questions: list[dict[str, Any]] = []
+    for idx, item in enumerate(section_arr):
+        qi = item.get("questionInfo", {}) or {}
+        setup = qi.get("setup", {}) or {}
+        dom_type = qi.get("domType", "")
+
+        # paragraph 为说明文字，不需要答案
+        is_paragraph = dom_type == "paragraph"
+        question: dict[str, Any] = {
+            "index": idx,
+            "question_id": str(qi.get("questionId", "")),
+            "title": qi.get("questionTitle", ""),
+            "type": dom_type,
+            "desc": qi.get("desc", ""),
+            # setup.required 码值反的："0"=必填，"1"=选填
+            "required": (not is_paragraph) and str(setup.get("required", "1")) == "0",
+        }
+
+        answer_arr = item.get("answerArr", []) or []
+        if dom_type in ("textarea", "text", "input"):
+            if answer_arr:
+                question["answer_id"] = str(answer_arr[0].get("answerId", ""))
+        elif dom_type == "number":
+            if answer_arr:
+                question["answer_id"] = str(answer_arr[0].get("answerId", ""))
+        elif dom_type in ("radio", "checkbox"):
+            question["options"] = [
+                {
+                    "answer_id": str(opt.get("answerId", "")),
+                    "text": opt.get("answerContent", ""),
+                }
+                for opt in answer_arr
+            ]
+            if dom_type == "checkbox":
+                question["min_options"] = int(setup.get("limitOptionsMin", 0) or 0)
+                question["max_options"] = int(setup.get("limitOptionsMax", 0) or 0)
+
+        section_questions.append(question)
+
+    return {
+        "enroll_id": str(enroll.get("enrollId", "")),
+        "enroll_url": enroll.get("shareUrl", ""),
+        "contact_fields": contact_fields,
+        "section_questions": section_questions,
+    }
+
+
+def _validate_enroll_form(
+    contact_fields: list[dict[str, Any]],
+    section_questions: list[dict[str, Any]],
+    contact_answers: dict[str, str],
+    section_answers: list[dict[str, Any]],
+) -> str | None:
+    """校验报名表单答案是否满足必填和格式要求。
+
+    返回 None 表示校验通过，否则返回错误信息。
+    """
+    # 校验联系信息：selected=True 且 required=True 的字段必须填写
+    for field in contact_fields:
+        if field.get("selected") and field.get("required"):
+            key = field["key"]
+            value = contact_answers.get(key, "")
+            if not str(value).strip():
+                return f"联系信息[{field.get('title', key)}]为必填项，请提供"
+
+    ans_map = {a.get("question_id", ""): a for a in section_answers}
+
+    for q in section_questions:
+        qid = q["question_id"]
+        qtype = q.get("type", "")
+        ans = ans_map.get(qid)
+
+        if qtype == "paragraph":
+            continue
+
+        # 必填校验
+        if q.get("required"):
+            if not ans:
+                return f"[{q.get('title', qid)}]为必填项，请提供答案"
+
+        if not ans:
+            continue
+
+        if qtype in ("textarea", "text", "input"):
+            text = str(ans.get("text", "")).strip()
+            if q.get("required") and not text:
+                return f"[{q.get('title', qid)}]为必填项，请提供文本答案"
+        elif qtype == "radio":
+            answer_id = str(ans.get("answer_id", "")).strip()
+            if q.get("required") and not answer_id:
+                return f"[{q.get('title', qid)}]为必填项，请选择一个选项"
+        elif qtype == "checkbox":
+            answer_ids = ans.get("answer_ids", []) or []
+            count = len(answer_ids)
+            min_opt = q.get("min_options", 0)
+            max_opt = q.get("max_options", 0)
+            if q.get("required") and count == 0:
+                return f"[{q.get('title', qid)}]为必填项，请至少选择一项"
+            if min_opt and count < min_opt:
+                return f"[{q.get('title', qid)}]至少需要选择 {min_opt} 项"
+            if max_opt and count > max_opt:
+                return f"[{q.get('title', qid)}]最多只能选择 {max_opt} 项"
+        elif qtype == "number":
+            number = ans.get("number")
+            if q.get("required") and number is None:
+                return f"[{q.get('title', qid)}]为必填项，请提供数值"
+
+    return None
+
+
+def _build_insert_answer_payload(
+    section_questions: list[dict[str, Any]],
+    section_answers: list[dict[str, Any]],
+    enroll_id: str,
+) -> dict[str, Any]:
+    """根据 section 答案构造 /ajax/insertAnswer 需要的 payload。"""
+    q_map = {q["question_id"]: q for q in section_questions}
+
+    answer_list: list[str] = []
+    answer_info: list[dict[str, str]] = []
+    answer_number: dict[str, Any] = {}
+
+    for ans in section_answers:
+        qid = ans.get("question_id", "")
+        q = q_map.get(qid)
+        if not q:
+            continue
+        qtype = q.get("type", "")
+
+        if qtype in ("textarea", "text", "input"):
+            answer_info.append(
+                {"id": q.get("answer_id", ""), "text": str(ans.get("text", ""))}
+            )
+        elif qtype == "radio":
+            answer_id = str(ans.get("answer_id", "")).strip()
+            if answer_id:
+                answer_list.append(answer_id)
+        elif qtype == "checkbox":
+            for aid in ans.get("answer_ids", []) or []:
+                if aid:
+                    answer_list.append(str(aid))
+        elif qtype == "number":
+            number = ans.get("number")
+            if number is not None:
+                answer_number[q.get("answer_id", "")] = number
+
+    return {
+        "answerList": answer_list,
+        "answerInfo": answer_info,
+        "answerNumber": answer_number,
+        "sessionId": 0,
+        "enrollId": str(enroll_id),
+    }
 
 
 def _extract_uscorm_runtime(
@@ -1409,6 +1646,249 @@ async def stu_enroll_course(
             error_code="ENROLL_ERROR",
             error_message=str(e),
             suggested_action="稍后重试，或检查网络连接",
+        )
+
+
+@mcp.tool()
+async def stu_get_enroll_form(
+    course_identifier: Annotated[
+        str,
+        Field(description="课程标识。支持格式：访问码（如 aet504）、短域名（如 aet504.umu.cn）、完整URL（如 https://<domain>/course/?groupId=7324740&sKey=7fea）"),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """获取复杂报名表单的字段和题目结构。
+
+    触发条件：当 stu_enroll_course 报名后仍无法学习，或 stu_get_course_structure
+    提示需要报名但课程实际要求填写姓名、手机号、公司、职场地址、部门等信息时调用。
+    前置依赖：需先调用 stu_login 完成登录。
+    副作用：无（只读查询）。
+
+    返回的 contact_fields 中：
+    - selected=true 的字段才会在表单中显示并提交
+    - required=true 表示该字段必填
+
+    返回的 section_questions 中：
+    - type=paragraph 为说明文字，不需要答案
+    - type=textarea/text/input 为文本题，提交时使用 {question_id, text}
+    - type=radio 为单选题，提交时使用 {question_id, answer_id}
+    - type=checkbox 为多选题，提交时使用 {question_id, answer_ids}
+    - required=true 表示该题必填
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="请先调用 stu_login 登录",
+            next_action="needs_user_input",
+        )
+
+    try:
+        group_id, s_key, _ = _resolve_course_identifier(client, course_identifier)
+    except ValueError as e:
+        return _err(
+            error_code="INVALID_COURSE_IDENTIFIER",
+            error_message=str(e),
+            suggested_action="提供有效的课程链接、访问码或短域名",
+        )
+
+    try:
+        enroll_id, enroll_url = _get_enroll_short_url(client, group_id, s_key)
+        if not enroll_id or not enroll_url:
+            return _err(
+                error_code="ENROLL_FORM_NOT_FOUND",
+                error_message="无法从课程页面提取报名信息，该课程可能不需要报名或访问受限",
+                suggested_action="调用 stu_get_course_structure 确认课程报名状态",
+            )
+
+        page_data = _fetch_enroll_form_page(client, enroll_url)
+        if not page_data:
+            return _err(
+                error_code="ENROLL_FORM_PARSE_FAILED",
+                error_message="无法解析报名表单页面",
+                suggested_action="稍后重试，或检查网络连接",
+            )
+
+        form = _parse_enroll_form(page_data)
+        form["group_id"] = group_id
+        form["s_key"] = s_key
+
+        return _ok(
+            data=form,
+            next_action="proceed",
+            suggested_action="根据返回的表单字段准备答案，调用 stu_submit_enroll_form 提交",
+        )
+    except Exception as e:
+        return _err(
+            error_code="GET_ENROLL_FORM_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接和课程访问权限",
+        )
+
+
+@mcp.tool()
+async def stu_submit_enroll_form(
+    course_identifier: Annotated[
+        str,
+        Field(description="课程标识。支持格式：访问码（如 aet504）、短域名（如 aet504.umu.cn）、完整URL（如 https://<domain>/course/?groupId=7324740&sKey=7fea）"),
+    ],
+    contact_answers: Annotated[
+        dict[str, str],
+        Field(
+            default={},
+            description='联系信息答案。key 对应 stu_get_enroll_form 返回的 contact_fields.key，例如 {"username": "张三", "mobile": "13800138000", "company": "腾讯"}',
+        ),
+    ] = None,
+    section_answers: Annotated[
+        list[dict[str, Any]],
+        Field(
+            default=None,
+            description='报名问题答案列表。每题一个对象：文本题 {question_id, text}，单选题 {question_id, answer_id}，多选题 {question_id, answer_ids}',
+        ),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """提交复杂报名表单（联系信息 + 报名问题）。
+
+    触发条件：调用 stu_get_enroll_form 获取表单结构并准备好答案后调用。
+    前置依赖：需先调用 stu_login 完成登录，且已通过 stu_get_enroll_form 获取表单结构。
+    副作用：会完成课程报名，提交后学员可正常学习课程小节。
+
+    注意：
+    - 只会提交 contact_fields 中 selected=true 的字段
+    - section_questions 中 type=paragraph 的题目不需要提交答案
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="请先调用 stu_login 登录",
+            next_action="needs_user_input",
+        )
+
+    contact_answers = contact_answers or {}
+    section_answers = section_answers or []
+
+    try:
+        group_id, s_key, _ = _resolve_course_identifier(client, course_identifier)
+    except ValueError as e:
+        return _err(
+            error_code="INVALID_COURSE_IDENTIFIER",
+            error_message=str(e),
+            suggested_action="提供有效的课程链接、访问码或短域名",
+        )
+
+    try:
+        # 1. 获取表单结构和 enroll_id/short_url
+        enroll_id, enroll_url = _get_enroll_short_url(client, group_id, s_key)
+        if not enroll_id or not enroll_url:
+            return _err(
+                error_code="ENROLL_FORM_NOT_FOUND",
+                error_message="无法从课程页面提取报名信息",
+                suggested_action="调用 stu_get_enroll_form 确认表单结构",
+            )
+
+        page_data = _fetch_enroll_form_page(client, enroll_url)
+        if not page_data:
+            return _err(
+                error_code="ENROLL_FORM_PARSE_FAILED",
+                error_message="无法解析报名表单页面",
+                suggested_action="稍后重试",
+            )
+
+        form = _parse_enroll_form(page_data)
+        contact_fields = form.get("contact_fields", [])
+        section_questions = form.get("section_questions", [])
+
+        # 2. 校验答案
+        error_msg = _validate_enroll_form(
+            contact_fields, section_questions, contact_answers, section_answers
+        )
+        if error_msg:
+            return _err(
+                error_code="ENROLL_FORM_VALIDATION_FAILED",
+                error_message=error_msg,
+                suggested_action="根据 stu_get_enroll_form 返回的表单结构补充必填答案",
+                data={"contact_fields": contact_fields, "section_questions": section_questions},
+            )
+
+        # 3. 预报名验证
+        client.post(
+            client.mobile_url("/ajax/verify/auto"),
+            {"enroll_id": str(enroll_id)},
+        )
+
+        # 4. 提交联系信息（只传 selected=true 的字段）
+        submit_contact: dict[str, str] = {"enroll_id": str(enroll_id)}
+        for field in contact_fields:
+            if field.get("selected"):
+                key = field["key"]
+                value = contact_answers.get(key, "")
+                submit_contact[key] = str(value)
+
+        client.post(
+            client.mobile_url("/signup/submitContact"),
+            submit_contact,
+        )
+
+        # 5. 提交报名问题答案
+        answer_payload = _build_insert_answer_payload(
+            section_questions, section_answers, enroll_id
+        )
+        client.post(
+            client.mobile_url("/ajax/insertAnswer"),
+            {"q": json.dumps(answer_payload, ensure_ascii=False)},
+        )
+
+        # 6. 确认报名结果
+        page_data = _fetch_enroll_form_page(client, enroll_url)
+        is_enrolled = 0
+        pay_status = ""
+        if page_data:
+            data = page_data.get("data", {})
+            is_enrolled = data.get("is_enrolled", 0)
+            pay_status = data.get("pay_status", "")
+
+        if str(is_enrolled) in ("1", "2") or pay_status in ("pay", "success"):
+            return _ok(
+                data={
+                    "enroll_id": enroll_id,
+                    "is_enrolled": is_enrolled,
+                    "pay_status": pay_status,
+                },
+                next_action="enrollment_completed",
+                suggested_action="报名成功，现在可以调用 stu_get_course_structure 获取课程结构并学习",
+            )
+
+        return _err(
+            error_code="ENROLL_FORM_SUBMIT_INCOMPLETE",
+            error_message=f"报名提交后状态未确认: is_enrolled={is_enrolled}, pay_status={pay_status}",
+            suggested_action="调用 stu_get_enroll_form 或 stu_get_course_structure 检查当前报名状态",
+            data={"is_enrolled": is_enrolled, "pay_status": pay_status},
+        )
+    except Exception as e:
+        return _err(
+            error_code="SUBMIT_ENROLL_FORM_ERROR",
+            error_message=str(e),
+            suggested_action="检查网络连接、答案格式和课程访问权限",
         )
 
 
