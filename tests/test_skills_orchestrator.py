@@ -262,7 +262,7 @@ class TestBuiltinSkillParameterFixes:
         responses = {
             ("student", "stu_enroll_course"): {
                 "success": True,
-                "data": {"is_enrolled": True},
+                "data": {"is_enrolled": 2, "pay_status": "success"},
             },
         }
         mock_mcp = MockMCPClientManager(responses)
@@ -277,6 +277,7 @@ class TestBuiltinSkillParameterFixes:
         )
         parsed = json.loads(result)
         assert parsed["success"] is True
+        assert parsed["data"]["is_enrolled"] == 2
         assert mock_mcp.calls == [
             ("student", "stu_enroll_course", {"enroll_id": "mock-enroll-id"}),
         ]

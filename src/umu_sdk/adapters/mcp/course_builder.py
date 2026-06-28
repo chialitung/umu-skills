@@ -1053,22 +1053,45 @@ class CourseBuilder:
 
     # 默认报名联系信息字段（与 UMU 后台默认保持一致）
     _DEFAULT_ENROLL_CONTACT_INFO: list[dict[str, Any]] = [
-        {"key": "username", "questionTitle": "姓名", "defaultPlaceHolder": "输入真实姓名", "domType": "text"},
-        {"key": "mobile", "questionTitle": "手机号", "defaultPlaceHolder": "输入手机号码", "domType": "text"},
-        {"key": "company", "questionTitle": "公司", "defaultPlaceHolder": "您的公司", "domType": "text"},
-        {"key": "department", "questionTitle": "部门", "defaultPlaceHolder": "您的部门", "domType": "text"},
-        {"key": "position", "questionTitle": "职位", "defaultPlaceHolder": "您的职位", "domType": "text"},
-        {"key": "job_number", "questionTitle": "员工号", "defaultPlaceHolder": "您的工号", "domType": "text"},
-        {"key": "city", "questionTitle": "城市", "defaultPlaceHolder": "您所在的城市", "domType": "text"},
-        {"key": "address", "questionTitle": "地址", "defaultPlaceHolder": "请输入您的地址", "domType": "text"},
-        {"key": "sex", "questionTitle": "性别", "defaultPlaceHolder": "", "domType": "radio",
+        {"key": "username", "questionTitle": "姓名", "defaultPlaceHolder": "输入真实姓名", "placeHolder": "输入真实姓名", "domType": "text"},
+        {"key": "mobile", "questionTitle": "手机号", "defaultPlaceHolder": "输入手机号码", "placeHolder": "输入手机号码", "domType": "text"},
+        {"key": "company", "questionTitle": "公司", "defaultPlaceHolder": "您的公司", "placeHolder": "您的公司", "domType": "text"},
+        {"key": "department", "questionTitle": "部门", "defaultPlaceHolder": "您的部门", "placeHolder": "", "domType": "text"},
+        {"key": "position", "questionTitle": "职位", "defaultPlaceHolder": "您的职位", "placeHolder": "", "domType": "text"},
+        {"key": "job_number", "questionTitle": "员工号", "defaultPlaceHolder": "您的工号", "placeHolder": "", "domType": "text"},
+        {"key": "city", "questionTitle": "城市", "defaultPlaceHolder": "您所在的城市", "placeHolder": "", "domType": "text"},
+        {"key": "address", "questionTitle": "地址", "defaultPlaceHolder": "请输入您的地址", "placeHolder": "", "domType": "text"},
+        {"key": "sex", "questionTitle": "性别", "defaultPlaceHolder": "", "placeHolder": "", "domType": "radio",
          "questionDefaultValue": [{"value": "2", "text": "女"}, {"value": "1", "text": "男"}]},
-        {"key": "email", "questionTitle": "邮箱", "defaultPlaceHolder": "请输入您的邮箱", "domType": "text"},
-        {"key": "phone", "questionTitle": "电话号码", "defaultPlaceHolder": "请输入您的电话", "domType": "text"},
-        {"key": "qq", "questionTitle": "QQ", "defaultPlaceHolder": "请输入您的QQ", "domType": "text"},
-        {"key": "weixin", "questionTitle": "微信", "defaultPlaceHolder": "请输入您的微信", "domType": "text"},
-        {"key": "remark", "questionTitle": "备注", "defaultPlaceHolder": "请输入备注", "domType": "text"},
+        {"key": "email", "questionTitle": "邮箱", "defaultPlaceHolder": "请输入您的邮箱", "placeHolder": "", "domType": "text"},
+        {"key": "phone", "questionTitle": "电话号码", "defaultPlaceHolder": "请输入您的电话", "placeHolder": "", "domType": "text"},
+        {"key": "qq", "questionTitle": "QQ", "defaultPlaceHolder": "请输入您的QQ", "placeHolder": "", "domType": "text"},
+        {"key": "weixin", "questionTitle": "微信", "defaultPlaceHolder": "请输入您的微信", "placeHolder": "", "domType": "text"},
+        {"key": "remark", "questionTitle": "备注", "defaultPlaceHolder": "请输入备注", "placeHolder": "", "domType": "text"},
     ]
+
+    def _get_enrollment_base_info(self, group_id: str) -> dict[str, Any]:
+        """获取报名设置所需课程基础信息.
+
+        通过 /ajax/group/getgroupinfo 获取课程标题、讲师 ID、分享链接等字段，
+        用于构造 /api/enroll/saveenroll 请求体。
+        """
+        resp = self.client.get(
+            self.client.desktop_url("/ajax/group/getgroupinfo"),
+            params={"group_id": group_id},
+        )
+        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
+            err_msg = resp.get("errMsg") or resp.get("error", "unknown")
+            raise RuntimeError(f"获取课程报名基础信息失败: {err_msg}")
+
+        info = resp.get("data", {}).get("info", {})
+        group_info = info.get("groupInfo", {})
+        return {
+            "title": group_info.get("groupTitle") or group_info.get("title", ""),
+            "teacher_id": str(group_info.get("teacher_id", "")),
+            "share_url": group_info.get("shareUrl", ""),
+            "share_qrc": group_info.get("shareQrc", ""),
+        }
 
     def set_course_enrollment(
         self,
@@ -1078,10 +1101,14 @@ class CourseBuilder:
         title: str | None = None,
         desc: str = "",
         contact_info: list[dict[str, Any]] | None = None,
+        selected_contact_fields: list[str] | None = None,
         allow_cancel: bool = False,
         user_quota: int = -1,
         begin_time: int | str = 0,
         end_time: int | str = 0,
+        price_amount: int = 0,
+        section_questions: list[dict[str, Any]] | None = None,
+        approval_setting: dict[str, Any] | None = None,
         enroll_id: str = "",
     ) -> dict[str, Any]:
         """设置课程报名开关及报名信息.
@@ -1095,11 +1122,20 @@ class CourseBuilder:
             auto_check: 是否自动审核报名（默认 True）
             title: 报名标题，默认使用课程标题
             desc: 报名说明
-            contact_info: 自定义报名联系信息字段，None 使用默认字段
+            contact_info: 自定义报名联系信息字段，None 使用默认字段。
+                每个字段可包含 isSelected/isRequired 来控制是否勾选与必填。
+            selected_contact_fields: 快速指定要勾选的默认字段 key 列表
+                （如 ["username", "mobile"]），与 contact_info 可叠加。
             allow_cancel: 是否允许学员取消报名
             user_quota: 报名人数上限，-1 表示不限制
             begin_time: 报名开始时间（Unix 时间戳或 0 表示不限制）
             end_time: 报名结束时间（Unix 时间戳或 0 表示不限制）
+            price_amount: 报名价格（分），0 表示免费
+            section_questions: 自定义报名问题列表，每个问题支持 title、type、
+                required、options 等字段。type 支持 textarea/radio/checkbox/
+                paragraph/number，简写 text 会被映射为 textarea。
+            approval_setting: 审核人设置，格式
+                {"course_manager": bool, "department_manager": bool, "designees": [...]}
             enroll_id: 现有报名 ID（修改时传入，新建留空）
 
         Returns:
@@ -1111,45 +1147,90 @@ class CourseBuilder:
         if not group_id:
             raise ValueError("group_id 不能为空")
 
-        # 获取课程标题（如果未提供）
-        course_title = title
-        if course_title is None:
-            course_info = self.get_course(group_id)
-            course_title = course_info.get("title", "")
+        # 获取课程基础信息（标题、讲师 ID、分享链接等）
+        base_info = self._get_enrollment_base_info(group_id)
+        course_title = title if title is not None else base_info["title"]
+        teacher_id = base_info["teacher_id"]
+        share_url = base_info.get("share_url", "")
+        share_qrc = base_info.get("share_qrc", "")
 
         # 构造联系信息字段
         fields = contact_info if contact_info is not None else self._DEFAULT_ENROLL_CONTACT_INFO
+        selected_keys = set(selected_contact_fields or [])
         formatted_contact_info = []
         for field in fields:
             default_value = field.get("questionDefaultValue", [{"value": "", "text": ""}])
+            # 支持 isSelected/selected 两种写法
+            is_selected_raw = field.get("isSelected", field.get("selected"))
+            if is_selected_raw is None:
+                is_selected = field.get("key", "") in selected_keys
+            else:
+                is_selected = str(is_selected_raw) in ("1", "true", "True", True)
+            is_required = str(field.get("isRequired", field.get("required", True))) in (
+                "1",
+                "true",
+                "True",
+                True,
+            )
             formatted_contact_info.append({
                 "isMustKey": "0",
                 "canMove": "1",
                 "domType": field.get("domType", "text"),
-                "isRequired": "1" if field.get("isRequired", True) else "0",
-                "isSelected": "0",
+                "isRequired": "1" if is_required else "0",
+                "isSelected": "1" if is_selected else "0",
                 "questionTitle": field["questionTitle"],
                 "defaultPlaceHolder": field.get("defaultPlaceHolder", ""),
+                "placeHolder": field.get("placeHolder", field.get("defaultPlaceHolder", "")),
                 "questionDefaultValue": default_value,
                 "questionValue": "",
                 "key": field["key"],
             })
 
+        # 构造报名问题 sectionArr
+        formatted_sections: list[dict[str, Any]] = []
+        if section_questions:
+            for idx, q in enumerate(section_questions, start=1):
+                formatted_sections.append(self._format_section_question(q, idx))
+
+        payment_switch = 1 if price_amount and price_amount > 0 else 0
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         enroll_payload: dict[str, Any] = {
-            "enrollId": str(enroll_id),
-            "title": course_title,
-            "autoCheck": 1 if auto_check else 0,
-            "desc": desc,
-            "shareUrl": 0,
-            "inUse": 0,
-            "sessionType": "9",
-            "payment": {"switch_status": 0, "amount": 0},
-            "contactInfo": formatted_contact_info,
-            "questionArr": [],
-            "sectionArr": [],
-            "status": 1 if enabled else 0,
-            "multimedia_type": "1",
             "group_id": str(group_id),
+            "obj_id": str(group_id),
+            "obj_type": "1",
+            "teacher_id": teacher_id,
+            "title": course_title,
+            "status": "1" if enabled else "0",
+            "source_mark": "1",
+            "multimedia_id": "0",
+            "multimedia_type": 0,
+            "create_time": now_str,
+            "update_time": now_str,
+            "shareUrl": share_url,
+            "shareQrc": share_qrc,
+            "totalUserCount": 0,
+            "count": [0, 0, 0, 0, 0, 0],
+            "inUse": False,
+            "enrollId": str(enroll_id),
+            "autoCheck": "1" if auto_check else "0",
+            "desc": desc,
+            "payment": {"switch_status": payment_switch, "amount": int(price_amount or 0)},
+            "totalAmount": "0",
+            "sectionArr": formatted_sections,
+            "contactInfo": formatted_contact_info,
+            "setupInfo": {
+                "share": {
+                    "shareStatus": 1,
+                    "shareStart": "",
+                    "shareEnd": "",
+                    "wxShareTitle": "",
+                    "wxShareDesc": "",
+                },
+                "payment": {
+                    "switch_status": str(payment_switch),
+                    "amount": str(int(price_amount or 0)),
+                },
+            },
             "setup": {
                 "allow_cancel": "1" if allow_cancel else "0",
                 "user_quota": str(user_quota),
@@ -1160,10 +1241,12 @@ class CourseBuilder:
 
         self._write_cooldown()
         logger.info(
-            "设置课程报名: group_id=%s, enabled=%s, auto_check=%s",
+            "设置课程报名: group_id=%s, enabled=%s, auto_check=%s, price=%s, sections=%s",
             group_id,
             enabled,
             auto_check,
+            price_amount,
+            len(formatted_sections),
         )
 
         resp = self.client.post(
@@ -1181,12 +1264,116 @@ class CourseBuilder:
         enroll_id_returned = str(data.get("enrollId", enroll_id))
         logger.info("课程报名设置成功: group_id=%s, enroll_id=%s", group_id, enroll_id_returned)
 
+        # 保存审核人设置
+        if approval_setting and enroll_id_returned:
+            self._save_enroll_approval_setting(enroll_id_returned, approval_setting)
+
         return {
             "group_id": group_id,
             "enroll_id": enroll_id_returned,
             "enabled": enabled,
             "auto_check": auto_check,
         }
+
+    def _format_section_question(self, q: dict[str, Any], index: int) -> dict[str, Any]:
+        """将简化的报名问题格式转换为 UMU sectionArr 格式.
+
+        参考 HAR/tracer 中真实的 /api/enroll/saveenroll 请求：
+        - 选项放在 answerArr 中（radio/checkbox）
+        - setup.required 中 "0" 表示必填，"1" 表示选填
+        - extend.pic_url 对 radio/checkbox/textarea 固定为 []
+        """
+        q_type = q.get("type", q.get("domType", "text"))
+        # 简化类型 -> UMU domType 映射
+        type_map = {"text": "textarea"}
+        q_type = type_map.get(q_type, q_type)
+        title = q.get("title", q.get("questionTitle", f"问题{index}"))
+        required = str(q.get("required", q.get("isRequired", False))) in (
+            "1",
+            "true",
+            "True",
+            True,
+        )
+        options = q.get("options", q.get("questionDefaultValue", []))
+
+        # UMU 约定：setup.required "0"=必填，"1"=选填
+        setup: dict[str, Any] = {"required": "0" if required else "1"}
+        extend: dict[str, Any] = {"pic_url": []}
+        answer_arr: list[dict[str, Any]] = []
+
+        if q_type == "radio":
+            answer_arr = [{"answerContent": opt["text"] if isinstance(opt, dict) else str(opt)} for opt in options]
+        elif q_type == "checkbox":
+            answer_arr = [{"answerContent": opt["text"] if isinstance(opt, dict) else str(opt)} for opt in options]
+            min_opts = q.get("min_options", q.get("limitOptionsMin", 0))
+            max_opts = q.get("max_options", q.get("limitOptionsMax", 0))
+            if min_opts:
+                setup["limitOptionsMin"] = int(min_opts)
+            if max_opts:
+                setup["limitOptionsMax"] = int(max_opts)
+        elif q_type == "textarea":
+            placeholder = q.get("placeholder", q.get("defaultPlaceHolder", ""))
+            if placeholder:
+                answer_arr = [{"answerContent": placeholder}]
+        elif q_type == "number":
+            extend["min"] = q.get("min", 0)
+            extend["max"] = q.get("max", 100)
+            if q.get("min_desc"):
+                extend["minDesc"] = q["min_desc"]
+            if q.get("max_desc"):
+                extend["maxDesc"] = q["max_desc"]
+            setup["defaultValue"] = q.get("default_value", q.get("defaultValue", ""))
+        elif q_type == "paragraph":
+            extend = {}
+
+        return {
+            "questionInfo": {
+                "questionId": "",
+                "sessionId": "",
+                "questionTitle": title,
+                "questionIndex": index,
+                "pattern": "",
+                "required": "",
+                "creatTime": "",
+                "creatTimeShow": "",
+                "domType": q_type,
+                "totalCount": "",
+                "showType": {},
+                "showIndex": index,
+                "setup": setup,
+                "extend": extend,
+                "cid": q.get("cid", ""),
+                "desc": q.get("desc", ""),
+            },
+            "answerArr": answer_arr,
+        }
+
+    def _save_enroll_approval_setting(
+        self, enroll_id: str, approval_setting: dict[str, Any]
+    ) -> dict[str, Any]:
+        """保存报名审核人设置."""
+        setting = {
+            "manager_permission": 1 if approval_setting.get("course_manager", False) else 0,
+            "department_manager_permission": 1
+            if approval_setting.get("department_manager", False)
+            else 0,
+            "designee_permission": 1
+            if approval_setting.get("designee", False)
+            or bool(approval_setting.get("designees"))
+            else 0,
+        }
+        resp = self.client.post(
+            self.client.desktop_url("/uapi/v1/enroll/save-approval-setting"),
+            data={
+                "enroll_id": str(enroll_id),
+                "setting": json.dumps(setting, ensure_ascii=False),
+            },
+        )
+        if resp.get("error_code") != 0 and resp.get("status") not in (True, "true"):
+            err_msg = resp.get("error_message") or resp.get("error", "unknown")
+            raise RuntimeError(f"保存报名审核设置失败: {err_msg}")
+        logger.info("报名审核设置保存成功: enroll_id=%s", enroll_id)
+        return resp
 
     # ------------------------------------------------------------------
     # 辅助方法：处理富文本中的本地图片

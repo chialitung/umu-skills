@@ -570,6 +570,54 @@ def _fetch_enroll_form_page(client: UMUClient, enroll_url: str) -> dict[str, Any
         return None
 
 
+def _check_needs_enroll_form(
+    client: UMUClient, group_id: str, s_key: str | None = None
+) -> tuple[bool, dict[str, Any] | None]:
+    """检测课程是否需要填写复杂报名表单。
+
+    复用 course/pay 页面和报名表单解析逻辑，判断当前课程在报名后是否
+    还需要学员填写联系信息或报名问题。
+
+    Args:
+        group_id: 课程组 ID
+        s_key: 课程 URL 中的 sKey
+
+    Returns:
+        (是否需要表单, 表单摘要或 None)。表单摘要只包含用户需要填写的字段，
+        用于快速提示用户准备答案。
+    """
+    try:
+        enroll_id, enroll_url = _get_enroll_short_url(client, group_id, s_key)
+        if not enroll_id or not enroll_url:
+            return False, None
+
+        page_data = _fetch_enroll_form_page(client, enroll_url)
+        if not page_data:
+            return False, None
+
+        form = _parse_enroll_form(page_data)
+        contact_fields = form.get("contact_fields", [])
+        section_questions = form.get("section_questions", [])
+
+        # 只统计真正需要用户填写的字段
+        selected_contact = [f for f in contact_fields if f.get("selected")]
+        answerable_questions = [
+            q for q in section_questions if q.get("type") != "paragraph"
+        ]
+
+        if not selected_contact and not answerable_questions:
+            return False, None
+
+        summary: dict[str, Any] = {
+            "enroll_id": str(enroll_id),
+            "contact_fields": selected_contact,
+            "section_questions": answerable_questions,
+        }
+        return True, summary
+    except Exception:
+        return False, None
+
+
 def _parse_enroll_form(page_data: dict[str, Any]) -> dict[str, Any]:
     """从 pageData 解析 contactInfo 和 sectionArr，返回结构化表单。"""
     data = page_data.get("data", {})
@@ -617,8 +665,16 @@ def _parse_enroll_form(page_data: dict[str, Any]) -> dict[str, Any]:
             if answer_arr:
                 question["answer_id"] = str(answer_arr[0].get("answerId", ""))
         elif dom_type == "number":
-            if answer_arr:
-                question["answer_id"] = str(answer_arr[0].get("answerId", ""))
+            extend = qi.get("extend", {}) or {}
+            min_val = extend.get("min")
+            max_val = extend.get("max")
+            if min_val is not None:
+                question["min"] = min_val
+            if max_val is not None:
+                question["max"] = max_val
+            default_value = setup.get("defaultValue")
+            if default_value is not None:
+                question["default_value"] = default_value
         elif dom_type in ("radio", "checkbox"):
             question["options"] = [
                 {
@@ -700,6 +756,17 @@ def _validate_enroll_form(
             number = ans.get("number")
             if q.get("required") and number is None:
                 return f"[{q.get('title', qid)}]为必填项，请提供数值"
+            if number is not None:
+                try:
+                    numeric_value: float = float(number)
+                except (TypeError, ValueError):
+                    return f"[{q.get('title', qid)}]必须是有效数字"
+                min_val = q.get("min")
+                max_val = q.get("max")
+                if min_val is not None and numeric_value < float(min_val):
+                    return f"[{q.get('title', qid)}]不能小于 {min_val}"
+                if max_val is not None and numeric_value > float(max_val):
+                    return f"[{q.get('title', qid)}]不能大于 {max_val}"
 
     return None
 
@@ -738,7 +805,7 @@ def _build_insert_answer_payload(
         elif qtype == "number":
             number = ans.get("number")
             if number is not None:
-                answer_number[q.get("answer_id", "")] = number
+                answer_number[str(qid)] = str(number)
 
     return {
         "answerList": answer_list,
@@ -1322,6 +1389,20 @@ async def stu_get_course_structure(
     }
 
     if needs_enroll:
+        # 进一步检测是否需要填写复杂报名表单
+        try:
+            needs_form, form_summary = _check_needs_enroll_form(client, group_id, s_key)
+            if needs_form and form_summary:
+                data["enroll_form_required"] = True
+                data["enroll_form_summary"] = form_summary
+                return _ok(
+                    data=data,
+                    next_action="needs_enroll_form",
+                    suggested_action="课程需要报名并填写报名信息。请先调用 stu_enroll_course(enroll_id, course_identifier) 预报名，再调用 stu_submit_enroll_form 提交报名信息。",
+                )
+        except Exception:
+            pass
+
         return _ok(
             data=data,
             next_action="needs_enrollment",
@@ -1601,6 +1682,13 @@ async def stu_get_my_courses(
 @mcp.tool()
 async def stu_enroll_course(
     enroll_id: Annotated[str, Field(description="报名 ID，来自 stu_get_course_structure 返回的 enroll_id")],
+    course_identifier: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="课程标识（访问码/短域名/URL）。提供后可在预报名状态下检测是否需要填写复杂报名表单。",
+        ),
+    ] = None,
     session_id: Annotated[
         str | None,
         Field(
@@ -1615,7 +1703,11 @@ async def stu_enroll_course(
     前置依赖：需先调用 stu_get_course_structure 获取 enroll_id。
     副作用：报名成功后可以正常访问课程内容和完成小节。
 
-    注意：免费课程报名后 pay_status 也会返回 "success"。
+    注意：
+    - 免费课程报名后 pay_status 也会返回 "success"。
+    - 部分课程在 /ajax/verify/auto 后会处于"已预报名但未填表"状态
+      （is_enrolled=1, pay_status="pay"），此时若提供了 course_identifier，
+      本工具会返回 next_action="needs_enroll_form"，引导调用方提交报名表单。
     """
     client = _get_client(session_id)
     try:
@@ -1627,10 +1719,31 @@ async def stu_enroll_course(
             data = r.get("data", {})
             is_enrolled = data.get("is_enrolled")
             pay_status = data.get("pay_status", "")
+
+            # 预报名状态：可能还需要填写复杂报名表单
+            if str(is_enrolled) == "1" and pay_status == "pay" and course_identifier:
+                try:
+                    group_id, s_key, _ = _resolve_course_identifier(client, course_identifier)
+                    needs_form, form_summary = _check_needs_enroll_form(client, group_id, s_key)
+                    if needs_form and form_summary:
+                        return _ok(
+                            data={
+                                "is_enrolled": is_enrolled,
+                                "pay_status": pay_status,
+                                "enroll_form_required": True,
+                                "enroll_form_summary": form_summary,
+                            },
+                            next_action="needs_enroll_form",
+                            suggested_action="课程已预报名，但还需要填写报名信息。请调用 stu_get_enroll_form 获取完整表单并提交，或使用 stu_submit_enroll_form 直接提交答案。",
+                        )
+                except Exception:
+                    pass
+
             return _ok(
                 data={
                     "is_enrolled": is_enrolled,
                     "pay_status": pay_status,
+                    "enroll_form_required": False,
                 },
                 next_action="proceed",
                 suggested_action="报名成功，现在可以调用 stu_get_course_structure 获取课程结构并学习",
@@ -1679,6 +1792,7 @@ async def stu_get_enroll_form(
     - type=textarea/text/input 为文本题，提交时使用 {question_id, text}
     - type=radio 为单选题，提交时使用 {question_id, answer_id}
     - type=checkbox 为多选题，提交时使用 {question_id, answer_ids}
+    - type=number 为数值题，提交时使用 {question_id, number}，若题目有 min/max 则会校验范围
     - required=true 表示该题必填
     """
     client = _get_client(session_id)
@@ -1752,7 +1866,7 @@ async def stu_submit_enroll_form(
         list[dict[str, Any]],
         Field(
             default=None,
-            description='报名问题答案列表。每题一个对象：文本题 {question_id, text}，单选题 {question_id, answer_id}，多选题 {question_id, answer_ids}',
+            description='报名问题答案列表。每题一个对象：文本题 {question_id, text}，单选题 {question_id, answer_id}，多选题 {question_id, answer_ids}，数值题 {question_id, number}',
         ),
     ] = None,
     session_id: Annotated[
@@ -3801,6 +3915,19 @@ async def stu_complete_course(
                         data={"details": details},
                     )
                 await asyncio.sleep(1)
+
+                # 报名后检测是否需要填写复杂报名表单
+                needs_form, form_summary = _check_needs_enroll_form(client, group_id, s_key)
+                if needs_form and form_summary:
+                    return _ok(
+                        data={
+                            "enroll_form_required": True,
+                            "enroll_form_summary": form_summary,
+                            "details": details,
+                        },
+                        next_action="needs_enroll_form",
+                        suggested_action="课程已预报名，但需要填写报名信息。请调用 stu_get_enroll_form 获取完整表单并提交，或使用 stu_submit_enroll_form 直接提交答案后继续学习。",
+                    )
             except Exception as e:
                 details.append({"action": "enroll", "success": False, "error": str(e)})
                 return _err(

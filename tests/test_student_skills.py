@@ -40,6 +40,38 @@ class MockMCPClientManager:
         )
 
 
+class SequentialMockMCPClientManager:
+    """支持同一工具按顺序返回不同结果的 Mock."""
+
+    def __init__(self, responses: dict[tuple[str, str], list[dict[str, Any]]] | None = None) -> None:
+        self.responses = responses or {}
+        self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
+        self._indices: dict[tuple[str, str], int] = {}
+
+    def list_servers(self) -> list[str]:
+        return ["teacher", "student", "admin"]
+
+    async def call_tool(
+        self,
+        server: str,
+        tool: str,
+        arguments: dict[str, Any] | None = None,
+        read_timeout_seconds: float | None = None,
+    ) -> ToolCallResult:
+        self.calls.append((server, tool, arguments))
+        key = (server, tool)
+        response_list = self.responses.get(key, [{"success": True, "data": {"mock": True}}])
+        idx = self._indices.get(key, 0)
+        self._indices[key] = idx + 1
+        response = response_list[idx % len(response_list)]
+        return ToolCallResult(
+            success=response.get("success", True),
+            data=response.get("data"),
+            error_code=response.get("error_code", ""),
+            error_message=response.get("error_message", ""),
+        )
+
+
 @pytest.fixture(autouse=True)
 def reset_globals():
     """每个测试前重置 server 全局变量."""
@@ -302,9 +334,199 @@ class TestStudentAssessment:
         ]
 
 
+class TestStudentEnrollment:
+    async def test_enroll_course_simple_success(self, registry_with_student_skills: SkillRegistry) -> None:
+        responses = {
+            ("student", "stu_enroll_course"): {
+                "success": True,
+                "data": {"is_enrolled": 2, "pay_status": "success"},
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_student_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="enroll_course",
+            arguments={"enroll_id": "enr-001"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["is_enrolled"] == 2
+        assert mock_mcp.calls == [("student", "stu_enroll_course", {"enroll_id": "enr-001"})]
+
+    async def test_enroll_course_with_complex_form(self, registry_with_student_skills: SkillRegistry) -> None:
+        responses = {
+            ("student", "stu_enroll_course"): [
+                {"success": True, "data": {"is_enrolled": 1, "pay_status": "pay"}},
+                {"success": True, "data": {"is_enrolled": 2, "pay_status": "success"}},
+            ],
+            ("student", "stu_get_enroll_form"): [
+                {
+                    "success": True,
+                    "data": {
+                        "enroll_id": "enr-001",
+                        "contact_fields": [
+                            {"key": "username", "title": "姓名", "type": "text", "required": True, "selected": True},
+                        ],
+                        "section_questions": [
+                            {
+                                "question_id": "q-001",
+                                "title": "选择部门",
+                                "type": "radio",
+                                "required": True,
+                                "options": [{"answer_id": "a-001", "text": "行政部"}],
+                            },
+                        ],
+                    },
+                },
+            ],
+            ("student", "stu_submit_enroll_form"): [
+                {"success": True, "data": {"submitted": True}},
+            ],
+        }
+        mock_mcp = SequentialMockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_student_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="enroll_course",
+            arguments={
+                "enroll_id": "enr-001",
+                "contact_answers": {"username": "张三"},
+                "section_answers": [{"question_id": "q-001", "answer_id": "a-001"}],
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["is_enrolled"] == 2
+
+        # 验证完整调用链
+        assert mock_mcp.calls[0] == ("student", "stu_enroll_course", {"enroll_id": "enr-001"})
+        assert mock_mcp.calls[1] == ("student", "stu_get_enroll_form", {"course_identifier": "enr-001"})
+        assert mock_mcp.calls[2][0:2] == ("student", "stu_submit_enroll_form")
+        assert mock_mcp.calls[3] == ("student", "stu_enroll_course", {"enroll_id": "enr-001"})
+
+    async def test_enroll_course_needs_user_input(self, registry_with_student_skills: SkillRegistry) -> None:
+        responses = {
+            ("student", "stu_enroll_course"): [
+                {"success": True, "data": {"is_enrolled": 1, "pay_status": "pay"}},
+            ],
+            ("student", "stu_get_enroll_form"): [
+                {
+                    "success": True,
+                    "data": {
+                        "enroll_id": "enr-001",
+                        "contact_fields": [
+                            {"key": "username", "title": "姓名", "type": "text", "required": True, "selected": True},
+                        ],
+                        "section_questions": [
+                            {
+                                "question_id": "q-001",
+                                "title": "选择部门",
+                                "type": "radio",
+                                "required": True,
+                                "options": [{"answer_id": "a-001", "text": "行政部"}],
+                            },
+                        ],
+                    },
+                },
+            ],
+        }
+        mock_mcp = SequentialMockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_student_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="enroll_course",
+            arguments={"enroll_id": "enr-001"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is False
+        assert parsed["next_action"] == "needs_user_input"
+        assert parsed["error_code"] == "ENROLL_FORM_REQUIRED"
+        assert parsed["data"]["section_questions"][0]["title"] == "选择部门"
+
+    async def test_get_course_enroll_form(self, registry_with_student_skills: SkillRegistry) -> None:
+        responses = {
+            ("student", "stu_get_enroll_form"): {
+                "success": True,
+                "data": {"enroll_id": "enr-001", "contact_fields": [], "section_questions": []},
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_student_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="get_course_enroll_form",
+            arguments={"course_identifier": "aet504"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["enroll_id"] == "enr-001"
+        assert mock_mcp.calls == [("student", "stu_get_enroll_form", {"course_identifier": "aet504"})]
+
+    async def test_submit_course_enroll_form(self, registry_with_student_skills: SkillRegistry) -> None:
+        responses = {
+            ("student", "stu_submit_enroll_form"): {
+                "success": True,
+                "data": {"submitted": True},
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_student_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="submit_course_enroll_form",
+            arguments={
+                "course_identifier": "aet504",
+                "contact_answers": {"username": "张三"},
+                "section_answers": [{"question_id": "q-001", "answer_id": "a-001"}],
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["submitted"] is True
+        assert mock_mcp.calls == [
+            (
+                "student",
+                "stu_submit_enroll_form",
+                {
+                    "course_identifier": "aet504",
+                    "contact_answers": {"username": "张三"},
+                    "section_answers": [{"question_id": "q-001", "answer_id": "a-001"}],
+                },
+            ),
+        ]
+
+
 class TestStudentCourseCompletion:
-    async def test_complete_entire_course(self, registry_with_student_skills: SkillRegistry) -> None:
-        mock_mcp = MockMCPClientManager()
+    async def test_complete_entire_course_already_enrolled(self, registry_with_student_skills: SkillRegistry) -> None:
+        responses = {
+            ("student", "stu_get_course_structure"): {
+                "success": True,
+                "data": {
+                    "group_id": "g-001",
+                    "needs_enrollment": False,
+                    "total_lessons": 4,
+                },
+            },
+            ("student", "stu_complete_course"): {
+                "success": True,
+                "data": {
+                    "completed_lessons": 4,
+                    "total_lessons": 4,
+                    "progress_percentage": 100,
+                },
+            },
+            ("student", "stu_get_learning_progress"): {
+                "success": True,
+                "data": {"complete_rate": 100, "is_fully_completed": True},
+            },
+        }
+        mock_mcp = MockMCPClientManager(responses)
         skills_server._skill_registry = registry_with_student_skills
         skills_server._mcp_client = mock_mcp
 
@@ -314,10 +536,126 @@ class TestStudentCourseCompletion:
         )
         parsed = json.loads(result)
         assert parsed["success"] is True
-        assert mock_mcp.calls == [
-            (
-                "student",
-                "stu_complete_course",
-                {"course_identifier": "aet504", "skip_exam": True, "skip_questionnaire": True},
-            ),
-        ]
+        assert parsed["data"]["enrollment"]["needed"] is False
+        assert parsed["data"]["completion"]["success"] is True
+        assert parsed["data"]["verification"]["data"]["complete_rate"] == 100
+
+    async def test_complete_entire_course_enrolls_first(self, registry_with_student_skills: SkillRegistry) -> None:
+        responses = {
+            ("student", "stu_get_course_structure"): [
+                {
+                    "success": True,
+                    "data": {
+                        "group_id": "g-001",
+                        "needs_enrollment": True,
+                        "enroll_id": "enr-001",
+                        "total_lessons": 4,
+                    },
+                },
+            ],
+            ("student", "stu_enroll_course"): [
+                {"success": True, "data": {"is_enrolled": 1, "pay_status": "pay"}},
+                {"success": True, "data": {"is_enrolled": 2, "pay_status": "success"}},
+            ],
+            ("student", "stu_get_enroll_form"): [
+                {
+                    "success": True,
+                    "data": {
+                        "enroll_id": "enr-001",
+                        "contact_fields": [
+                            {"key": "username", "title": "姓名", "type": "text", "required": True, "selected": True},
+                        ],
+                        "section_questions": [
+                            {
+                                "question_id": "q-001",
+                                "title": "选择部门",
+                                "type": "radio",
+                                "required": True,
+                                "options": [{"answer_id": "a-001", "text": "行政部"}],
+                            },
+                        ],
+                    },
+                },
+            ],
+            ("student", "stu_submit_enroll_form"): [
+                {"success": True, "data": {"submitted": True}},
+            ],
+            ("student", "stu_complete_course"): [
+                {
+                    "success": True,
+                    "data": {
+                        "completed_lessons": 4,
+                        "total_lessons": 4,
+                        "progress_percentage": 100,
+                    },
+                },
+            ],
+            ("student", "stu_get_learning_progress"): [
+                {"success": True, "data": {"complete_rate": 100, "is_fully_completed": True}},
+            ],
+        }
+        mock_mcp = SequentialMockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_student_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="complete_entire_course",
+            arguments={
+                "course_identifier": "aet504",
+                "contact_answers": {"username": "张三"},
+                "section_answers": [{"question_id": "q-001", "answer_id": "a-001"}],
+            },
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["enrollment"]["success"] is True
+        assert parsed["data"]["completion"]["success"] is True
+        assert parsed["data"]["verified_complete_rate"] == 100
+
+        # 验证报名流程被调用
+        enroll_course_calls = [c for c in mock_mcp.calls if c[1] == "stu_enroll_course"]
+        assert len(enroll_course_calls) == 2
+
+    async def test_learn_course_end_to_end(self, registry_with_student_skills: SkillRegistry) -> None:
+        responses = {
+            ("student", "stu_get_course_structure"): [
+                {
+                    "success": True,
+                    "data": {
+                        "group_id": "g-001",
+                        "needs_enrollment": True,
+                        "enroll_id": "enr-001",
+                        "total_lessons": 4,
+                    },
+                },
+            ],
+            ("student", "stu_enroll_course"): [
+                {"success": True, "data": {"is_enrolled": 2, "pay_status": "success"}},
+            ],
+            ("student", "stu_complete_course"): [
+                {
+                    "success": True,
+                    "data": {
+                        "completed_lessons": 4,
+                        "total_lessons": 4,
+                        "progress_percentage": 100,
+                    },
+                },
+            ],
+            ("student", "stu_get_learning_progress"): [
+                {"success": True, "data": {"complete_rate": 100, "is_fully_completed": True}},
+            ],
+        }
+        mock_mcp = SequentialMockMCPClientManager(responses)
+        skills_server._skill_registry = registry_with_student_skills
+        skills_server._mcp_client = mock_mcp
+
+        result = await skills_server.skill_run(
+            name="learn_course",
+            arguments={"course_identifier": "aet504"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        assert parsed["data"]["course_identifier"] == "aet504"
+        assert parsed["data"]["enrollment"]["success"] is True
+        assert parsed["data"]["verified_complete_rate"] == 100

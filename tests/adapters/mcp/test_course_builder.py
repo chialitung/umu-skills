@@ -43,6 +43,7 @@ def _course_info_response(title: str = "测试课程"):
                 "groupInfo": {
                     "groupTitle": title,
                     "title": title,
+                    "teacher_id": "20438403",
                     "desc": "",
                     "groupRemark": "",
                     "lesson_type": 0,
@@ -107,13 +108,18 @@ class TestSetCourseEnrollment:
 
         payload = json.loads(calls[0].kwargs["data"]["enroll"])
         assert payload["group_id"] == "7339916"
+        assert payload["obj_id"] == "7339916"
+        assert payload["obj_type"] == "1"
+        assert payload["teacher_id"] == "20438403"
         assert payload["title"] == "E2E_测试课程_SCORM"
-        assert payload["status"] == 1
-        assert payload["autoCheck"] == 1
-        assert payload["sessionType"] == "9"
+        assert payload["status"] == "1"
+        assert payload["autoCheck"] == "1"
+        assert "sessionType" not in payload
         assert payload["setup"]["allow_cancel"] == "0"
         assert payload["setup"]["user_quota"] == "-1"
         assert len(payload["contactInfo"]) == len(CourseBuilder._DEFAULT_ENROLL_CONTACT_INFO)
+        assert payload["contactInfo"][0]["placeHolder"] == "输入真实姓名"
+        assert payload["setupInfo"]["payment"]["switch_status"] == "0"
 
     def test_set_course_enrollment_disabled(self, builder, mock_client):
         mock_client.get.return_value = _course_info_response()
@@ -133,8 +139,8 @@ class TestSetCourseEnrollment:
         assert result["auto_check"] is False
 
         payload = json.loads(mock_client.post.call_args.kwargs["data"]["enroll"])
-        assert payload["status"] == 0
-        assert payload["autoCheck"] == 0
+        assert payload["status"] == "0"
+        assert payload["autoCheck"] == "0"
         assert payload["setup"]["allow_cancel"] == "1"
         assert payload["setup"]["user_quota"] == "100"
         assert payload["setup"]["begin_time"] == "1782561347"
@@ -151,6 +157,7 @@ class TestSetCourseEnrollment:
                 "defaultPlaceHolder": "请输入工号",
                 "domType": "text",
                 "isRequired": True,
+                "isSelected": True,
             }
         ]
 
@@ -168,6 +175,95 @@ class TestSetCourseEnrollment:
         assert payload["contactInfo"][0]["key"] == "employee_id"
         assert payload["contactInfo"][0]["questionTitle"] == "工号"
         assert payload["contactInfo"][0]["isRequired"] == "1"
+        assert payload["contactInfo"][0]["isSelected"] == "1"
+
+    def test_set_course_enrollment_selected_fields(self, builder, mock_client):
+        mock_client.get.return_value = _course_info_response()
+        mock_client.post.return_value = _enroll_save_response()
+
+        result = builder.set_course_enrollment(
+            group_id="7339916",
+            enabled=True,
+            selected_contact_fields=["username", "mobile"],
+        )
+
+        assert result["enroll_id"] == "580237"
+        payload = json.loads(mock_client.post.call_args.kwargs["data"]["enroll"])
+        selected = {f["key"]: f["isSelected"] for f in payload["contactInfo"]}
+        assert selected["username"] == "1"
+        assert selected["mobile"] == "1"
+        assert selected["company"] == "0"
+
+    def test_set_course_enrollment_price_and_sections(self, builder, mock_client):
+        mock_client.get.return_value = _course_info_response()
+        mock_client.post.return_value = _enroll_save_response()
+
+        section_questions = [
+            {
+                "title": "单选题",
+                "type": "radio",
+                "required": True,
+                "options": [
+                    {"value": "1", "text": "选项1"},
+                    {"value": "2", "text": "选项2"},
+                ],
+            },
+            {
+                "title": "开放题",
+                "type": "text",
+                "required": False,
+            },
+        ]
+
+        result = builder.set_course_enrollment(
+            group_id="7339916",
+            enabled=True,
+            price_amount=1990,
+            section_questions=section_questions,
+        )
+
+        assert result["enroll_id"] == "580237"
+        payload = json.loads(mock_client.post.call_args.kwargs["data"]["enroll"])
+        assert payload["payment"]["switch_status"] == 1
+        assert payload["payment"]["amount"] == 1990
+        assert len(payload["sectionArr"]) == 2
+
+        radio = payload["sectionArr"][0]
+        assert radio["questionInfo"]["domType"] == "radio"
+        assert radio["questionInfo"]["questionTitle"] == "单选题"
+        assert radio["questionInfo"]["setup"]["required"] == "0"
+        assert radio["answerArr"] == [{"answerContent": "选项1"}, {"answerContent": "选项2"}]
+        assert radio["questionInfo"]["extend"]["pic_url"] == []
+
+        textarea = payload["sectionArr"][1]
+        assert textarea["questionInfo"]["domType"] == "textarea"
+        assert textarea["questionInfo"]["setup"]["required"] == "1"
+
+    def test_set_course_enrollment_approval_setting(self, builder, mock_client):
+        mock_client.get.return_value = _course_info_response()
+        mock_client.post.side_effect = [
+            _enroll_save_response("580240"),
+            {"error_code": 0, "error_message": "", "data": {"status": 1}},
+        ]
+
+        result = builder.set_course_enrollment(
+            group_id="7339916",
+            enabled=True,
+            approval_setting={
+                "course_manager": True,
+                "department_manager": False,
+                "designee": False,
+            },
+        )
+
+        assert result["enroll_id"] == "580240"
+        calls = mock_client.post.call_args_list
+        assert len(calls) == 2
+        assert calls[1].args[0] == "https://www.umu.cn/uapi/v1/enroll/save-approval-setting"
+        setting = json.loads(calls[1].kwargs["data"]["setting"])
+        assert setting["manager_permission"] == 1
+        assert setting["department_manager_permission"] == 0
+        assert setting["designee_permission"] == 0
 
     def test_set_course_enrollment_failure(self, builder, mock_client):
         mock_client.get.return_value = _course_info_response()
@@ -205,7 +301,7 @@ class TestTeacherEnrollmentTools:
         assert result["data"]["enabled"] is True
 
         payload = json.loads(mock_client.post.call_args.kwargs["data"]["enroll"])
-        assert payload["status"] == 1
+        assert payload["status"] == "1"
 
     async def test_tch_set_course_enrollment_tool_invalid_json(self, mock_client):
         with _auth_patch(mock_client):
@@ -215,6 +311,54 @@ class TestTeacherEnrollmentTools:
 
         assert result["success"] is False
         assert result["error_code"] == "INVALID_JSON"
+
+    async def test_tch_set_course_enrollment_tool_full_params(self, mock_client):
+        mock_client.get.return_value = _course_info_response()
+        mock_client.post.side_effect = [
+            _enroll_save_response("580237"),
+            {"error_code": 0, "error_message": "", "data": {"status": 1}},
+        ]
+
+        with _auth_patch(mock_client):
+            result = json.loads(
+                await tch_set_course_enrollment(
+                    "7339916",
+                    enabled=True,
+                    auto_check=True,
+                    title="报名标题",
+                    desc="报名说明",
+                    allow_cancel=True,
+                    user_quota=50,
+                    price_amount=100,
+                    selected_contact_fields='["username", "mobile"]',
+                    section_questions_json='[{"title": "单选题", "type": "radio", "required": true, "options": [{"value": "1", "text": "A"}]}]',
+                    approval_setting_json='{"course_manager": true, "department_manager": false}',
+                    enroll_id="580237",
+                )
+            )
+
+        assert result["success"] is True
+        assert result["data"]["enroll_id"] == "580237"
+
+        calls = mock_client.post.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[0] == "https://www.umu.cn/api/enroll/saveenroll"
+        assert calls[1].args[0] == "https://www.umu.cn/uapi/v1/enroll/save-approval-setting"
+
+        payload = json.loads(calls[0].kwargs["data"]["enroll"])
+        assert payload["title"] == "报名标题"
+        assert payload["desc"] == "报名说明"
+        assert payload["status"] == "1"
+        assert payload["payment"]["amount"] == 100
+        assert payload["setup"]["allow_cancel"] == "1"
+        assert payload["setup"]["user_quota"] == "50"
+        assert len(payload["sectionArr"]) == 1
+        assert payload["sectionArr"][0]["answerArr"] == [{"answerContent": "A"}]
+        assert payload["sectionArr"][0]["questionInfo"]["setup"]["required"] == "0"
+
+        selected = {f["key"]: f["isSelected"] for f in payload["contactInfo"]}
+        assert selected["username"] == "1"
+        assert selected["mobile"] == "1"
 
     async def test_tch_update_course_with_enroll_status_only(self, mock_client):
         mock_client.get.return_value = _course_info_response()

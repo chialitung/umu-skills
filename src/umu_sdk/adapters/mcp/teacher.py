@@ -6351,11 +6351,11 @@ async def tch_set_course_enrollment(
     ] = True,
     title: Annotated[
         str | None,
-        Field(default=None, description="报名标题，默认使用课程标题"),
+        Field(default=None, description="报名页标题，默认使用课程标题"),
     ] = None,
     desc: Annotated[
         str,
-        Field(default="", description="报名说明"),
+        Field(default="", description="报名说明/介绍"),
     ] = "",
     allow_cancel: Annotated[
         bool,
@@ -6373,14 +6373,50 @@ async def tch_set_course_enrollment(
         int | str,
         Field(default=0, description="报名结束时间（Unix 时间戳或 0 表示不限制）"),
     ] = 0,
+    price_amount: Annotated[
+        int,
+        Field(default=0, description="报名价格（分），0 表示免费"),
+    ] = 0,
+    selected_contact_fields: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description='要勾选的报名联系信息字段 key 列表，JSON 格式: ["username", "mobile"]。'
+                        "不传则不勾选任何字段。",
+        ),
+    ] = None,
     contact_info_json: Annotated[
         str | None,
         Field(
             default=None,
-            description='自定义报名联系信息字段 JSON，格式: [{"key": "...", "questionTitle": "...", "defaultPlaceHolder": "...", "domType": "text"}]。'
+            description='自定义报名联系信息字段 JSON，格式: [{"key": "...", "questionTitle": "...", '
+                        '"defaultPlaceHolder": "...", "domType": "text", "isSelected": true, '
+                        '"isRequired": true}]。isSelected 控制是否勾选，isRequired 控制是否必填。'
                         "不传则使用系统默认字段。",
         ),
     ] = None,
+    section_questions_json: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description='自定义报名问题 JSON，格式: [{"title": "问题", "type": "radio", '
+                        '"required": true, "options": [{"text": "选项1"}, {"text": "选项2"}]}]。'
+                        "支持 textarea（开放式问题）/radio/checkbox/paragraph/number；"
+                        "简写 type=text 会被映射为 textarea。必填问题的 required 请传 true。",
+        ),
+    ] = None,
+    approval_setting_json: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description='审核人设置 JSON，格式: {"course_manager": true, "department_manager": false, '
+                        '"designee": false}。自动审核时通常无需设置。',
+        ),
+    ] = None,
+    enroll_id: Annotated[
+        str,
+        Field(default="", description="现有报名 ID，修改报名时传入"),
+    ] = "",
     session_id: Annotated[
         str | None,
         Field(
@@ -6399,16 +6435,25 @@ async def tch_set_course_enrollment(
     """
     client = _get_client(session_id)
 
-    contact_info = None
-    if contact_info_json:
+    def _parse_json(name: str, value: str | None) -> Any:
+        if not value:
+            return None
         try:
-            contact_info = json.loads(contact_info_json)
+            return json.loads(value)
         except json.JSONDecodeError as e:
-            return _err(
-                error_code="INVALID_JSON",
-                error_message=f"contact_info_json 不是有效 JSON: {e}",
-                suggested_action="请检查 JSON 格式",
-            )
+            raise ValueError(f"{name} 不是有效 JSON: {e}")
+
+    try:
+        contact_info = _parse_json("contact_info_json", contact_info_json)
+        section_questions = _parse_json("section_questions_json", section_questions_json)
+        approval_setting = _parse_json("approval_setting_json", approval_setting_json)
+        selected_fields = _parse_json("selected_contact_fields", selected_contact_fields)
+    except ValueError as e:
+        return _err(
+            error_code="INVALID_JSON",
+            error_message=str(e),
+            suggested_action="请检查 JSON 格式",
+        )
 
     try:
         builder = CourseBuilder(client)
@@ -6422,7 +6467,12 @@ async def tch_set_course_enrollment(
             user_quota=user_quota,
             begin_time=begin_time,
             end_time=end_time,
+            price_amount=price_amount,
+            selected_contact_fields=selected_fields,
             contact_info=contact_info,
+            section_questions=section_questions,
+            approval_setting=approval_setting,
+            enroll_id=enroll_id,
         )
         return _ok(
             data=result,
