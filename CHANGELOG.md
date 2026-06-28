@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.6] - 2026-06-28
+
+### Added
+- 学习项目删除能力：
+  - Teacher MCP 新增 `tch_delete_learning_program`，支持讲师删除拥有的学习项目。
+  - Admin MCP 新增 `adm_delete_learning_program`，支持管理员删除指定学习项目。
+  - Skill 层新增 `delete_learning_program`（讲师）与 `delete_learning_program_admin`（管理员）。
+  - 补充相关单元测试覆盖删除成功、失败与 Skill 编排。
+
+### Fixed
+- 修复 `tests/adapters/mcp/test_signin_section.py` 中复杂签到自动发现测试的 patch 目标，使其与实现函数 `_extract_signin_page_data_json` 对齐。
+
 ## [0.24.5] - 2026-06-28
 
 ### Added
