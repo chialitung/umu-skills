@@ -4733,13 +4733,15 @@ async def tch_create_signin_section(
     signin_info_json: Annotated[
         str,
         Field(
-            description='签到信息（问题）列表的 JSON 字符串。每项为一个信息对象，支持 4 种类型。\n'
+            description='签到信息（问题）列表的 JSON 字符串。每项为一个信息对象，支持 5 种类型。\n'
                         '**文本输入**：{"type":"textarea","title":"您的姓名是？","required":true,"hint":"请输入姓名"}\n'
                         '  - hint: 占位提示文字（可选，默认空）\n'
                         '**单选题**：{"type":"radio","title":"您的性别是？","required":true,"options":["女","男"]}\n'
                         '**多选题**：{"type":"checkbox","title":"谁是你的朋友？","required":true,"options":["黄飞鸿","洪七公","周伯通"],"min_options":1,"max_options":2}\n'
                         '  - min_options: 最少选几项（可选，默认1）\n'
                         '  - max_options: 最多选几项（可选，默认等于选项数）\n'
+                        '**数值题**：{"type":"number","title":"您的工作年限是？","required":false,"min":0,"max":50,"default":0}\n'
+                        '  - min: 最小值（可选，默认0）；max: 最大值（可选，默认100）；default: 默认值（可选，默认等于min）\n'
                         '**段落说明**：{"type":"paragraph","content":"<p>这是一段说明文字</p>"}\n'
                         '  - content: 支持 HTML 格式'
         ),
@@ -4802,7 +4804,7 @@ async def tch_create_signin_section(
     前置依赖：需先调用 tch_login 完成登录，已有 group_id。
 
     签到小节(sessionType=6)允许学员在签到时填写各种信息，支持文本输入、
-    单选、多选、段落说明四种类型。
+    单选、多选、数值题、段落说明五种类型。
 
     签到设置参数说明：
     - auto_check: True=自动审核(默认)，学员签到后立即完成

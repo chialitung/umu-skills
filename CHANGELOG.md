@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.5] - 2026-06-28
+
+### Added
+- 学员复杂签到支持文本/单选/多选/数值题：
+  - Student MCP 新增 `stu_check_in_with_answers`，通过签到页面 HTML 自动获取问题结构并提交答案。
+  - 支持 `textarea`、`radio`、`checkbox`、`number` 四种题目类型，与教师端复杂签到配置对齐。
+  - 新增 `tests/adapters/mcp/test_signin_section.py` 单元测试覆盖创建、更新与学员签到提交流程。
+
+### Fixed
+- `CourseBuilder.create_signin_section` / `update_signin_section` 修复签到问题必填语义与 `pattern` 类型码：
+  - `required` 字段正确映射为 `"0"`（必填）/ `"1"`（非必填），与 UMU 前端约定一致。
+  - 单选题 `pattern` 由 `"3"` 修正为 `"0"`，多选题由 `"3"` 修正为 `"1"`，数值题为 `"8"`，段落说明为 `"4"`。
+  - 只要包含签到问题即自动开启高级模式（`advance=1`）。
+  - 新增数值题（`type="number"`）支持，支持 `min`/`max`/`default` 配置。
+
 ## [0.24.4] - 2026-06-28
 
 ### Added

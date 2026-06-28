@@ -7346,6 +7346,16 @@ class CourseBuilder:
             "max_options": 2   // 最多选几项（可选，默认等于选项数）
         }
 
+        **数值题 (type="number")：**
+        {
+            "type": "number",
+            "title": "您的工作年限是？",
+            "required": false,
+            "min": 0,      // 最小值（可选，默认0）
+            "max": 50,     // 最大值（可选，默认100）
+            "default": 0   // 默认值（可选，默认等于min）
+        }
+
         **段落说明 (type="paragraph")：**
         {
             "type": "paragraph",
@@ -7417,7 +7427,7 @@ class CourseBuilder:
 
                 question_info = {
                     "extend": {"pic_url": []},
-                    "setup": {"required": "1" if required else "0"},
+                    "setup": {"required": "0" if required else "1"},
                     "questionId": "",
                     "questionTitle": title,
                     "mobileQuestionTitle": title,
@@ -7445,11 +7455,11 @@ class CourseBuilder:
 
                 question_info = {
                     "extend": {"pic_url": []},
-                    "setup": {"required": "1" if required else "0"},
+                    "setup": {"required": "0" if required else "1"},
                     "questionId": "",
                     "questionTitle": title,
                     "mobileQuestionTitle": title,
-                    "pattern": "3",
+                    "pattern": "0",
                     "required": False,
                     "domType": "radio",
                     "templateId": "",
@@ -7483,7 +7493,7 @@ class CourseBuilder:
                     "extend": {"pic_url": []},
                 })
 
-                question_setup = {"required": "1" if required else "0"}
+                question_setup = {"required": "0" if required else "1"}
                 if min_opts > 0:
                     question_setup["limitOptionsMin"] = min_opts
                 if max_opts > 0:
@@ -7495,7 +7505,7 @@ class CourseBuilder:
                     "questionId": "",
                     "questionTitle": title,
                     "mobileQuestionTitle": title,
-                    "pattern": "3",
+                    "pattern": "1",
                     "required": False,
                     "domType": "checkbox",
                     "templateId": "",
@@ -7503,6 +7513,30 @@ class CourseBuilder:
                     "cid": _next_cid(),
                 }
                 section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
+
+            elif info_type == "number":
+                # 数值题（滑块/数值输入）
+                min_value = int(info.get("min", 0))
+                max_value = int(info.get("max", 100))
+                default_value = int(info.get("default", min_value))
+
+                question_info = {
+                    "extend": {"pic_url": [], "min": min_value, "max": max_value},
+                    "setup": {
+                        "required": "0" if required else "1",
+                        "defaultValue": default_value,
+                    },
+                    "questionId": "",
+                    "questionTitle": title,
+                    "mobileQuestionTitle": title,
+                    "pattern": "8",
+                    "required": False,
+                    "domType": "number",
+                    "templateId": "",
+                    "questionIndex": str(idx + 1),
+                    "cid": _next_cid(),
+                }
+                section_arr.append({"questionInfo": question_info, "answerArr": []})
 
             elif info_type == "paragraph":
                 # 段落说明（无答案）
@@ -7512,7 +7546,7 @@ class CourseBuilder:
                     "sessionId": "",
                     "questionTitle": "",
                     "questionIndex": "",
-                    "pattern": "",
+                    "pattern": "4",
                     "required": "",
                     "creatTime": "",
                     "creatTimeShow": "",
@@ -7531,8 +7565,9 @@ class CourseBuilder:
                 raise ValueError(f"不支持的签到信息类型: {info_type}（第 {idx + 1} 题）")
 
         # 3. 构造 sessionInfo
+        # 只要有签到问题就开启高级模式（advance=1），与前端编辑器行为一致。
         setup: dict[str, Any] = {
-            "advance": 1 if desc_richtext else 0,
+            "advance": 1,
             "basicQuestionCount": 1,
             "is_anti_fraud": "1" if is_anti_fraud else "0",
             "mini_program_switch": "1" if mini_program_switch else "0",
@@ -7763,6 +7798,12 @@ class CourseBuilder:
             setup["type_name"] = type_name
             changes.append(f"type_name: {type_name}")
 
+        # 只要修改了签到信息，就确保开启高级模式
+        if signin_info_list is not None:
+            if str(setup.get("advance", "")) != "1":
+                setup["advance"] = 1
+                changes.append("advance: 1")
+
         # 6. 处理签到信息（sectionArr）变更
         new_section_arr: list[dict[str, Any]] = []
 
@@ -7807,7 +7848,7 @@ class CourseBuilder:
 
                     question_info = {
                         "extend": {"pic_url": []},
-                        "setup": {"required": "1" if required else "0"},
+                        "setup": {"required": "0" if required else "1"},
                         "questionId": existing_qid if preserve_id else "",
                         "questionTitle": title,
                         "mobileQuestionTitle": title,
@@ -7837,11 +7878,11 @@ class CourseBuilder:
 
                     question_info = {
                         "extend": {"pic_url": []},
-                        "setup": {"required": "1" if required else "0"},
+                        "setup": {"required": "0" if required else "1"},
                         "questionId": existing_qid if preserve_id else "",
                         "questionTitle": title,
                         "mobileQuestionTitle": title,
-                        "pattern": "3",
+                        "pattern": "0",
                         "required": False,
                         "domType": "radio",
                         "templateId": "",
@@ -7878,7 +7919,7 @@ class CourseBuilder:
                         "extend": {"pic_url": []},
                     })
 
-                    setup_q = {"required": "1" if required else "0"}
+                    setup_q = {"required": "0" if required else "1"}
                     if min_opts > 0:
                         setup_q["limitOptionsMin"] = min_opts
                     if max_opts > 0:
@@ -7890,7 +7931,7 @@ class CourseBuilder:
                         "questionId": existing_qid if preserve_id else "",
                         "questionTitle": title,
                         "mobileQuestionTitle": title,
-                        "pattern": "3",
+                        "pattern": "1",
                         "required": False,
                         "domType": "checkbox",
                         "templateId": "",
@@ -7899,6 +7940,30 @@ class CourseBuilder:
                     }
                     new_section_arr.append({"questionInfo": question_info, "answerArr": answer_arr})
 
+                elif info_type == "number":
+                    # 数值题（滑块/数值输入）
+                    min_value = int(info.get("min", 0))
+                    max_value = int(info.get("max", 100))
+                    default_value = int(info.get("default", min_value))
+
+                    question_info = {
+                        "extend": {"pic_url": [], "min": min_value, "max": max_value},
+                        "setup": {
+                            "required": "0" if required else "1",
+                            "defaultValue": default_value,
+                        },
+                        "questionId": existing_qid if preserve_id else "",
+                        "questionTitle": title,
+                        "mobileQuestionTitle": title,
+                        "pattern": "8",
+                        "required": False,
+                        "domType": "number",
+                        "templateId": "",
+                        "questionIndex": str(idx + 1),
+                        "cid": _next_cid(),
+                    }
+                    new_section_arr.append({"questionInfo": question_info, "answerArr": []})
+
                 elif info_type == "paragraph":
                     content = info.get("content", "")
                     question_info = {
@@ -7906,7 +7971,7 @@ class CourseBuilder:
                         "sessionId": session_id if preserve_id else "",
                         "questionTitle": "",
                         "questionIndex": "",
-                        "pattern": "",
+                        "pattern": "4",
                         "required": "",
                         "creatTime": "",
                         "creatTimeShow": "",

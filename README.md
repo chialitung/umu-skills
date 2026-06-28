@@ -421,14 +421,14 @@ python -m umu_sdk.adapters.mcp.admin
 | 资源（文档） | `tch_upload_document`, `tch_list_documents`, `tch_rename_document`, `tch_delete_document`, `tch_upload_documents_batch`, `tch_delete_documents_batch` |
 | 资源（音视频） | `tch_upload_audio_video`, `tch_list_audio_videos`, `tch_rename_audio_video`, `tch_delete_audio_video` |
 
-### 学生工具（27）
+### 学生工具（28）
 
 | 分类 | 工具 |
 |----------|-------|
 | 认证 | `stu_login`, `stu_check_auth` |
 | 会话 | `stu_create_session`, `stu_list_sessions`, `stu_destroy_session` |
 | 课程 | `stu_get_my_courses`, `stu_list_participated_courses`, `stu_get_course_structure`, `stu_get_learning_progress`, `stu_resolve_course_url` |
-| 学习 | `stu_enroll_course`, `stu_browse_lesson`, `stu_complete_scorm_section`, `stu_get_questionnaire_questions`, `stu_submit_questionnaire`, `stu_submit_questionnaire_with_config`, `stu_check_in`, `stu_check_in_with_rating`, `stu_start_exam`, `stu_submit_exam`, `stu_submit_exam_with_config`, `stu_get_lesson_status` |
+| 学习 | `stu_enroll_course`, `stu_browse_lesson`, `stu_complete_scorm_section`, `stu_get_questionnaire_questions`, `stu_submit_questionnaire`, `stu_submit_questionnaire_with_config`, `stu_check_in`, `stu_check_in_with_rating`, `stu_check_in_with_answers`, `stu_start_exam`, `stu_submit_exam`, `stu_submit_exam_with_config`, `stu_get_lesson_status` |
 | 报名 | `stu_get_enroll_form`, `stu_submit_enroll_form` |
 | 完成课程 | `stu_complete_course`, `stu_batch_complete_course` |
 | 批量 | `stu_batch_import_accounts` |

@@ -3194,6 +3194,270 @@ async def stu_check_in_with_rating(
         )
 
 
+def _extract_signin_page_data_json(html: str) -> dict[str, Any] | None:
+    """从签到页面 HTML 中提取 pageData JSON 对象.
+
+    页面通过 ``var pageData = {...};`` 或 ``pageData = {...};`` 注入初始数据。
+    本函数使用简单的括号深度计数来定位 JSON 结束位置。
+    """
+    markers = ["var pageData = ", "pageData="]
+    start = -1
+    used_marker = ""
+    for marker in markers:
+        start = html.find(marker)
+        if start != -1:
+            used_marker = marker
+            break
+    if start == -1:
+        return None
+    start += len(used_marker)
+
+    depth = 0
+    in_string = False
+    escape = False
+    end = start
+    for i in range(start, len(html)):
+        ch = html[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"' and not in_string:
+            in_string = True
+        elif ch == '"' and in_string:
+            in_string = False
+        elif not in_string:
+            if ch in "{[":
+                depth += 1
+            elif ch in "}]":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+    json_str = html[start:end]
+    if not json_str:
+        return None
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        return None
+
+
+def _fetch_signin_questions(
+    client: UMUClient,
+    element_id: str,
+) -> list[dict[str, Any]]:
+    """通过签到页面 HTML 获取复杂签到的问题结构.
+
+    返回 sectionArr 列表（每项包含 questionInfo 和 answerArr）。
+    如果学员已经签到过，sectionArr 可能为空，此时抛出 RuntimeError。
+    """
+    # 1. 获取 element 信息，找到移动端分享 URL
+    element_resp = client.get(client.desktop_url(f"/uapi/v1/element/{element_id}"))
+    element_data = element_resp.get("data", {}) or {}
+    share_url = element_data.get("share_url", "") or element_data.get("share_card_view", "")
+    if not share_url:
+        raise RuntimeError("无法获取签到小节分享链接")
+
+    parsed = urlparse(share_url)
+    key = parsed.path.rstrip("/").split("/")[-1]
+    if not key:
+        raise RuntimeError(f"无法从分享链接提取签到 key: {share_url}")
+    # 移动端短链接形如 https://m.umu.cn/ssu_xxxx，需要去掉 ssu_ 前缀
+    if key.startswith("ssu_"):
+        key = key[4:]
+
+    # 2. 获取签到页面 HTML
+    sign_url = f"https://m.umu.cn/session/sign/{key}?sourceTitle="
+    html = _get_html(client, sign_url)
+
+    page_data = _extract_signin_page_data_json(html)
+    if not page_data:
+        raise RuntimeError("无法从签到页面解析 pageData")
+
+    section_arr = page_data.get("info", {}).get("sessionArr", {}).get("sectionArr", [])
+    if not isinstance(section_arr, list):
+        section_arr = []
+
+    # 过滤段落说明，只保留需要作答的题目；同时规范化字段名
+    # 页面数据中的 question_id 字段名为 "id"，answer_id 字段名为 "id"/"answerId"
+    questions = []
+    for sec in section_arr:
+        qinfo = sec.get("questionInfo", {})
+        dom_type = qinfo.get("domType", "")
+        if dom_type == "paragraph":
+            continue
+        qinfo.setdefault("questionId", qinfo.get("id", ""))
+        for ans in sec.get("answerArr", []):
+            ans.setdefault("answerId", ans.get("id", ""))
+            ans.setdefault("questionId", qinfo.get("questionId", ""))
+        questions.append(sec)
+
+    if not questions:
+        raise RuntimeError(
+            "签到页面未返回题目数据（可能学员已完成签到，或页面结构已变更）。"
+            "请提供显式 question_id 调用，或先调用 tch_get_section 获取题目 ID。"
+        )
+
+    return questions
+
+
+@mcp.tool()
+async def stu_check_in_with_answers(
+    element_id: Annotated[str, Field(description="签到小节元素 ID")],
+    answers_json: Annotated[
+        str,
+        Field(
+            description='复杂签到答案列表 JSON 字符串。每项对应一道题目，支持以下格式：\n'
+                        '按题目顺序（默认）：{"type":"textarea","text":"张三"}、'
+                        '{"type":"radio","answer_id":"171199905"}、'
+                        '{"type":"checkbox","answer_ids":["171199908","171199909"]}、'
+                        '{"type":"number","value":5}\n'
+                        '显式指定题目 ID：{"question_id":"262285888","type":"textarea","text":"张三"}、'
+                        '{"question_id":"262285889","type":"radio","answer_id":"171199905"}、'
+                        '{"question_id":"262285890","type":"checkbox","answer_ids":["..."]}、'
+                        '{"question_id":"262285891","type":"number","value":5}\n'
+                        '未提供 question_id 时，工具会按顺序从签到页面自动获取题目结构并匹配。'
+        ),
+    ],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """完成复杂签到小节（支持文本/单选/多选/数值题）.
+
+    触发条件：当小节 type=6 且 advance=1（复杂签到）时调用。
+    前置依赖：需先调用 stu_get_course_structure 获取 element_id。
+    副作用：会提交签到答案并执行 makeweikestatus 状态序列。
+
+    说明：
+    - 当 answers_json 中的条目未包含 question_id 时，工具会尝试从签到页面
+      自动获取题目结构并按索引匹配。自动获取失败时（如已签到过），请使用
+      显式 question_id 格式。
+    - 可通过 tch_get_section(element_id) 获取题目 ID 和选项 ID。
+    """
+    client = _get_client(session_id)
+    try:
+        raw_answers = json.loads(answers_json)
+        if not isinstance(raw_answers, list):
+            raise ValueError("answers_json 必须解析为列表")
+
+        # 判断是否需要自动获取题目结构
+        need_discovery = any(
+            isinstance(a, dict) and not a.get("question_id") for a in raw_answers
+        )
+        questions: list[dict[str, Any]] = []
+        if need_discovery:
+            try:
+                questions = _fetch_signin_questions(client, element_id)
+            except RuntimeError as e:
+                return _err(
+                    error_code="SIGNIN_QUESTIONS_NOT_FOUND",
+                    error_message=str(e),
+                    suggested_action="使用显式 question_id 格式提供答案，"
+                                    "或先通过 tch_get_section 获取题目结构",
+                )
+
+        answer_list: list[str] = []
+        answer_info: list[dict[str, str]] = []
+        answer_number: dict[str, int | float] = {}
+
+        for idx, ans in enumerate(raw_answers):
+            if not isinstance(ans, dict):
+                raise ValueError(f"第 {idx + 1} 个答案必须是对象")
+
+            q_type = ans.get("type", "").lower()
+            question_id = ans.get("question_id", "")
+
+            if not question_id:
+                if idx >= len(questions):
+                    raise ValueError(
+                        f"第 {idx + 1} 个答案超出题目数量，"
+                        f"请提供 question_id 或检查答案数量"
+                    )
+                question_id = questions[idx].get("questionInfo", {}).get("questionId", "")
+                if not question_id:
+                    raise ValueError(f"第 {idx + 1} 题未找到 question_id")
+
+            if q_type in ("radio", "single"):
+                answer_id = ans.get("answer_id", "")
+                if not answer_id:
+                    raise ValueError(f"第 {idx + 1} 题（单选）必须提供 answer_id")
+                answer_list.append(str(answer_id))
+            elif q_type in ("checkbox", "multi", "multiple"):
+                answer_ids = ans.get("answer_ids", [])
+                if not isinstance(answer_ids, list) or not answer_ids:
+                    raise ValueError(f"第 {idx + 1} 题（多选）必须提供非空 answer_ids 列表")
+                answer_list.extend(str(aid) for aid in answer_ids)
+            elif q_type in ("textarea", "text", "input"):
+                text = ans.get("text", "")
+                if text == "":
+                    raise ValueError(f"第 {idx + 1} 题（文本）必须提供 text")
+                answer_info.append({"id": str(question_id), "text": str(text)})
+            elif q_type in ("number", "range"):
+                value = ans.get("value")
+                if value is None:
+                    raise ValueError(f"第 {idx + 1} 题（数值）必须提供 value")
+                try:
+                    answer_number[str(question_id)] = int(value)
+                except (TypeError, ValueError):
+                    answer_number[str(question_id)] = float(value)
+            else:
+                raise ValueError(f"第 {idx + 1} 题 unsupported type: {q_type}")
+
+        q_payload = {
+            "answerList": answer_list,
+            "answerInfo": answer_info,
+            "answerNumber": answer_number,
+            "enrollId": 0,
+            "sessionId": str(element_id),
+        }
+
+        resp = client.post(
+            client.mobile_url("/ajax/insertAnswer"),
+            {"q": json.dumps(q_payload, ensure_ascii=False)},
+        )
+        if not resp.get("status") and resp.get("error_code") != 0:
+            raise RuntimeError(f"提交签到答案失败: {resp.get('error', resp.get('error_message', 'unknown'))}")
+
+        await _makeweikestatus_sequence(client, element_id)
+
+        return _ok(
+            data={
+                "element_id": element_id,
+                "action": "complex_checkin_completed",
+                "answer_count": len(raw_answers),
+            },
+            next_action="proceed",
+            suggested_action="调用 stu_get_lesson_status 验证小节是否已完成",
+        )
+    except json.JSONDecodeError as e:
+        return _err(
+            error_code="INVALID_ANSWERS_JSON",
+            error_message=f"answers_json 解析失败: {e}",
+            suggested_action="请检查 answers_json 是否为有效的 JSON 格式",
+        )
+    except ValueError as e:
+        return _err(
+            error_code="INVALID_ANSWERS",
+            error_message=str(e),
+            suggested_action="请检查答案格式是否符合要求",
+        )
+    except Exception as e:
+        logger.exception("复杂签到提交异常")
+        return _err(
+            error_code="CHECKIN_WITH_ANSWERS_FAILED",
+            error_message=str(e),
+            suggested_action="检查 element_id、answers_json 格式及网络连接后重试",
+        )
+
+
 @mcp.tool()
 async def stu_start_exam(
     element_id: Annotated[str, Field(description="考试小节元素 ID")],
