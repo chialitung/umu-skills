@@ -385,7 +385,7 @@ class TestStudentCheckInWithAnswers:
 
         with _patch_student_client(mock_client), \
                 patch("umu_sdk.adapters.mcp.student._get_html", return_value="<html></html>"), \
-                patch("umu_sdk.adapters.mcp.student._extract_page_data_json", return_value=_signin_page_data()):
+                patch("umu_sdk.adapters.mcp.student._extract_signin_page_data_json", return_value=_signin_page_data()):
             result = json.loads(await stu_check_in_with_answers(
                 element_id="262285400",
                 answers_json=json.dumps([

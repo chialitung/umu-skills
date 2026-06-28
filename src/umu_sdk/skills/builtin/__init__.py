@@ -14,6 +14,7 @@ from .admin_courses import (
     set_course_auto_close_admin,
 )
 from .admin_learning_programs_personal import (
+    delete_learning_program_admin,
     list_admin_personal_learning_programs,
     list_cooperated_learning_programs_admin,
     list_enrolled_learning_programs_admin,
@@ -43,6 +44,7 @@ from .program_permissions import (
     set_program_access_permission,
 )
 from .teacher_learning_programs import (
+    delete_learning_program,
     list_cooperated_learning_programs,
     list_enrolled_learning_programs,
     list_owned_learning_programs,
@@ -56,6 +58,8 @@ __all__ = [
     "cancel_course_auto_close",
     "cancel_course_auto_close_admin",
     "cancel_program_access_permissions",
+    "delete_learning_program",
+    "delete_learning_program_admin",
     "get_course_access_list",
     "get_course_access_permission",
     "get_course_auto_close",

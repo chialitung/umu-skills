@@ -7906,6 +7906,65 @@ async def tch_remove_courses_from_learning_program(
 
 
 @mcp.tool()
+async def tch_delete_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(default=None, description="可选的会话 ID"),
+    ] = None,
+) -> str:
+    """删除学习项目.
+
+    触发条件：需要删除讲师拥有的学习项目时调用。
+    前置依赖：需先调用 tch_login 完成登录。
+    副作用：将学习项目移至平台回收站。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 tch_login 登录",
+            next_action="retry",
+        )
+
+    if not program_id or str(program_id) in ("0", ""):
+        return _err(
+            error_code="EMPTY_PROGRAM_ID",
+            error_message="program_id 不能为空",
+            suggested_action="提供有效的学习项目 ID",
+        )
+
+    try:
+        resp = client.post(
+            client.desktop_url("/api/program/deleteprogram"),
+            data={"program_id": program_id},
+        )
+
+        if resp.get("status") is True or resp.get("error_code") == 0:
+            return _ok(
+                data={"program_id": program_id, "deleted": True},
+                next_action="proceed",
+                suggested_action="学习项目已删除",
+            )
+
+        return _err(
+            error_code="DELETE_LEARNING_PROGRAM_FAILED",
+            error_message=resp.get("error", "删除学习项目失败"),
+            suggested_action="请确认对该学习项目具有删除权限",
+        )
+    except Exception as e:
+        logger.exception("删除学习项目失败")
+        return _err(
+            error_code="DELETE_LEARNING_PROGRAM_ERROR",
+            error_message=str(e),
+            suggested_action="请检查网络连接和参数后重试",
+        )
+
+
+@mcp.tool()
 async def tch_list_program_participants(
     program_id: Annotated[str, Field(description="学习项目 ID")],
     status_filter: Annotated[

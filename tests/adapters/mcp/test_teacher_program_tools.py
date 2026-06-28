@@ -12,6 +12,7 @@ from umu_sdk.adapters.mcp.teacher import (
     tch_add_courses_to_learning_program,
     tch_configure_program_certificate,
     tch_create_learning_program,
+    tch_delete_learning_program,
     tch_get_learning_program,
     tch_list_program_learning_tasks,
     tch_list_program_participants,
@@ -146,6 +147,26 @@ class TestTchRemoveCoursesFromLearningProgram:
                 result = json.loads(await tch_remove_courses_from_learning_program("359929", ["1"]))
             assert result["success"] is True
             assert result["data"]["removed"] == ["1"]
+
+
+class TestTchDeleteLearningProgram:
+    async def test_success(self, mock_client):
+        mock_client.post.return_value = {"status": True, "error_code": 0}
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_delete_learning_program("360141"))
+        assert result["success"] is True
+        assert result["data"]["deleted"] is True
+        mock_client.post.assert_called_once()
+        call = mock_client.post.call_args
+        assert "/api/program/deleteprogram" in call.args[0]
+        assert call.kwargs["data"]["program_id"] == "360141"
+
+    async def test_failure(self, mock_client):
+        mock_client.post.return_value = {"status": False, "error": "无权限删除该项目"}
+        with _auth_patch(mock_client):
+            result = json.loads(await tch_delete_learning_program("360141"))
+        assert result["success"] is False
+        assert "无权限" in result["error_message"]
 
 
 class TestTchListProgramParticipants:

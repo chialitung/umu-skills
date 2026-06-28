@@ -532,6 +532,41 @@ async def list_program_learning_tasks(
     }
 
 
+@skill(
+    name="delete_learning_program",
+    description="删除讲师拥有的学习项目",
+    required_servers=["teacher"],
+    return_description="删除结果",
+)
+async def delete_learning_program(
+    ctx: SkillContext,
+    program_id: str,
+) -> dict[str, Any]:
+    """删除学习项目."""
+    result = await ctx.call_tool(
+        server="teacher",
+        tool="tch_delete_learning_program",
+        arguments={"program_id": program_id},
+    )
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "DELETE_LEARNING_PROGRAM_FAILED",
+            "error_message": result.get("error_message") or "删除学习项目失败",
+            "suggested_action": result.get("suggested_action") or "请确认讲师已登录",
+            "next_action": "retry",
+        }
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
 __all__ = [
     "list_teacher_learning_programs",
     "list_owned_learning_programs",
@@ -539,6 +574,7 @@ __all__ = [
     "list_enrolled_learning_programs",
     "create_learning_program",
     "update_learning_program",
+    "delete_learning_program",
     "list_program_participants",
     "list_program_learning_tasks",
 ]

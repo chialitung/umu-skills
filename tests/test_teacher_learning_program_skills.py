@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from umu_sdk.skills.builtin.program_permissions import set_program_access_permission
-from umu_sdk.skills.builtin.teacher_learning_programs import list_owned_learning_programs
+from umu_sdk.skills.builtin.teacher_learning_programs import (
+    delete_learning_program,
+    list_owned_learning_programs,
+)
 
 
 @pytest.fixture
@@ -48,3 +51,19 @@ class TestTeacherLearningProgramSkills:
         call = ctx.call_tool.call_args
         assert call.kwargs["tool"] == "tch_set_program_access_permission"
         assert call.kwargs["arguments"]["access_permission"] == 2
+
+    async def test_delete_learning_program(self, ctx):
+        ctx.call_tool.return_value = {
+            "success": True,
+            "data": {"program_id": "360141", "deleted": True},
+            "error_code": "",
+            "error_message": "",
+            "suggested_action": "",
+            "next_action": "proceed",
+        }
+        result = await delete_learning_program(ctx, "360141")
+        assert result["success"] is True
+        call = ctx.call_tool.call_args
+        assert call.kwargs["server"] == "teacher"
+        assert call.kwargs["tool"] == "tch_delete_learning_program"
+        assert call.kwargs["arguments"]["program_id"] == "360141"

@@ -3554,6 +3554,68 @@ async def adm_delete_groups(
 
 
 @mcp.tool()
+async def adm_delete_learning_program(
+    program_id: Annotated[str, Field(description="学习项目 ID")],
+    session_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
+        ),
+    ] = None,
+) -> str:
+    """删除学习项目.
+
+    触发条件：管理员需要删除指定学习项目时调用。
+    前置依赖：需先调用 adm_login 完成管理员登录。
+    副作用：将学习项目移至平台回收站。
+    """
+    client = _get_client(session_id)
+
+    auth_err = _require_auth(client)
+    if auth_err:
+        return _err(
+            error_code="NOT_AUTHENTICATED",
+            error_message=auth_err,
+            suggested_action="调用 adm_login 登录",
+            next_action="retry",
+        )
+
+    if not program_id or str(program_id) in ("0", ""):
+        return _err(
+            error_code="EMPTY_PROGRAM_ID",
+            error_message="program_id 不能为空",
+            suggested_action="提供有效的学习项目 ID",
+        )
+
+    try:
+        resp = client.post(
+            client.desktop_url("/api/program/deleteprogram"),
+            data={"program_id": program_id},
+        )
+
+        if resp.get("status") is True or resp.get("error_code") == 0:
+            return _ok(
+                data={"program_id": program_id, "deleted": True},
+                next_action="proceed",
+                suggested_action="学习项目已删除",
+            )
+
+        return _err(
+            error_code="DELETE_LEARNING_PROGRAM_FAILED",
+            error_message=resp.get("error", "删除学习项目失败"),
+            suggested_action="请确认管理员对该学习项目具有删除权限",
+        )
+    except Exception as e:
+        logger.exception("删除学习项目失败")
+        return _err(
+            error_code="DELETE_LEARNING_PROGRAM_ERROR",
+            error_message=str(e),
+            suggested_action="请检查网络连接和参数后重试",
+        )
+
+
+@mcp.tool()
 async def adm_get_group(
     group_id: Annotated[str, Field(description="分组 ID")],
     session_id: Annotated[

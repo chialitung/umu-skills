@@ -381,7 +381,7 @@ python -m umu_sdk.adapters.mcp.admin
 
 ## 可用工具
 
-### 管理员工具（53）
+### 管理员工具（54）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -393,7 +393,7 @@ python -m umu_sdk.adapters.mcp.admin
 | 组织架构 | `adm_list_departments`, `adm_get_department_tree`, `adm_get_department`, `adm_get_child_departments`, `adm_list_department_members`, `adm_search_department_members`, `adm_create_department`, `adm_update_department`（可设置部门负责人）, `adm_sort_departments`, `adm_add_department_members`, `adm_move_department_members`, `adm_remove_department_members`, `adm_delete_departments`, `adm_list_groups` |
 | 分组 | `adm_create_group`, `adm_update_group`, `adm_delete_groups`, `adm_get_group`, `adm_list_group_members`, `adm_list_group_managers`, `adm_add_group_members`, `adm_remove_group_members`, `adm_add_group_managers`, `adm_remove_group_managers` |
 | 班级 | `adm_list_classes` |
-| 课程/学习项目 | `adm_list_courses`, `adm_list_learning_programs`, `adm_list_personal_learning_programs` |
+| 课程/学习项目 | `adm_list_courses`, `adm_list_learning_programs`, `adm_list_personal_learning_programs`, `adm_delete_learning_program` |
 | 课程审核 | `adm_list_course_audit_records`, `adm_audit_course`, `adm_list_course_categories`, `adm_list_course_blacklist`, `adm_save_course_blacklist` |
 | 学习记录 | `adm_list_learning_records`, `adm_export_learning_records` |
 | 导出 | `adm_export_accounts` |
@@ -401,7 +401,7 @@ python -m umu_sdk.adapters.mcp.admin
 | 讲师 | `adm_list_instructors` |
 | 授课记录 | `adm_list_teaching_records` |
 
-### 教师工具（97）
+### 教师工具（98）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -409,7 +409,7 @@ python -m umu_sdk.adapters.mcp.admin
 | 会话 | `tch_create_session`, `tch_list_sessions`, `tch_destroy_session` |
 | 课程 | `tch_create_course`, `tch_get_course`, `tch_get_course_detail`, `tch_update_course`, `tch_update_course_basic`, `tch_update_course_type`, `tch_update_course_category`, `tch_update_course_schedule`, `tch_update_course_images`, `tch_update_course_richtext`, `tch_submit_course_for_audit`, `tch_get_course_enrollment`, `tch_set_course_enrollment`, `tch_get_course_auto_close`, `tch_set_course_auto_close`, `tch_cancel_course_auto_close` |
 | 课程列表 | `tch_list_created_courses`, `tch_list_cooperated_courses`, `tch_list_participated_courses`, `tch_list_learning_programs` |
-| 学习项目 | `tch_create_learning_program`, `tch_get_learning_program`, `tch_update_learning_program`, `tch_update_learning_program_modules`, `tch_remove_courses_from_learning_program`, `tch_add_courses_to_learning_program`, `tch_configure_program_certificate`, `tch_set_program_points_status`, `tch_search_courses_for_program`, `tch_list_program_participants`, `tch_list_program_learning_tasks` |
+| 学习项目 | `tch_create_learning_program`, `tch_get_learning_program`, `tch_update_learning_program`, `tch_update_learning_program_modules`, `tch_remove_courses_from_learning_program`, `tch_add_courses_to_learning_program`, `tch_delete_learning_program`, `tch_configure_program_certificate`, `tch_set_program_points_status`, `tch_search_courses_for_program`, `tch_list_program_participants`, `tch_list_program_learning_tasks` |
 | 课程学员 | `tch_list_course_learning_tasks`, `tch_list_course_participants`, `tch_list_course_learning_durations` |
 | 课程协同 | `tch_list_course_collaborators`, `tch_search_collaborator_accounts`, `tch_invite_course_collaborator`, `tch_update_collaborator_role`, `tch_remove_course_collaborator`, `tch_transfer_course_owner` |
 | 课程权限 | `tch_set_course_access_permission`, `tch_get_course_access_permission`, `tch_get_course_access_list`, `tch_search_access_accounts`, `tch_add_course_access_accounts`, `tch_remove_course_access_accounts`, `tch_cancel_all_assigned_permissions`, `tch_set_program_access_permission`, `tch_get_program_access_permission`, `tch_get_program_access_list`, `tch_search_program_access_accounts`, `tch_add_program_access_accounts`, `tch_remove_program_access_accounts`, `tch_cancel_all_program_permissions`, `tch_export_course_permissions`, `tch_export_program_permissions` |
@@ -468,7 +468,7 @@ python -m umu_sdk.skills.server
 - 返回与 Skill 统一的标准信封格式
 - AI 应优先使用 `skill_run` 调用已封装 Skill，仅在工具未覆盖时使用透传
 
-内置 Skill 覆盖高频场景（共 118），并支持通过 `/umu`、`/umua`、`/umut`、`/umus` 斜杠命令直接触发：
+内置 Skill 覆盖高频场景（共 120），并支持通过 `/umu`、`/umua`、`/umut`、`/umus` 斜杠命令直接触发：
 
 | Skill | 涉及子 MCP | 说明 |
 |-------|-----------|------|
@@ -511,6 +511,7 @@ python -m umu_sdk.skills.server
 | `list_enrolled_learning_programs` | teacher | 列出讲师报名的学习项目 |
 | `create_learning_program` | teacher | 创建学习项目并添加课程，可选配置证书与积分 |
 | `update_learning_program` | teacher | 修改学习项目基本信息、模块与课程关系，支持删除课程 |
+| `delete_learning_program` | teacher | 删除学习项目 |
 | `list_program_participants` | teacher | 查询学习项目的学员名单（含 modules/courses 完成明细） |
 | `list_program_learning_tasks` | teacher | 查询学习项目的学习任务学员名单（含 modules/courses 完成明细） |
 | `set_program_access_permission` | teacher | 设置学习项目访问权限 |
@@ -579,6 +580,7 @@ python -m umu_sdk.skills.server
 | `list_owned_learning_programs_admin` | admin | 列出管理员负责的学习项目 |
 | `list_cooperated_learning_programs_admin` | admin | 列出管理员协同的学习项目 |
 | `list_enrolled_learning_programs_admin` | admin | 列出管理员报名的学习项目 |
+| `delete_learning_program_admin` | admin | 删除学习项目 |
 | `disable_account` | admin | 禁用账号 |
 | `enable_account` | admin | 启用账号 |
 | `update_account` | admin | 编辑账号信息（姓名、邮箱、角色、分组、工号等） |
