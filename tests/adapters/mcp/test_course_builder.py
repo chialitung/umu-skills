@@ -86,6 +86,75 @@ def _course_info_response(title: str = "测试课程"):
     }
 
 
+def _enroll_info_response():
+    return {
+        "error_code": 0,
+        "error_message": "",
+        "data": {
+            "enroll_id": "580263",
+            "source_mark": "1",
+            "title": "测试报名标题",
+            "auto_check": "1",
+            "status": "1",
+            "desc": "",
+            "multimedia_id": "77201794",
+            "multimedia_type": "1",
+            "create_time": "2026-06-28 14:15:06",
+            "setup": {
+                "share": {"shareStatus": 1, "shareStart": "", "shareEnd": "", "wxShareTitle": "", "wxShareDesc": ""},
+                "payment": {"switch_status": "0", "amount": "0"},
+                "switch_status": "0",
+                "amount": "0",
+                "begin_time": "0",
+                "end_time": "0",
+                "user_quota": "-1",
+                "allow_upd_enroll_switch": "1",
+                "max_user_quota": "-1",
+                "allow_reject_participate_user": "1",
+                "allow_clear": "1",
+                "enable_expiry": "0",
+                "expiry_days": "0",
+                "allow_cancel": "0",
+            },
+            "share_url": "https://m.umu.cn/sse_xxx",
+            "share_qrc": "https://www.umu.cn/qrc/?type=enroll",
+        },
+    }
+
+
+class TestGetCourseEnrollment:
+    def test_get_course_enrollment_parses_response(self, builder, mock_client):
+        mock_client.get.return_value = _enroll_info_response()
+
+        result = builder.get_course_enrollment("7343171")
+
+        assert result["enroll_id"] == "580263"
+        assert result["title"] == "测试报名标题"
+        assert result["multimedia_id"] == "77201794"
+        assert result["multimedia_type"] == "1"
+        assert result["create_time"] == "2026-06-28 14:15:06"
+        assert result["setup"]["user_quota"] == "-1"
+        assert result["setup"]["allow_cancel"] == "0"
+        assert result["setupInfo"]["payment"]["switch_status"] == "0"
+        assert "share" not in result["setup"]
+        assert "payment" not in result["setup"]
+
+        calls = mock_client.get.call_args_list
+        assert len(calls) == 1
+        assert calls[0].args[0] == "https://www.umu.cn/uapi/v1/course/enroll-info"
+        assert calls[0].kwargs["params"] == {"group_id": "7343171"}
+
+    def test_get_course_enrollment_failure(self, builder, mock_client):
+        mock_client.get.return_value = {
+            "error_code": 100001,
+            "error_message": "not found",
+            "data": {},
+        }
+
+        with pytest.raises(RuntimeError, match="获取报名配置失败"):
+            builder.get_course_enrollment("7343171")
+
+
 class TestSetCourseEnrollment:
     def test_set_course_enrollment_request_payload(self, builder, mock_client):
         mock_client.get.return_value = _course_info_response("E2E_测试课程_SCORM")

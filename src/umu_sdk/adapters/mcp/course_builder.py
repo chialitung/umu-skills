@@ -1093,6 +1093,69 @@ class CourseBuilder:
             "share_qrc": group_info.get("shareQrc", ""),
         }
 
+    def get_course_enrollment(self, group_id: str) -> dict[str, Any]:
+        """获取课程当前报名配置.
+
+        调用 /uapi/v1/course/enroll-info。该接口返回的 setup 字段是合并结构
+        （含 share/payment 子对象），本方法将其转换为与 saveenroll payload
+        对齐的格式：setup 只保留限额/时间/开关等字段，share/payment 拆到
+        setupInfo 中。
+        """
+        resp = self.client.get(
+            self.client.desktop_url("/uapi/v1/course/enroll-info"),
+            params={"group_id": group_id},
+        )
+        if resp.get("error_code") != 0 and resp.get("status") not in (True, "true"):
+            err_msg = resp.get("error_message") or resp.get("error", "unknown")
+            raise RuntimeError(f"获取报名配置失败: {err_msg}")
+
+        data = resp.get("data", {})
+        setup = data.get("setup", {})
+
+        # 从 setup 中拆分 share/payment 到 setupInfo，其余字段留在 setup
+        setup_info = {
+            "share": setup.get(
+                "share",
+                {
+                    "shareStatus": 1,
+                    "shareStart": "",
+                    "shareEnd": "",
+                    "wxShareTitle": "",
+                    "wxShareDesc": "",
+                },
+            ),
+            "payment": setup.get("payment", {"switch_status": "0", "amount": "0"}),
+        }
+        setup_top = {k: v for k, v in setup.items() if k not in ("share", "payment")}
+
+        return {
+            "enroll_id": str(data.get("enroll_id", "")),
+            "group_id": str(group_id),
+            "obj_id": str(group_id),
+            "obj_type": "1",
+            "teacher_id": str(data.get("teacher_id", "")),
+            "title": data.get("title", ""),
+            "status": str(data.get("status", "1")),
+            "source_mark": str(data.get("source_mark", "1")),
+            "multimedia_id": str(data.get("multimedia_id", "0")),
+            "multimedia_type": data.get("multimedia_type", 0),
+            "create_time": data.get("create_time", ""),
+            "update_time": data.get("create_time", ""),
+            "shareUrl": data.get("share_url", ""),
+            "shareQrc": data.get("share_qrc", ""),
+            "totalUserCount": data.get("participate_num", 0),
+            "count": [0, 0, 0, 0, 0, 0],
+            "inUse": False,
+            "autoCheck": str(data.get("auto_check", "1")),
+            "desc": data.get("desc", ""),
+            "payment": {"switch_status": 0, "amount": 0},
+            "totalAmount": "0",
+            "sectionArr": data.get("sectionArr", []),
+            "contactInfo": data.get("contactInfo", []),
+            "setupInfo": setup_info,
+            "setup": setup_top,
+        }
+
     def set_course_enrollment(
         self,
         group_id: str,
