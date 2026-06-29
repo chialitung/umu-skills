@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="get_learning_records",
     description="查询企业学员课程学习明细",
-    required_servers=["admin"],
+    required_capabilities=['data_query'],
     return_description="学习记录列表及分页信息",
 )
 async def get_learning_records(
@@ -54,11 +54,7 @@ async def get_learning_records(
     if class_names:
         arguments["class_names"] = class_names
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_learning_records",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="list_learning_records", arguments=arguments)
 
     if not result["success"]:
         return {

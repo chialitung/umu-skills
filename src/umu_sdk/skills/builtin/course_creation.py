@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="create_course_with_scorm",
     description="创建空课程并添加 SCORM 小节（使用已有 SCORM 资源）",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="包含 group_id、section_id 等创建结果",
 )
 async def create_course_with_scorm(
@@ -39,9 +39,9 @@ async def create_course_with_scorm(
     if category_names:
         create_args["category_names"] = category_names
 
-    course_result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_course",
+    course_result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="create_course",
         arguments=create_args,
     )
     if not course_result["success"]:
@@ -61,15 +61,15 @@ async def create_course_with_scorm(
             "data": course_result.get("data"),
             "error_code": "MISSING_GROUP_ID",
             "error_message": "创建课程成功，但响应中未找到 group_id",
-            "suggested_action": "请检查 tch_create_course 的返回结构",
+            "suggested_action": "请检查 create_course operation 的返回结构",
             "next_action": "needs_user_input",
         }
 
     # 2. 添加 SCORM 小节
     ctx.logger.info("[create_course_with_scorm] 添加 SCORM 小节到课程 %s", group_id)
-    section_result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_scorm_section",
+    section_result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="create_scorm_section",
         arguments={
             "group_id": group_id,
             "section_title": section_title,
@@ -88,9 +88,9 @@ async def create_course_with_scorm(
 
     # 3. 获取课程访问码供学员端解析使用
     ctx.logger.info("[create_course_with_scorm] 获取课程访问信息 %s", group_id)
-    course_info = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_course",
+    course_info = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="get_course",
         arguments={"group_id": group_id},
     )
     access_code = ""
@@ -113,7 +113,7 @@ async def create_course_with_scorm(
 
 
 def _extract_group_id(data: Any) -> str | None:
-    """从 tch_create_course 的返回数据中提取 group_id."""
+    """从 create_course operation 的返回数据中提取 group_id."""
     if not isinstance(data, dict):
         return None
     group_id = data.get("group_id") or data.get("groupId") or data.get("id")

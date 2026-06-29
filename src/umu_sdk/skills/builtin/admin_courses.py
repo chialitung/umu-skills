@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="list_courses",
     description="查询企业课程清单，支持按名称/标签/访问码/创建人/权限/审核状态等筛选",
-    required_servers=["admin"],
+    required_capabilities=['course_management'],
     return_description="课程列表及分页信息",
 )
 async def list_courses(
@@ -62,11 +62,7 @@ async def list_courses(
     if end_day:
         arguments["end_day"] = end_day
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_courses",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="list_courses", arguments=arguments)
 
     if not result["success"]:
         return {
@@ -94,7 +90,7 @@ async def list_courses(
         "管理员查询课程的定时自动关闭时间（自动关闭、定时关闭、关闭时间、到期时间）。"
         "此操作只读取自动关闭配置，不会修改访问权限或报名开关。"
     ),
-    required_servers=["admin", "teacher"],
+    required_capabilities=['course_management'],
     return_description="查询结果",
 )
 async def get_course_auto_close_admin(
@@ -108,11 +104,7 @@ async def get_course_auto_close_admin(
     常见表达：查看课程什么时候自动关闭、查询课程的关闭时间/到期时间。
     注意：这与访问权限、报名开关、课程小节无关。
     """
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_course_auto_close",
-        arguments={"group_id": group_id},
-    )
+    result = await ctx.call_role_tool(role="teacher", operation="get_course_auto_close", arguments={"group_id": group_id})
 
     if not result["success"]:
         return {
@@ -141,7 +133,7 @@ async def get_course_auto_close_admin(
         "例如：把课程 X 的自动关闭时间设为 2028-05-21 12:30。"
         "此操作只修改自动关闭时间，不会修改访问权限、报名开关或课程小节。"
     ),
-    required_servers=["admin", "teacher"],
+    required_capabilities=['course_management'],
     return_description="设置结果",
 )
 async def set_course_auto_close_admin(
@@ -159,11 +151,7 @@ async def set_course_auto_close_admin(
     常见表达：设置课程自动关闭时间、定时关闭课程、把课程关闭时间设为某时、课程某时到期。
     注意：此操作只修改自动关闭时间，不修改谁能看（访问权限）、是否需要报名（报名开关）或课程内容。
     """
-    previous = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_course_auto_close",
-        arguments={"group_id": group_id},
-    )
+    previous = await ctx.call_role_tool(role="teacher", operation="get_course_auto_close", arguments={"group_id": group_id})
     if not previous["success"]:
         return {
             "success": False,
@@ -178,11 +166,7 @@ async def set_course_auto_close_admin(
     if custom_tips is not None:
         arguments["custom_tips"] = custom_tips
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_set_course_auto_close",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="teacher", operation="set_course_auto_close", arguments=arguments)
 
     if not result["success"]:
         return {
@@ -213,7 +197,7 @@ async def set_course_auto_close_admin(
         "管理员取消课程的定时自动关闭（关闭自动关闭、取消到期时间、移除自动关闭设置）。"
         "此操作只清除自动关闭时间，不会修改访问权限、报名开关或课程小节。"
     ),
-    required_servers=["admin", "teacher"],
+    required_capabilities=['course_management'],
     return_description="取消结果",
 )
 async def cancel_course_auto_close_admin(
@@ -227,11 +211,7 @@ async def cancel_course_auto_close_admin(
     常见表达：取消课程自动关闭、关闭课程的定时关闭、移除课程的到期时间。
     注意：此操作只清除自动关闭时间，不修改访问权限、报名开关或课程内容。
     """
-    previous = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_course_auto_close",
-        arguments={"group_id": group_id},
-    )
+    previous = await ctx.call_role_tool(role="teacher", operation="get_course_auto_close", arguments={"group_id": group_id})
     if not previous["success"]:
         return {
             "success": False,
@@ -242,11 +222,7 @@ async def cancel_course_auto_close_admin(
             "next_action": "retry",
         }
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_cancel_course_auto_close",
-        arguments={"group_id": group_id, "clear_tips": True},
-    )
+    result = await ctx.call_role_tool(role="teacher", operation="cancel_course_auto_close", arguments={"group_id": group_id, "clear_tips": True})
 
     if not result["success"]:
         return {

@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="get_teaching_records",
     description="查询讲师授课记录，支持按审核状态、讲师关键词、课程名称、访问码等多条件组合筛选",
-    required_servers=["admin"],
+    required_capabilities=['teaching_records'],
     return_description="授课记录列表及分页信息",
 )
 async def get_teaching_records(
@@ -45,11 +45,7 @@ async def get_teaching_records(
         if value:
             arguments[key] = value
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_teaching_records",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="list_teaching_records", arguments=arguments)
 
     if not result["success"]:
         return {

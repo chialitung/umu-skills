@@ -104,8 +104,8 @@ class TestAdminToTeacherToolRedirect:
 
         result = await skills_server.skill_call_atomic_tool(
             server="admin",
-            tool="adm_set_course_access_permission",
-            arguments={"group_id": "123", "access_permission": 2},
+            tool="adm_add_course_access_accounts",
+            arguments={"group_id": "123", "accounts": [{"account": "a@b.com", "account_type": "user", "id": "1"}]},
         )
         parsed = json.loads(result)
 
@@ -117,7 +117,7 @@ class TestAdminToTeacherToolRedirect:
     async def test_redirect_preserves_error_response(self) -> None:
         mock_mcp = MockMCPClientManager(
             responses={
-                ("teacher", "tch_set_course_access_permission"): {
+                ("teacher", "tch_add_course_access_accounts"): {
                     "success": False,
                     "error_code": "AUTH_FAILED",
                     "error_message": "未登录",
@@ -128,8 +128,8 @@ class TestAdminToTeacherToolRedirect:
 
         result = await skills_server.skill_call_atomic_tool(
             server="admin",
-            tool="adm_set_course_access_permission",
-            arguments={"group_id": "123", "access_permission": 2},
+            tool="adm_add_course_access_accounts",
+            arguments={"group_id": "123", "accounts": [{"account": "a@b.com", "account_type": "user", "id": "1"}]},
         )
         parsed = json.loads(result)
 
@@ -137,5 +137,5 @@ class TestAdminToTeacherToolRedirect:
         assert parsed["error_code"] == "AUTH_FAILED"
         assert parsed.get("deprecated") is True
         assert mock_mcp.calls == [
-            ("teacher", "tch_set_course_access_permission", {"group_id": "123", "access_permission": 2}),
+            ("teacher", "tch_add_course_access_accounts", {"group_id": "123", "accounts": [{"account": "a@b.com", "account_type": "user", "id": "1"}]}),
         ]

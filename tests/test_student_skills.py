@@ -128,7 +128,7 @@ class TestStudentLearning:
         assert mock_mcp.calls == [
             (
                 "student",
-                "stu_get_my_courses",
+                "stu_list_participated_courses",
                 {"page": 1, "page_size": 10, "fetch_all": False},
             ),
         ]

@@ -18,7 +18,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="set_program_access_permission",
     description="设置学习项目的访问权限：企业内公开、指定账户可见或关闭",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management'],
     return_description="设置结果",
 )
 async def set_program_access_permission(
@@ -27,11 +27,7 @@ async def set_program_access_permission(
     access_permission: int,
 ) -> dict[str, Any]:
     """设置学习项目访问权限."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_set_program_access_permission",
-        arguments={"program_id": program_id, "access_permission": access_permission},
-    )
+    result = await ctx.call_capability_tool(capability="permission_management", operation="set_program_access_permission", arguments={"program_id": program_id, "access_permission": access_permission})
     if not result["success"]:
         return {
             "success": False,
@@ -54,7 +50,7 @@ async def set_program_access_permission(
 @skill(
     name="get_program_access_permission",
     description="获取学习项目当前的访问权限设置",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management'],
     return_description="当前权限设置",
 )
 async def get_program_access_permission(
@@ -62,11 +58,7 @@ async def get_program_access_permission(
     program_id: str,
 ) -> dict[str, Any]:
     """获取学习项目当前访问权限."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_program_access_permission",
-        arguments={"program_id": program_id},
-    )
+    result = await ctx.call_capability_tool(capability="permission_management", operation="get_program_access_permission", arguments={"program_id": program_id})
     if not result["success"]:
         return {
             "success": False,
@@ -89,7 +81,7 @@ async def get_program_access_permission(
 @skill(
     name="get_program_access_list",
     description="获取学习项目当前已授权的访问列表",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management'],
     return_description="已授权列表",
 )
 async def get_program_access_list(
@@ -99,11 +91,7 @@ async def get_program_access_list(
     size: int = 20,
 ) -> dict[str, Any]:
     """获取学习项目已授权列表."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_program_access_list",
-        arguments={"program_id": program_id, "page": page, "size": size},
-    )
+    result = await ctx.call_capability_tool(capability="permission_management", operation="get_program_access_list", arguments={"program_id": program_id, "page": page, "size": size})
     if not result["success"]:
         return {
             "success": False,
@@ -126,7 +114,7 @@ async def get_program_access_list(
 @skill(
     name="search_program_access_accounts",
     description="搜索可授权访问学习项目的账户、班级、部门或分组，支持模糊匹配",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management'],
     return_description="候选账户/班级/部门/分组列表",
 )
 async def search_program_access_accounts(
@@ -135,11 +123,7 @@ async def search_program_access_accounts(
     keyword: str,
 ) -> dict[str, Any]:
     """搜索可授权访问学习项目的对象."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_search_program_access_accounts",
-        arguments={"program_id": program_id, "keyword": keyword},
-    )
+    result = await ctx.call_capability_tool(capability="permission_management", operation="search_program_access_accounts", arguments={"program_id": program_id, "keyword": keyword})
     if not result["success"]:
         return {
             "success": False,
@@ -162,7 +146,7 @@ async def search_program_access_accounts(
 @skill(
     name="add_program_access_accounts",
     description="为学习项目设置指定账户、班级、部门或分组的访问权限",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management'],
     return_description="添加结果",
 )
 async def add_program_access_accounts(
@@ -171,11 +155,7 @@ async def add_program_access_accounts(
     accounts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """为学习项目添加指定对象."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_add_program_access_accounts",
-        arguments={"program_id": program_id, "accounts": accounts},
-    )
+    result = await ctx.call_capability_tool(capability="permission_management", operation="add_program_access_accounts", arguments={"program_id": program_id, "accounts": accounts})
     if not result["success"]:
         return {
             "success": False,
@@ -198,7 +178,7 @@ async def add_program_access_accounts(
 @skill(
     name="remove_program_access_accounts",
     description="移除学习项目的指定账户、班级、部门或分组的访问权限",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management'],
     return_description="移除结果",
 )
 async def remove_program_access_accounts(
@@ -207,11 +187,7 @@ async def remove_program_access_accounts(
     accounts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """移除学习项目指定对象."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_remove_program_access_accounts",
-        arguments={"program_id": program_id, "accounts": accounts},
-    )
+    result = await ctx.call_capability_tool(capability="permission_management", operation="remove_program_access_accounts", arguments={"program_id": program_id, "accounts": accounts})
     if not result["success"]:
         return {
             "success": False,
@@ -234,7 +210,7 @@ async def remove_program_access_accounts(
 @skill(
     name="cancel_program_access_permissions",
     description="取消学习项目的所有指定访问权限，清空指定账户/班级列表",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management'],
     return_description="取消结果",
 )
 async def cancel_program_access_permissions(
@@ -242,11 +218,7 @@ async def cancel_program_access_permissions(
     program_id: str,
 ) -> dict[str, Any]:
     """取消学习项目所有指定权限."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_cancel_all_program_permissions",
-        arguments={"program_id": program_id},
-    )
+    result = await ctx.call_capability_tool(capability="permission_management", operation="cancel_all_program_permissions", arguments={"program_id": program_id})
     if not result["success"]:
         return {
             "success": False,

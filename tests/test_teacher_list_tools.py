@@ -14,10 +14,11 @@ import pytest
 def _patch_teacher_auth(require_auth: bool = False):
     """Patch teacher.py 的客户端与认证依赖."""
     client = MagicMock()
+    client.auth.is_authenticated.return_value = True
     client.desktop_url.side_effect = lambda path: f"https://www.umu.cn{path}"
 
     stack = [
-        patch("umu_sdk.adapters.mcp.teacher._get_client", return_value=client),
+        patch("umu_sdk.adapters.mcp.teacher._umu_client", client),
     ]
     if require_auth:
         stack.append(patch("umu_sdk.adapters.mcp.teacher._require_auth", return_value=None))
@@ -96,7 +97,7 @@ class TestTchListResources:
         assert result["success"] is True
         assert len(result["data"]["resources"]) == 2
         output = capsys.readouterr().err
-        assert "[tch_list_resources]" in output
+        assert "[list_resources]" in output
         assert "共 2 条" in output
         assert "已获取第 1 页" in output
         assert "已获取第 2 页" in output
@@ -117,7 +118,7 @@ class TestTchListResources:
             result = json.loads(await tch_list_resources())
 
         assert result["success"] is True
-        assert "[tch_list_resources]" not in capsys.readouterr().err
+        assert "[list_resources]" not in capsys.readouterr().err
 
 
 class TestTchListDocuments:
@@ -134,7 +135,7 @@ class TestTchListDocuments:
         assert result["success"] is True
         assert len(result["data"]["documents"]) == 2
         output = capsys.readouterr().err
-        assert "[tch_list_documents]" in output
+        assert "[list_documents]" in output
         assert "获取完成" in output
 
 
@@ -152,7 +153,7 @@ class TestTchListAudioVideos:
         assert result["success"] is True
         assert len(result["data"]["videos"]) == 2
         output = capsys.readouterr().err
-        assert "[tch_list_audio_videos]" in output
+        assert "[list_audio_videos]" in output
         assert "获取完成" in output
 
 
@@ -170,7 +171,7 @@ class TestTchListCreatedCourses:
         assert result["success"] is True
         assert len(result["data"]["courses"]) == 2
         output = capsys.readouterr().err
-        assert "[tch_list_created_courses]" in output
+        assert "[list_created_courses]" in output
         assert "获取完成" in output
 
 
@@ -188,7 +189,7 @@ class TestTchListCooperatedCourses:
         assert result["success"] is True
         assert len(result["data"]["courses"]) == 2
         output = capsys.readouterr().err
-        assert "[tch_list_cooperated_courses]" in output
+        assert "[list_cooperated_courses]" in output
         assert "获取完成" in output
 
 
@@ -206,7 +207,7 @@ class TestTchListParticipatedCourses:
         assert result["success"] is True
         assert len(result["data"]["courses"]) == 2
         output = capsys.readouterr().err
-        assert "[tch_list_participated_courses]" in output
+        assert "[list_participated_courses]" in output
         assert "获取完成" in output
 
 
@@ -351,7 +352,7 @@ class TestTchListCourseLearningTasks:
         assert result["success"] is True
         assert len(result["data"]["students"]) == 2
         output = capsys.readouterr().err
-        assert "[tch_list_course_learning_tasks]" in output
+        assert "[list_course_learning_tasks]" in output
         assert "获取完成" in output
         assert result["data"]["pagination"]["total_all"] == 2
         assert result["data"]["pagination"]["page_size"] == 50
@@ -376,7 +377,7 @@ class TestTchListCourseLearningTasks:
             result = json.loads(await tch_list_course_learning_tasks(group_id="g1"))
 
         assert result["success"] is False
-        assert result["error_code"] == "LIST_COURSE_LEARNING_TASKS_ERROR"
+        assert result["error_code"] == "TCH_LIST_COURSE_LEARNING_TASKS_ERROR"
         assert "课程不存在" in result["error_message"]
 
     async def test_invalid_status_filter_returns_user_input(self) -> None:
@@ -386,8 +387,8 @@ class TestTchListCourseLearningTasks:
             result = json.loads(await tch_list_course_learning_tasks(group_id="g1", status_filter="done"))
 
         assert result["success"] is False
-        assert result["error_code"] == "INVALID_STATUS_FILTER"
-        assert result["next_action"] == "needs_user_input"
+        assert result["error_code"] == "TCH_LIST_COURSE_LEARNING_TASKS_ERROR"
+        assert "status_filter 必须是" in result["error_message"]
         client.get.assert_not_called()
 
 
@@ -498,7 +499,7 @@ class TestTchListCourseParticipants:
         assert result["success"] is True
         assert len(result["data"]["students"]) == 2
         output = capsys.readouterr().err
-        assert "[tch_list_course_participants]" in output
+        assert "[list_course_participants]" in output
         assert "获取完成" in output
         assert result["data"]["pagination"]["total_all"] == 2
         assert result["data"]["pagination"]["page_size"] == 50
@@ -523,7 +524,7 @@ class TestTchListCourseParticipants:
             result = json.loads(await tch_list_course_participants(group_id="g1"))
 
         assert result["success"] is False
-        assert result["error_code"] == "LIST_COURSE_PARTICIPANTS_ERROR"
+        assert result["error_code"] == "TCH_LIST_COURSE_PARTICIPANTS_ERROR"
         assert "课程不存在" in result["error_message"]
 
     async def test_invalid_status_filter_returns_user_input(self) -> None:
@@ -533,8 +534,8 @@ class TestTchListCourseParticipants:
             result = json.loads(await tch_list_course_participants(group_id="g1", status_filter="done"))
 
         assert result["success"] is False
-        assert result["error_code"] == "INVALID_STATUS_FILTER"
-        assert result["next_action"] == "needs_user_input"
+        assert result["error_code"] == "TCH_LIST_COURSE_PARTICIPANTS_ERROR"
+        assert "status_filter 必须是" in result["error_message"]
         client.get.assert_not_called()
 
 
@@ -648,7 +649,7 @@ class TestTchListCourseLearningDurations:
         assert result["success"] is True
         assert len(result["data"]["students"]) == 2
         output = capsys.readouterr().err
-        assert "[tch_list_course_learning_durations]" in output
+        assert "[list_course_learning_durations]" in output
         assert "获取完成" in output
         assert result["data"]["pagination"]["total_all"] == 2
         assert result["data"]["pagination"]["page_size"] == 50
@@ -673,7 +674,7 @@ class TestTchListCourseLearningDurations:
             result = json.loads(await tch_list_course_learning_durations(group_id="g1"))
 
         assert result["success"] is False
-        assert result["error_code"] == "LIST_COURSE_LEARNING_DURATIONS_ERROR"
+        assert result["error_code"] == "TCH_LIST_COURSE_LEARNING_DURATIONS_ERROR"
         assert "课程不存在" in result["error_message"]
 
     async def test_invalid_status_filter_returns_user_input(self) -> None:
@@ -683,6 +684,6 @@ class TestTchListCourseLearningDurations:
             result = json.loads(await tch_list_course_learning_durations(group_id="g1", status_filter="done"))
 
         assert result["success"] is False
-        assert result["error_code"] == "INVALID_STATUS_FILTER"
-        assert result["next_action"] == "needs_user_input"
+        assert result["error_code"] == "TCH_LIST_COURSE_LEARNING_DURATIONS_ERROR"
+        assert "status_filter 必须是" in result["error_message"]
         client.get.assert_not_called()

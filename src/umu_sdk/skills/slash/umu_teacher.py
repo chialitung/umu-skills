@@ -18,7 +18,7 @@ from ._runner import run_umu_command
 @skill(
     name="umu-teacher",
     description="使用 teacher 账号执行 UMU 操作（/umut /umuteacher）",
-    required_servers=[],
+    required_capabilities=[],
     return_description="统一返回信封",
 )
 async def umu_teacher(

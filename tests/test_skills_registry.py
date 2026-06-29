@@ -15,7 +15,7 @@ class TestSkillRegistry:
         @skill(
             name="test_skill",
             description="A test skill",
-            required_servers=["teacher"],
+            required_capabilities=["course_management"],
         )
         async def test_skill(ctx: SkillContext, value: int) -> dict:
             return {"result": value * 2}
@@ -25,7 +25,7 @@ class TestSkillRegistry:
         assert len(infos) == 1
         assert infos[0].name == "test_skill"
         assert infos[0].description == "A test skill"
-        assert infos[0].required_servers == ["teacher"]
+        assert infos[0].required_capabilities == ["course_management"]
 
     def test_get_skill(self) -> None:
         registry = SkillRegistry()
@@ -44,24 +44,24 @@ class TestSkillRegistry:
         with pytest.raises(KeyError, match="Skill \\[missing\\] 不存在"):
             registry.get_skill("missing")
 
-    def test_validate_servers(self) -> None:
+    def test_validate_capabilities(self) -> None:
         registry = SkillRegistry()
 
-        @skill(name="needs_teacher", description="", required_servers=["teacher"])
+        @skill(name="needs_teacher", description="", required_capabilities=["program_management"])
         async def needs_teacher(ctx: SkillContext) -> dict:
             return {}
 
-        @skill(name="needs_student", description="", required_servers=["student"])
+        @skill(name="needs_student", description="", required_capabilities=["learning"])
         async def needs_student(ctx: SkillContext) -> dict:
             return {}
 
         registry.register_function(needs_teacher)
         registry.register_function(needs_student)
 
-        missing = registry.validate_servers(["teacher"])
-        assert missing == ["student"]
+        missing = registry.validate_capabilities(["student"])
+        assert missing == ["program_management"]
 
-        missing = registry.validate_servers(["teacher", "student"])
+        missing = registry.validate_capabilities(["teacher", "student"])
         assert missing == []
 
     def test_load_builtin_skills(self) -> None:

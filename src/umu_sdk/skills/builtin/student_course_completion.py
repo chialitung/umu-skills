@@ -15,7 +15,7 @@ from .learning_flow import enroll_course
 @skill(
     name="complete_entire_course",
     description="自动完成整门课程，包含前置报名（含复杂报名表单）和完成进度验证",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="课程完成结果，包含报名、完成、验证三个阶段信息",
 )
 async def complete_entire_course(
@@ -44,9 +44,9 @@ async def complete_entire_course(
     ctx.logger.info("[complete_entire_course] 开始学习课程: %s", course_identifier)
 
     # 1. 获取课程结构，确认报名状态
-    structure_result = await ctx.call_tool(
-        server="student",
-        tool="stu_get_course_structure",
+    structure_result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="get_course_structure",
         arguments={"course_identifier": course_identifier},
     )
     if not structure_result.get("success"):
@@ -97,8 +97,7 @@ async def complete_entire_course(
                 },
                 "error_code": enroll_result.get("error_code") or "ENROLLMENT_FAILED",
                 "error_message": enroll_result.get("error_message") or "课程报名失败",
-                "suggested_action": enroll_result.get("suggested_action")
-                or "请检查报名信息后重试",
+                "suggested_action": enroll_result.get("suggested_action") or "请检查报名信息后重试",
                 "next_action": enroll_result.get("next_action") or "needs_user_input",
             }
 
@@ -114,9 +113,9 @@ async def complete_entire_course(
         arguments["exam_answers"] = exam_answers
 
     ctx.logger.info("[complete_entire_course] 调用 stu_complete_course 完成小节")
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_complete_course",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="complete_course",
         arguments=arguments,
     )
 
@@ -137,8 +136,7 @@ async def complete_entire_course(
             },
             "error_code": result.get("error_code") or "COMPLETE_COURSE_FAILED",
             "error_message": result.get("error_message") or "课程完成失败",
-            "suggested_action": result.get("suggested_action")
-            or "请确认课程标识正确且学员已报名",
+            "suggested_action": result.get("suggested_action") or "请确认课程标识正确且学员已报名",
             "next_action": result.get("next_action") or "needs_enrollment",
         }
 
@@ -146,9 +144,9 @@ async def complete_entire_course(
     verification_info: dict[str, Any] = {"success": True, "data": None}
     if verify_progress:
         ctx.logger.info("[complete_entire_course] 验证课程完成进度")
-        progress_result = await ctx.call_tool(
-            server="student",
-            tool="stu_get_learning_progress",
+        progress_result = await ctx.call_capability_tool(
+            capability="learning",
+            operation="get_learning_progress",
             arguments={"course_identifier": course_identifier},
         )
         verification_info["success"] = progress_result.get("success", False)
@@ -182,7 +180,7 @@ async def complete_entire_course(
 @skill(
     name="learn_course",
     description="端到端学习课程：报名（含复杂报名表单）+ 完成所有小节 + 验证进度",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="完整学习报告",
 )
 async def learn_course(

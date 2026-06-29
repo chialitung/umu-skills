@@ -29,7 +29,7 @@ def course_completion_workflow() -> str:
 
 【标准流程】
 1. **获取课程列表**（可选，如果用户没有提供课程标识）
-   调用 `stu_get_my_courses()` 获取用户的课程列表。
+   调用 `stu_list_participated_courses()` 获取用户的课程列表。
    让用户选择要学习的课程。
 
 2. **获取课程结构**

@@ -36,9 +36,15 @@ def ctx():
 class TestUmuTeacher:
     @pytest.mark.asyncio
     async def test_default_role_teacher(self, ctx):
+        async def _mock_skill(*args, **kwargs):
+            return {"success": True, "data": {"mock": True}}
+
         with patch(
             "umu_sdk.skills.slash._runner.get_configured_roles",
             return_value=["teacher"],
+        ), patch(
+            "umu_sdk.skills.slash._runner._find_skill_function",
+            return_value=_mock_skill,
         ):
             result = await umu_teacher(ctx, "列出我的课程")
 
@@ -50,9 +56,6 @@ class TestUmuTeacher:
         with patch(
             "umu_sdk.skills.slash._runner.get_configured_roles",
             return_value=["admin"],
-        ), patch(
-            "umu_sdk.skills.slash._runner.load_env_credentials",
-            return_value=("admin@umu.cn", "secret"),
         ):
             result = await umu_teacher(ctx, "创建课程 titledemo")
 
@@ -76,9 +79,6 @@ class TestUmuStudent:
         with patch(
             "umu_sdk.skills.slash._runner.get_configured_roles",
             return_value=["teacher"],
-        ), patch(
-            "umu_sdk.skills.slash._runner.load_env_credentials",
-            return_value=("teacher@umu.cn", "secret"),
         ):
             result = await umu_student(ctx, "报名 enroll_id=123")
 
@@ -113,7 +113,7 @@ class TestAutoCloseDispatch:
         target = select_target("使用teacher权限设置课程 7339916 的自动关闭时间为 2028-05-21 12:30")
         assert target is not None
         assert target.skill_name == "set_course_auto_close"
-        assert target.capability == "teacher"
+        assert target.capability == "course_management"
         assert target.arguments == {"group_id": "7339916", "close_time": "2028-05-21 12:30"}
         assert target.missing_args == []
 

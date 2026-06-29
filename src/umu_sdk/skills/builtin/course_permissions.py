@@ -21,7 +21,7 @@ from ..decorators import SkillContext, skill
         "设置课程的访问权限/可见范围（谁能看这门课）：企业内公开、指定账户可见或关闭。"
         "此操作只修改可见范围，不修改自动关闭时间、报名开关或课程小节。"
     ),
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="设置结果",
 )
 async def set_course_access_permission(
@@ -38,14 +38,10 @@ async def set_course_access_permission(
 
     注意：此操作只修改谁能看（可见范围），不修改自动关闭时间、报名开关或课程内容。
     """
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_set_course_access_permission",
-        arguments={
+    result = await ctx.call_capability_tool(capability="permission_management", operation="set_course_access_permission", arguments={
             "group_id": group_id,
             "access_permission": access_permission,
-        },
-    )
+        })
 
     if not result["success"]:
         return {
@@ -70,7 +66,7 @@ async def set_course_access_permission(
 @skill(
     name="search_course_access_accounts",
     description="搜索可授权访问课程的账户、班级、部门或分组，支持模糊匹配",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="候选账户/班级/部门/分组列表",
 )
 async def search_course_access_accounts(
@@ -79,14 +75,10 @@ async def search_course_access_accounts(
     keyword: str,
 ) -> dict[str, Any]:
     """搜索可授权访问课程的账户、班级、部门或分组."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_search_access_accounts",
-        arguments={
+    result = await ctx.call_capability_tool(capability="permission_management", operation="search_access_accounts", arguments={
             "group_id": group_id,
             "keyword": keyword,
-        },
-    )
+        })
 
     if not result["success"]:
         return {
@@ -111,7 +103,7 @@ async def search_course_access_accounts(
 @skill(
     name="add_course_access_accounts",
     description="为课程设置指定账户、班级、部门或分组的访问权限",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="添加结果",
 )
 async def add_course_access_accounts(
@@ -129,14 +121,10 @@ async def add_course_access_accounts(
     - department_id: 部门类型必填
     - user_group_id: 分组类型必填
     """
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_add_course_access_accounts",
-        arguments={
+    result = await ctx.call_capability_tool(capability="permission_management", operation="add_course_access_accounts", arguments={
             "group_id": group_id,
             "accounts": accounts,
-        },
-    )
+        })
 
     if not result["success"]:
         return {
@@ -161,7 +149,7 @@ async def add_course_access_accounts(
 @skill(
     name="remove_course_access_accounts",
     description="移除课程的指定账户、班级、部门或分组的访问权限",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="移除结果",
 )
 async def remove_course_access_accounts(
@@ -170,14 +158,10 @@ async def remove_course_access_accounts(
     accounts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """移除课程的指定账户/班级/部门/分组访问权限."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_remove_course_access_accounts",
-        arguments={
+    result = await ctx.call_capability_tool(capability="permission_management", operation="remove_course_access_accounts", arguments={
             "group_id": group_id,
             "accounts": accounts,
-        },
-    )
+        })
 
     if not result["success"]:
         return {
@@ -202,7 +186,7 @@ async def remove_course_access_accounts(
 @skill(
     name="cancel_course_access_permissions",
     description="取消课程的所有指定访问权限，清空指定账户/班级列表",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="取消结果",
 )
 async def cancel_course_access_permissions(
@@ -213,11 +197,7 @@ async def cancel_course_access_permissions(
 
     如需还原为企业内公开，请在调用后继续调用 set_course_access_permission(group_id, 2)。
     """
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_cancel_all_assigned_permissions",
-        arguments={"group_id": group_id},
-    )
+    result = await ctx.call_capability_tool(capability="permission_management", operation="cancel_all_assigned_permissions", arguments={"group_id": group_id})
 
     if not result["success"]:
         return {
@@ -242,7 +222,7 @@ async def cancel_course_access_permissions(
 @skill(
     name="get_course_access_permission",
     description="获取课程当前的访问权限设置",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="当前权限设置",
 )
 async def get_course_access_permission(
@@ -250,11 +230,7 @@ async def get_course_access_permission(
     group_id: str,
 ) -> dict[str, Any]:
     """获取课程当前的访问权限设置."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_course_access_permission",
-        arguments={"group_id": group_id},
-    )
+    result = await ctx.call_capability_tool(capability="permission_management", operation="get_course_access_permission", arguments={"group_id": group_id})
 
     if not result["success"]:
         return {
@@ -279,7 +255,7 @@ async def get_course_access_permission(
 @skill(
     name="get_course_access_list",
     description="获取课程当前已授权的访问列表",
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="已授权列表",
 )
 async def get_course_access_list(
@@ -289,15 +265,11 @@ async def get_course_access_list(
     size: int = 20,
 ) -> dict[str, Any]:
     """获取课程当前已授权的账户、班级、部门或分组列表."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_course_access_list",
-        arguments={
+    result = await ctx.call_capability_tool(capability="permission_management", operation="get_course_access_list", arguments={
             "group_id": group_id,
             "page": page,
             "size": size,
-        },
-    )
+        })
 
     if not result["success"]:
         return {
@@ -325,7 +297,7 @@ async def get_course_access_list(
         "查询课程的定时自动关闭时间（自动关闭、定时关闭、关闭时间、到期时间）。"
         "此操作只读取自动关闭配置，不会修改访问权限或报名开关。"
     ),
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="查询结果",
 )
 async def get_course_auto_close(
@@ -337,11 +309,7 @@ async def get_course_auto_close(
     常见表达：查看课程什么时候自动关闭、查询课程的关闭时间/到期时间。
     注意：这与访问权限、报名开关、课程小节无关。
     """
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_course_auto_close",
-        arguments={"group_id": group_id},
-    )
+    result = await ctx.call_role_tool(role="teacher", operation="get_course_auto_close", arguments={"group_id": group_id})
 
     if not result["success"]:
         return {
@@ -370,7 +338,7 @@ async def get_course_auto_close(
         "例如：把课程 X 的自动关闭时间设为 2028-05-21 12:30。"
         "此操作只修改自动关闭时间，不会修改访问权限、报名开关或课程小节。"
     ),
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="设置结果",
 )
 async def set_course_auto_close(
@@ -388,11 +356,7 @@ async def set_course_auto_close(
     常见表达：设置课程自动关闭时间、定时关闭课程、把课程关闭时间设为某时、课程某时到期。
     注意：此操作只修改自动关闭时间，不修改谁能看（访问权限）、是否需要报名（报名开关）或课程内容。
     """
-    previous = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_course_auto_close",
-        arguments={"group_id": group_id},
-    )
+    previous = await ctx.call_role_tool(role="teacher", operation="get_course_auto_close", arguments={"group_id": group_id})
     if not previous["success"]:
         return {
             "success": False,
@@ -407,11 +371,7 @@ async def set_course_auto_close(
     if custom_tips is not None:
         arguments["custom_tips"] = custom_tips
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_set_course_auto_close",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="teacher", operation="set_course_auto_close", arguments=arguments)
 
     if not result["success"]:
         return {
@@ -442,7 +402,7 @@ async def set_course_auto_close(
         "取消课程的定时自动关闭（关闭自动关闭、取消到期时间、移除自动关闭设置）。"
         "此操作只清除自动关闭时间，不会修改访问权限、报名开关或课程小节。"
     ),
-    required_servers=["teacher"],
+    required_capabilities=['permission_management', 'course_management'],
     return_description="取消结果",
 )
 async def cancel_course_auto_close(
@@ -456,11 +416,7 @@ async def cancel_course_auto_close(
     常见表达：取消课程自动关闭、关闭课程的定时关闭、移除课程的到期时间。
     注意：此操作只清除自动关闭时间，不修改访问权限、报名开关或课程内容。
     """
-    previous = await ctx.call_tool(
-        server="teacher",
-        tool="tch_get_course_auto_close",
-        arguments={"group_id": group_id},
-    )
+    previous = await ctx.call_role_tool(role="teacher", operation="get_course_auto_close", arguments={"group_id": group_id})
     if not previous["success"]:
         return {
             "success": False,
@@ -471,11 +427,7 @@ async def cancel_course_auto_close(
             "next_action": "retry",
         }
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_cancel_course_auto_close",
-        arguments={"group_id": group_id, "clear_tips": True},
-    )
+    result = await ctx.call_role_tool(role="teacher", operation="cancel_course_auto_close", arguments={"group_id": group_id, "clear_tips": True})
 
     if not result["success"]:
         return {

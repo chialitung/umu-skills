@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-06-29
+
+### Added
+- 跨角色能力（Capability）框架：
+  - 新增 `SkillContext.call_capability_tool()` 与 `call_role_tool()`，Skill 内部按 capability + operation 调用，无需硬编码 server/tool。
+  - 新增 `CapabilityResolver` 与 `CapabilityRegistry`，自动从 `tools/operations/` 扫描 `@umu_operation` 并推断 capability。
+  - `@skill` 装饰器支持 `required_capabilities`，用于声明 Skill 所需的能力域。
+- 业务操作下沉到 `src/umu_sdk/tools/operations/`：
+  - `learning.py`：学员学习流程（报名、浏览、签到、问卷、考试、完成课程等）。
+  - `course_management.py`：课程查询、创建、修改、分类、自动关闭、提交审核等。
+  - `section_management.py`：小节创建、修改、删除、可见性切换。
+  - `resource_management.py`：SCORM、文档、音视频资源上传与管理。
+  - `collaboration.py`：课程协同者、转让、学员名单。
+  - `programs.py`：学习项目管理。
+  - `access_permissions.py`：课程/学习项目访问权限。
+  - `courses.py`：已参与课程列表。
+- MCP Tool 工厂 `tool_factory.register_operations()`：根据 `@umu_operation` 的 `roles` 自动为 Teacher/Student/Admin MCP server 生成工具并注入模块命名空间。
+- Slash runner 改造为 capability 路由，支持 `/umu`、`/umua`、`/umut`、`/umus` 按默认角色解析同一 capability。
+
+### Changed
+- 所有内置 Skill 从 `call_tool(server, tool)` 迁移为 `call_capability_tool(capability, operation)`。
+- Teacher/Student/Admin MCP server 通过 `register_operations()` 注册共享业务操作，移除大量重复内联 tool 实现。
+- Admin MCP 现在暴露更多跨角色原子工具（课程管理、环节管理、资源管理、学习等），统一通过 capability 调用。
+- README 工具列表更新：管理员工具 135 个、教师工具 118 个、学生工具 27 个，原子工具总数 280+。
+
+### Fixed
+- 修复 `list_cooperated_courses` 在 operations 迁移后缺失的问题。
+- 统一 operations 中的异常为 `UMUError`，保证生成的 MCP tool 返回一致的 `error_code`。
+
 ## [0.24.6] - 2026-06-28
 
 ### Added

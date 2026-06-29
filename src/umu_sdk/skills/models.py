@@ -76,7 +76,7 @@ class SkillInfo(BaseModel):
 
     name: str
     description: str
-    required_servers: list[str] = Field(default_factory=list)
+    required_capabilities: list[str] = Field(default_factory=list)
     parameters: list[SkillParameter] = Field(default_factory=list)
     return_description: str = ""
 

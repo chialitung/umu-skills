@@ -81,8 +81,7 @@
 - `stu_resolve_course_url` — 解析课程标识
 - `stu_get_course_structure` — 获取课程结构
 - `stu_get_learning_progress` — 获取学习进度
-- `stu_get_my_courses` — 获取我的课程
-- `stu_list_participated_courses` — 列出参与过的课程
+- `stu_list_participated_courses` — 列出当前用户已参与学习的课程
 - `stu_enroll_course` — 报名课程
 
 ### 小节完成

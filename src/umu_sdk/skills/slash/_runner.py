@@ -13,16 +13,16 @@ from __future__ import annotations
 import importlib
 import inspect
 import logging
-import os
 import pkgutil
 import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from ...core.env_loader import load_env_credentials
+from ..auth_config import get_configured_roles
+from ..capability_resolver import CapabilityResolver, ROLE_PREFIXES
 from ..decorators import SkillContext, get_skill_function, is_skill_function
 from ..intent_capability_map import IntentCapabilityMap
-from ..role_resolver import RoleResolver, ResolvedRole
+from ..role_resolver import ResolvedRole
 
 logger = logging.getLogger("umu.mcp.skills")
 
@@ -39,7 +39,7 @@ class DispatchTarget:
     """统一 Skill 名称。"""
 
     capability: str
-    """所需能力角色：teacher/student/admin。"""
+    """所需能力域：learning/course_management/program_management 等。"""
 
     arguments: dict[str, Any] = field(default_factory=dict)
     """已解析出的参数。"""
@@ -49,76 +49,6 @@ class DispatchTarget:
 
 
 Dispatcher = Callable[[str], DispatchTarget | None]
-
-
-# ---------------------------------------------------------------------------
-# 配置角色凭证
-# ---------------------------------------------------------------------------
-
-
-def get_configured_roles() -> list[str]:
-    """返回已配置账号凭据的角色列表.
-
-    优先从 `.env` 文件读取，若不存在则回退到当前环境变量。
-    """
-    configured: list[str] = []
-    for role in ("admin", "teacher", "student"):
-        username, password = load_env_credentials(role)
-        if not username or not password:
-            username = os.getenv(f"UMU_{role.upper()}_USERNAME")
-            password = os.getenv(f"UMU_{role.upper()}_PASSWORD")
-        if username and password:
-            configured.append(role)
-    return configured
-
-
-async def _ensure_server_authenticated(
-    ctx: SkillContext,
-    server: str,
-    role: str,
-) -> dict[str, Any] | None:
-    """当目标 server 与 resolved role 不一致时，用角色凭据登录目标 server.
-
-    例如仅配置 admin 账号时，使用 admin 凭据登录 teacher 子 MCP，
-    从而复用 teacher 侧 canonical 工具完成课程创建等操作。
-    """
-    if server == role:
-        return None
-
-    username, password = load_env_credentials(role)
-    if not username or not password:
-        username = os.getenv(f"UMU_{role.upper()}_USERNAME")
-        password = os.getenv(f"UMU_{role.upper()}_PASSWORD")
-    if not username or not password:
-        return None
-
-    prefix = RoleResolver.ROLE_PREFIXES[role]
-    login_tool = f"{prefix}login"
-    logger.info(
-        "[%s] 使用 %s 凭据登录 %s 子 MCP: %s",
-        ctx.skill_name,
-        role,
-        server,
-        username,
-    )
-    result = await ctx.call_tool(
-        server=server,
-        tool=login_tool,
-        arguments={"username": username, "password": password},
-    )
-    if not result["success"]:
-        return {
-            "success": False,
-            "data": result.get("data"),
-            "error_code": result.get("error_code") or "AUTH_FALLBACK_FAILED",
-            "error_message": (
-                f"使用 {role} 凭据登录 {server} 子 MCP 失败: "
-                f"{result.get('error_message')}"
-            ),
-            "suggested_action": "请确认该账号在目标角色下具备操作权限",
-            "next_action": "retry",
-        }
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -175,18 +105,18 @@ def _dispatch_create_course(intent: str) -> DispatchTarget | None:
         args["scorm_resource_id"] = scorm_id
     else:
         missing.append("scorm_resource_id")
-    return DispatchTarget("create_course_with_scorm", "teacher", args, missing)
+    return DispatchTarget("create_course_with_scorm", "course_management", args, missing)
 
 
 def _dispatch_list_my_courses(intent: str) -> DispatchTarget | None:
     if any(k in intent for k in ("我的课程", "列出课程", "课程列表", "我创建的课程")):
-        return DispatchTarget("list_my_courses", "teacher", {}, [])
+        return DispatchTarget("list_my_courses", "course_management", {}, [])
     return None
 
 
 def _dispatch_course_categories(intent: str) -> DispatchTarget | None:
     if any(k in intent for k in ("课程分类", "分类树")):
-        return DispatchTarget("get_course_categories", "teacher", {}, [])
+        return DispatchTarget("get_course_categories", "course_management", {}, [])
     return None
 
 
@@ -199,7 +129,7 @@ def _dispatch_submit_course_for_audit(intent: str) -> DispatchTarget | None:
             args["group_id"] = group_id
         else:
             missing.append("group_id")
-        return DispatchTarget("submit_course_for_audit", "teacher", args, missing)
+        return DispatchTarget("submit_course_for_audit", "course_management", args, missing)
     return None
 
 
@@ -212,7 +142,7 @@ def _dispatch_enroll_course(intent: str) -> DispatchTarget | None:
             args["enroll_id"] = enroll_id
         else:
             missing.append("enroll_id")
-        return DispatchTarget("enroll_course", "student", args, missing)
+        return DispatchTarget("enroll_course", "learning", args, missing)
     return None
 
 
@@ -229,7 +159,7 @@ def _dispatch_get_course_progress(intent: str) -> DispatchTarget | None:
             args["course_identifier"] = course_identifier
         else:
             missing.append("course_identifier")
-        return DispatchTarget("get_course_progress", "student", args, missing)
+        return DispatchTarget("get_course_progress", "learning", args, missing)
     return None
 
 
@@ -278,7 +208,7 @@ def _dispatch_get_course_auto_close(intent: str) -> DispatchTarget | None:
             args["group_id"] = group_id
         else:
             missing.append("group_id")
-        return DispatchTarget("get_course_auto_close", "teacher", args, missing)
+        return DispatchTarget("get_course_auto_close", "course_management", args, missing)
     return None
 
 
@@ -298,7 +228,7 @@ def _dispatch_set_course_auto_close(intent: str) -> DispatchTarget | None:
             args["close_time"] = close_time
         else:
             missing.append("close_time")
-        return DispatchTarget("set_course_auto_close", "teacher", args, missing)
+        return DispatchTarget("set_course_auto_close", "course_management", args, missing)
     return None
 
 
@@ -313,13 +243,13 @@ def _dispatch_cancel_course_auto_close(intent: str) -> DispatchTarget | None:
             args["group_id"] = group_id
         else:
             missing.append("group_id")
-        return DispatchTarget("cancel_course_auto_close", "teacher", args, missing)
+        return DispatchTarget("cancel_course_auto_close", "course_management", args, missing)
     return None
 
 
 def _dispatch_list_admin_courses(intent: str) -> DispatchTarget | None:
     if any(k in intent for k in ("企业课程", "所有课程")):
-        return DispatchTarget("list_courses", "admin", {}, [])
+        return DispatchTarget("list_courses", "data_query", {}, [])
     return None
 
 
@@ -327,7 +257,7 @@ def _dispatch_list_admin_learning_programs(intent: str) -> DispatchTarget | None
     if any(k in intent for k in ("学习项目", "项目列表")) and any(
         k in intent for k in ("企业", "admin", "管理员")
     ):
-        return DispatchTarget("list_owned_learning_programs_admin", "admin", {}, [])
+        return DispatchTarget("list_owned_learning_programs_admin", "data_query", {}, [])
     return None
 
 
@@ -335,7 +265,7 @@ def _dispatch_list_teacher_learning_programs(intent: str) -> DispatchTarget | No
     if any(k in intent for k in ("学习项目", "项目列表")) and not any(
         k in intent for k in ("企业", "admin", "管理员")
     ):
-        return DispatchTarget("list_owned_learning_programs", "teacher", {}, [])
+        return DispatchTarget("list_owned_learning_programs", "program_management", {}, [])
     return None
 
 
@@ -362,6 +292,73 @@ def select_target(intent: str) -> DispatchTarget | None:
         if target is not None:
             return target
     return None
+
+
+def _resolve_role_for_capability(
+    capability: str,
+    configured_roles: set[str],
+    available_servers: set[str],
+    default_role: str | None = None,
+) -> ResolvedRole:
+    """根据能力域解析最佳执行角色.
+
+    使用 CapabilityResolver 的能力域到角色优先级映射，结合已配置角色和
+    可用子 MCP，选择实际执行角色；支持 default_role 作为优先选择。
+    """
+    resolver = CapabilityResolver(configured_roles=list(configured_roles))
+    role_order = list(resolver._get_role_order(capability))
+
+    candidates = [
+        role
+        for role in role_order
+        if role in configured_roles and role in available_servers
+    ]
+
+    if not candidates:
+        if default_role:
+            return ResolvedRole(
+                role=default_role,
+                server=default_role,
+                prefix=ROLE_PREFIXES.get(default_role, ""),
+                fallback_reason=f"没有可用角色可执行 {capability} 能力，请配置相应账号",
+            )
+        return ResolvedRole(
+            role="",
+            server="",
+            prefix="",
+            fallback_reason="未配置任何角色凭证",
+            needs_confirmation=False,
+        )
+
+    # 当没有 capability/default_role 线索且多个角色可用时，请求用户确认
+    if capability == "general" and not default_role and len(candidates) > 1:
+        return ResolvedRole(
+            role="",
+            server="",
+            prefix="",
+            needs_confirmation=True,
+            confirmation_message=(
+                f"检测到多个角色可用：{', '.join(candidates)}。"
+                "请回复数字选择：1-teacher 2-admin 3-student，或说明使用哪个角色。"
+            ),
+        )
+
+    # 显式指定了 default_role 且该角色可用时优先使用
+    if default_role and default_role in candidates:
+        selected = default_role
+        fallback_reason = None
+    else:
+        selected = candidates[0]
+        fallback_reason = None
+        if default_role and default_role not in candidates:
+            fallback_reason = f"{default_role} 角色未配置，已 fallback 到 {selected}"
+
+    return ResolvedRole(
+        role=selected,
+        server=selected,
+        prefix=ROLE_PREFIXES.get(selected, ""),
+        fallback_reason=fallback_reason,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -494,23 +491,18 @@ async def run_umu_command(
     Returns:
         统一返回信封。
     """
-    available_servers = ctx.mcp.list_servers()
-    configured_roles = get_configured_roles()
-
-    resolver = RoleResolver(
-        available_servers=available_servers,
-        configured_roles=configured_roles,
-        session_state=ctx.session_state,
-    )
+    available_servers = set(ctx.mcp.list_servers())
+    configured_roles = set(get_configured_roles())
 
     # 1. 意图分类
     target = select_target(command)
     required_capability = target.capability if target else IntentCapabilityMap.classify(command)
 
     # 2. 角色解析
-    resolved = resolver.resolve(
-        intent=command,
-        required_capability=required_capability or None,
+    resolved = _resolve_role_for_capability(
+        capability=required_capability or "general",
+        configured_roles=configured_roles,
+        available_servers=available_servers,
         default_role=default_role,
     )
 
@@ -536,29 +528,23 @@ async def run_umu_command(
     if target is None:
         return _build_unsupported_intent_response(command)
 
-    # 6. 检查目标能力对应的子 MCP 是否可用
-    canonical_server = target.capability
-    if canonical_server not in available_servers:
+    # 6. 检查解析出的子 MCP 是否可用
+    if resolved.server not in available_servers:
         return {
             "success": False,
             "data": None,
             "error_code": "SERVER_UNAVAILABLE",
-            "error_message": f"所需子 MCP [{canonical_server}] 未连接",
-            "suggested_action": f"请启动 {canonical_server} 子 MCP，或配置可 fallback 的角色",
+            "error_message": f"所需子 MCP [{resolved.server}] 未连接",
+            "suggested_action": f"请启动 {resolved.server} 子 MCP，或配置可 fallback 的角色",
             "next_action": "retry",
         }
 
-    # 7. 高权限 fallback 时，用 resolved role 的凭据登录 canonical server
-    auth_error = await _ensure_server_authenticated(ctx, canonical_server, resolved.role)
-    if auth_error is not None:
-        return auth_error
-
-    # 8. 缺少必填参数
+    # 7. 缺少必填参数
     if target.missing_args:
         _update_session_state(ctx, resolved, remember_choice)
         return _build_missing_args_response(resolved, target)
 
-    # 9. 调用统一 Skill
+    # 8. 调用统一 Skill
     skill_func = _find_skill_function(target.skill_name)
     if skill_func is None:
         return {
@@ -592,7 +578,7 @@ async def run_umu_command(
             "next_action": "retry",
         }
 
-    # 10. 统一结果并注入角色信息
+    # 9. 统一结果并注入角色信息
     _update_session_state(ctx, resolved, remember_choice)
 
     if isinstance(result, dict) and "success" in result:

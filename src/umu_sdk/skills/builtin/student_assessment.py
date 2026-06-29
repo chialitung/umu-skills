@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="get_questionnaire",
     description="获取问卷小节的题目",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="问卷题目列表",
 )
 async def get_questionnaire(
@@ -22,9 +22,9 @@ async def get_questionnaire(
     element_id: str,
 ) -> dict[str, Any]:
     """获取问卷题目."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_get_questionnaire_questions",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="get_questionnaire_questions",
         arguments={"element_id": element_id},
     )
 
@@ -51,7 +51,7 @@ async def get_questionnaire(
 @skill(
     name="submit_questionnaire",
     description="提交问卷小节答案（JSON 格式）",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="提交结果",
 )
 async def submit_questionnaire(
@@ -60,9 +60,9 @@ async def submit_questionnaire(
     answers_json: str,
 ) -> dict[str, Any]:
     """提交问卷."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_submit_questionnaire",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="submit_questionnaire",
         arguments={"element_id": element_id, "answers_json": answers_json},
     )
 
@@ -89,7 +89,7 @@ async def submit_questionnaire(
 @skill(
     name="submit_questionnaire_simple",
     description="使用简化配置提交问卷小节答案",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="提交结果",
 )
 async def submit_questionnaire_simple(
@@ -98,9 +98,9 @@ async def submit_questionnaire_simple(
     answers_config: str,
 ) -> dict[str, Any]:
     """使用配置格式提交问卷."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_submit_questionnaire_with_config",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="submit_questionnaire_with_config",
         arguments={"element_id": element_id, "answers_config": answers_config},
     )
 
@@ -127,7 +127,7 @@ async def submit_questionnaire_simple(
 @skill(
     name="start_exam",
     description="开始考试小节",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="考试提交 ID 等信息",
 )
 async def start_exam(
@@ -135,9 +135,9 @@ async def start_exam(
     element_id: str,
 ) -> dict[str, Any]:
     """开始考试."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_start_exam",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="start_exam",
         arguments={"element_id": element_id},
     )
 
@@ -164,7 +164,7 @@ async def start_exam(
 @skill(
     name="submit_exam",
     description="提交考试答案（JSON 格式）",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="提交结果",
 )
 async def submit_exam(
@@ -174,9 +174,9 @@ async def submit_exam(
     answers_json: str = "{}",
 ) -> dict[str, Any]:
     """提交考试."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_submit_exam",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="submit_exam",
         arguments={
             "element_id": element_id,
             "exam_submit_id": exam_submit_id,
@@ -207,7 +207,7 @@ async def submit_exam(
 @skill(
     name="submit_exam_simple",
     description="使用简化配置提交考试答案",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="提交结果",
 )
 async def submit_exam_simple(
@@ -216,9 +216,9 @@ async def submit_exam_simple(
     answers_config: str,
 ) -> dict[str, Any]:
     """使用配置格式提交考试."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_submit_exam_with_config",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="submit_exam_with_config",
         arguments={"element_id": element_id, "answers_config": answers_config},
     )
 

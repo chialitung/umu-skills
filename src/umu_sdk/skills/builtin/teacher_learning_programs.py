@@ -18,7 +18,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="list_teacher_learning_programs",
     description="查询讲师视角的学习项目清单，支持我拥有的/协同给我的/我报名的三个视角",
-    required_servers=["teacher"],
+    required_capabilities=["program_management"],
     return_description="学习项目列表",
 )
 async def list_teacher_learning_programs(
@@ -39,9 +39,9 @@ async def list_teacher_learning_programs(
     if keywords:
         arguments["keywords"] = keywords
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_list_learning_programs",
+    result = await ctx.call_capability_tool(
+        capability="program_management",
+        operation="list_learning_programs",
         arguments=arguments,
     )
     if not result["success"]:
@@ -80,7 +80,7 @@ async def _list_programs_by_scope(
 @skill(
     name="list_owned_learning_programs",
     description="查询我拥有的学习项目清单",
-    required_servers=["teacher"],
+    required_capabilities=["program_management"],
     return_description="学习项目列表",
 )
 async def list_owned_learning_programs(
@@ -97,7 +97,7 @@ async def list_owned_learning_programs(
 @skill(
     name="list_cooperated_learning_programs",
     description="查询协同给我的学习项目清单",
-    required_servers=["teacher"],
+    required_capabilities=["program_management"],
     return_description="学习项目列表",
 )
 async def list_cooperated_learning_programs(
@@ -114,7 +114,7 @@ async def list_cooperated_learning_programs(
 @skill(
     name="list_enrolled_learning_programs",
     description="查询我报名的学习项目清单",
-    required_servers=["teacher"],
+    required_capabilities=["program_management"],
     return_description="学习项目列表",
 )
 async def list_enrolled_learning_programs(
@@ -131,7 +131,7 @@ async def list_enrolled_learning_programs(
 @skill(
     name="create_learning_program",
     description="创建学习项目并添加课程，可选配置证书与积分",
-    required_servers=["teacher"],
+    required_capabilities=["program_management"],
     return_description="包含 program_id、添加结果等",
 )
 async def create_learning_program(
@@ -204,9 +204,9 @@ async def create_learning_program(
     create_args["enable_certificate"] = enable_certificate
 
     ctx.logger.info("[create_learning_program] 创建学习项目: %s", title)
-    create_result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_learning_program",
+    create_result = await ctx.call_capability_tool(
+        capability="program_management",
+        operation="create_learning_program",
         arguments=create_args,
     )
     if not create_result["success"]:
@@ -226,7 +226,7 @@ async def create_learning_program(
             "data": create_result.get("data"),
             "error_code": "MISSING_PROGRAM_ID",
             "error_message": "创建学习项目成功，但响应中无有效 program_id",
-            "suggested_action": "请检查 tch_create_learning_program 返回结构或 API 是否可用",
+            "suggested_action": "请检查 create_learning_program operation 返回结构或 API 是否可用",
             "next_action": "needs_user_input",
         }
 
@@ -234,9 +234,9 @@ async def create_learning_program(
 
     if modules:
         ctx.logger.info("[create_learning_program] 向项目 %s 添加课程", program_id)
-        add_result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_add_courses_to_learning_program",
+        add_result = await ctx.call_capability_tool(
+            capability="program_management",
+            operation="add_courses_to_learning_program",
             arguments={"program_id": program_id, "modules": modules},
         )
         result_data["add_courses_result"] = add_result.get("data", {})
@@ -257,9 +257,9 @@ async def create_learning_program(
             cert_args["text"] = certificate_text
         if certificate_theme_id:
             cert_args["theme_id"] = certificate_theme_id
-        cert_result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_configure_program_certificate",
+        cert_result = await ctx.call_capability_tool(
+            capability="program_management",
+            operation="configure_program_certificate",
             arguments=cert_args,
         )
         result_data["certificate_result"] = cert_result.get("data", {})
@@ -275,9 +275,9 @@ async def create_learning_program(
 
     if enable_points:
         ctx.logger.info("[create_learning_program] 开启积分")
-        points_result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_set_program_points_status",
+        points_result = await ctx.call_capability_tool(
+            capability="program_management",
+            operation="set_program_points_status",
             arguments={"program_id": program_id, "enabled": True},
         )
         result_data["points_result"] = points_result.get("data", {})
@@ -304,7 +304,7 @@ async def create_learning_program(
 @skill(
     name="update_learning_program",
     description="修改学习项目基本信息、模块与课程关系，支持删除课程",
-    required_servers=["teacher"],
+    required_capabilities=["program_management"],
     return_description="包含 program_id 与各子操作结果",
 )
 async def update_learning_program(
@@ -378,9 +378,9 @@ async def update_learning_program(
     # 先删除课程，再修改模块，避免顺序冲突
     if remove_module_group_ids:
         ctx.logger.info("[update_learning_program] 从项目 %s 删除课程", program_id)
-        remove_result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_remove_courses_from_learning_program",
+        remove_result = await ctx.call_capability_tool(
+            capability="program_management",
+            operation="remove_courses_from_learning_program",
             arguments={"program_id": program_id, "module_group_ids": remove_module_group_ids},
         )
         result_data["remove_courses_result"] = remove_result.get("data", {})
@@ -395,9 +395,9 @@ async def update_learning_program(
             }
 
     ctx.logger.info("[update_learning_program] 修改项目 %s 基本信息", program_id)
-    update_result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_update_learning_program",
+    update_result = await ctx.call_capability_tool(
+        capability="program_management",
+        operation="update_learning_program",
         arguments=update_args,
     )
     if not update_result["success"]:
@@ -412,9 +412,9 @@ async def update_learning_program(
 
     if modules:
         ctx.logger.info("[update_learning_program] 修改项目 %s 模块", program_id)
-        module_result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_update_learning_program_modules",
+        module_result = await ctx.call_capability_tool(
+            capability="program_management",
+            operation="update_learning_program_modules",
             arguments={"program_id": program_id, "modules": modules},
         )
         result_data["update_modules_result"] = module_result.get("data", {})
@@ -441,7 +441,7 @@ async def update_learning_program(
 @skill(
     name="list_program_participants",
     description="查询学习项目的学员名单，支持按完成状态筛选与是否包含禁用账号",
-    required_servers=["teacher"],
+    required_capabilities=["program_management"],
     return_description="学员名单及 modules/courses 深度格式化结果",
 )
 async def list_program_participants(
@@ -454,9 +454,9 @@ async def list_program_participants(
     fetch_all: bool = False,
 ) -> dict[str, Any]:
     """查询学习项目的学员名单."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_list_program_participants",
+    result = await ctx.call_capability_tool(
+        capability="program_management",
+        operation="list_program_participants",
         arguments={
             "program_id": program_id,
             "status_filter": status_filter,
@@ -488,7 +488,7 @@ async def list_program_participants(
 @skill(
     name="list_program_learning_tasks",
     description="查询学习项目的学习任务学员名单，支持按完成状态筛选与是否包含禁用账号",
-    required_servers=["teacher"],
+    required_capabilities=["program_management"],
     return_description="学习任务学员名单及 modules/courses 深度格式化结果",
 )
 async def list_program_learning_tasks(
@@ -501,9 +501,9 @@ async def list_program_learning_tasks(
     fetch_all: bool = False,
 ) -> dict[str, Any]:
     """查询学习项目的学习任务学员名单."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_list_program_learning_tasks",
+    result = await ctx.call_capability_tool(
+        capability="program_management",
+        operation="list_program_learning_tasks",
         arguments={
             "program_id": program_id,
             "status_filter": status_filter,
@@ -535,7 +535,7 @@ async def list_program_learning_tasks(
 @skill(
     name="delete_learning_program",
     description="删除讲师拥有的学习项目",
-    required_servers=["teacher"],
+    required_capabilities=["program_management"],
     return_description="删除结果",
 )
 async def delete_learning_program(
@@ -543,9 +543,9 @@ async def delete_learning_program(
     program_id: str,
 ) -> dict[str, Any]:
     """删除学习项目."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_delete_learning_program",
+    result = await ctx.call_capability_tool(
+        capability="program_management",
+        operation="delete_learning_program",
         arguments={"program_id": program_id},
     )
     if not result["success"]:

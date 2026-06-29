@@ -16,7 +16,7 @@ from umu_sdk.skills.builtin.program_permissions import set_program_access_permis
 @pytest.fixture
 def ctx():
     mock = AsyncMock()
-    mock.call_tool.return_value = {
+    default_response = {
         "success": True,
         "data": {"programs": [{"program_id": "359923"}]},
         "error_code": "",
@@ -24,6 +24,8 @@ def ctx():
         "suggested_action": "",
         "next_action": "proceed",
     }
+    mock.call_capability_tool.return_value = default_response
+    mock.call_role_tool.return_value = default_response
     return mock
 
 
@@ -31,14 +33,14 @@ class TestAdminLearningProgramSkills:
     async def test_list_owned_learning_programs_admin(self, ctx):
         result = await list_owned_learning_programs_admin(ctx)
         assert result["success"] is True
-        ctx.call_tool.assert_awaited_once()
-        call = ctx.call_tool.call_args
-        assert call.kwargs["server"] == "admin"
-        assert call.kwargs["tool"] == "adm_list_personal_learning_programs"
+        ctx.call_role_tool.assert_awaited_once()
+        call = ctx.call_role_tool.call_args
+        assert call.kwargs["role"] == "admin"
+        assert call.kwargs["operation"] == "list_personal_learning_programs"
         assert call.kwargs["arguments"]["scope"] == "owned"
 
     async def test_set_program_access_permission(self, ctx):
-        ctx.call_tool.return_value = {
+        ctx.call_capability_tool.return_value = {
             "success": True,
             "data": {"program_id": "359923", "access_permission": 2},
             "error_code": "",
@@ -48,13 +50,14 @@ class TestAdminLearningProgramSkills:
         }
         result = await set_program_access_permission(ctx, "359923", 2)
         assert result["success"] is True
-        call = ctx.call_tool.call_args
-        assert call.kwargs["server"] == "teacher"
-        assert call.kwargs["tool"] == "tch_set_program_access_permission"
-        assert call.kwargs["arguments"]["access_permission"] == 2
+        ctx.call_capability_tool.assert_awaited_once_with(
+            capability="permission_management",
+            operation="set_program_access_permission",
+            arguments={"program_id": "359923", "access_permission": 2},
+        )
 
     async def test_delete_learning_program_admin(self, ctx):
-        ctx.call_tool.return_value = {
+        ctx.call_role_tool.return_value = {
             "success": True,
             "data": {"program_id": "360141", "deleted": True},
             "error_code": "",
@@ -64,7 +67,8 @@ class TestAdminLearningProgramSkills:
         }
         result = await delete_learning_program_admin(ctx, "360141")
         assert result["success"] is True
-        call = ctx.call_tool.call_args
-        assert call.kwargs["server"] == "admin"
-        assert call.kwargs["tool"] == "adm_delete_learning_program"
-        assert call.kwargs["arguments"]["program_id"] == "360141"
+        ctx.call_role_tool.assert_awaited_once_with(
+            role="admin",
+            operation="delete_learning_program",
+            arguments={"program_id": "360141"},
+        )

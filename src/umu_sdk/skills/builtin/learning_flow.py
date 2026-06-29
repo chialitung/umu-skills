@@ -42,7 +42,7 @@ def _build_enroll_form_payload(
 @skill(
     name="enroll_course",
     description="为当前学员报名课程，支持需要填写联系信息/单选/多选/开放题的特殊报名表单",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="报名结果，复杂表单需要用户输入时会返回表单结构",
 )
 async def enroll_course(
@@ -73,10 +73,12 @@ async def enroll_course(
 
     resolved_identifier = course_identifier
     if not enroll_id and course_identifier:
-        ctx.logger.info("[enroll_course] 未提供 enroll_id，尝试从课程标识解析: %s", course_identifier)
-        resolve_result = await ctx.call_tool(
-            server="student",
-            tool="stu_resolve_course_url",
+        ctx.logger.info(
+            "[enroll_course] 未提供 enroll_id，尝试从课程标识解析: %s", course_identifier
+        )
+        resolve_result = await ctx.call_capability_tool(
+            capability="learning",
+            operation="resolve_course_url",
             arguments={"course_identifier": course_identifier},
         )
         if not resolve_result.get("success"):
@@ -90,9 +92,9 @@ async def enroll_course(
             }
         resolved_identifier = course_identifier
 
-        structure_result = await ctx.call_tool(
-            server="student",
-            tool="stu_get_course_structure",
+        structure_result = await ctx.call_capability_tool(
+            capability="learning",
+            operation="get_course_structure",
             arguments={"course_identifier": course_identifier},
         )
         if not structure_result.get("success"):
@@ -118,9 +120,9 @@ async def enroll_course(
 
     ctx.logger.info("[enroll_course] 报名课程，enroll_id: %s", enroll_id)
 
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_enroll_course",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="enroll_course",
         arguments={"enroll_id": enroll_id},
     )
     if not result["success"]:
@@ -146,9 +148,9 @@ async def enroll_course(
 
     # 预报名或中间状态，检查是否需要填写报名表单
     ctx.logger.info("[enroll_course] 报名状态为中间态，检查是否需要填写报名表单")
-    form_result = await ctx.call_tool(
-        server="student",
-        tool="stu_get_enroll_form",
+    form_result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="get_enroll_form",
         arguments={"course_identifier": resolved_identifier or enroll_id},
     )
     if not form_result.get("success"):
@@ -168,8 +170,7 @@ async def enroll_course(
 
     # 判断是否存在需要用户填写的必填项
     has_required_contact = any(
-        field.get("selected") and field.get("required")
-        for field in contact_fields
+        field.get("selected") and field.get("required") for field in contact_fields
     )
     has_required_question = any(
         question.get("required") and question.get("type") != "paragraph"
@@ -178,9 +179,9 @@ async def enroll_course(
 
     if not has_required_contact and not has_required_question:
         # 表单中没有必填项，尝试再次调用 stu_enroll_course 确认
-        retry_result = await ctx.call_tool(
-            server="student",
-            tool="stu_enroll_course",
+        retry_result = await ctx.call_capability_tool(
+            capability="learning",
+            operation="enroll_course",
             arguments={"enroll_id": enroll_id},
         )
         if retry_result.get("success"):
@@ -215,9 +216,9 @@ async def enroll_course(
         }
 
     ctx.logger.info("[enroll_course] 提交报名表单")
-    submit_result = await ctx.call_tool(
-        server="student",
-        tool="stu_submit_enroll_form",
+    submit_result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="submit_enroll_form",
         arguments=_build_enroll_form_payload(
             resolved_identifier or enroll_id,
             contact_answers,
@@ -235,9 +236,9 @@ async def enroll_course(
         }
 
     # 表单提交后再次确认报名状态
-    final_result = await ctx.call_tool(
-        server="student",
-        tool="stu_enroll_course",
+    final_result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="enroll_course",
         arguments={"enroll_id": enroll_id},
     )
     if not final_result.get("success"):
@@ -274,7 +275,7 @@ async def enroll_course(
 @skill(
     name="get_course_enroll_form",
     description="获取课程的复杂报名表单结构（联系信息 + 报名问题）",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="报名表单结构",
 )
 async def get_course_enroll_form(
@@ -288,9 +289,9 @@ async def get_course_enroll_form(
     """
     ctx.logger.info("[get_course_enroll_form] 获取报名表单: %s", course_identifier)
 
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_get_enroll_form",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="get_enroll_form",
         arguments={"course_identifier": course_identifier},
     )
 
@@ -317,7 +318,7 @@ async def get_course_enroll_form(
 @skill(
     name="submit_course_enroll_form",
     description="提交课程的复杂报名表单",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="表单提交结果",
 )
 async def submit_course_enroll_form(
@@ -336,9 +337,9 @@ async def submit_course_enroll_form(
     ctx.logger.info("[submit_course_enroll_form] 提交报名表单: %s", course_identifier)
 
     payload = _build_enroll_form_payload(course_identifier, contact_answers, section_answers)
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_submit_enroll_form",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="submit_enroll_form",
         arguments=payload,
     )
 
@@ -365,7 +366,7 @@ async def submit_course_enroll_form(
 @skill(
     name="get_course_progress",
     description="获取当前学员在指定课程的学习进度和结构",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="课程结构及完成状态",
 )
 async def get_course_progress(
@@ -382,9 +383,9 @@ async def get_course_progress(
     ctx.logger.info("[get_course_progress] 查询课程进度: %s", course_identifier)
 
     # 1. 解析课程标识
-    resolve_result = await ctx.call_tool(
-        server="student",
-        tool="stu_resolve_course_url",
+    resolve_result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="resolve_course_url",
         arguments={"course_identifier": course_identifier},
     )
     if not resolve_result["success"]:
@@ -398,9 +399,9 @@ async def get_course_progress(
         }
 
     # 2. 获取课程结构和进度
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_get_course_structure",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="get_course_structure",
         arguments={
             "course_identifier": course_identifier,
             "include_question_preview": include_question_preview,

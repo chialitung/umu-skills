@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from umu_sdk.adapters.mcp.admin import adm_list_personal_learning_programs
+from umu_sdk.adapters.mcp.admin import mcp as admin_mcp
 
 
 @pytest.fixture
@@ -23,6 +23,7 @@ def mock_client():
 def _auth_patch(mock_client):
     stack = ExitStack()
     stack.enter_context(patch("umu_sdk.adapters.mcp.admin._get_client", return_value=mock_client))
+    stack.enter_context(patch("umu_sdk.adapters.mcp.admin._umu_client", mock_client))
     stack.enter_context(patch("umu_sdk.adapters.mcp.admin._require_auth", return_value=None))
     return stack
 
@@ -47,15 +48,19 @@ class TestAdmListPersonalLearningPrograms:
     async def test_owned_scope(self, mock_client):
         resp = _program_page(1, 20, 1, [{"program_id": "359923", "program_title": "测试项目"}])
         mock_client.get.return_value = resp
+        tools = admin_mcp._tool_manager._tools
+        tool_fn = tools["adm_list_personal_learning_programs"].fn
         with _auth_patch(mock_client):
-            result = json.loads(await adm_list_personal_learning_programs(scope="owned"))
+            result = json.loads(await tool_fn(scope="owned"))
         assert result["success"] is True
         assert result["data"]["scope"] == "owned"
         assert len(result["data"]["programs"]) == 1
 
     async def test_unauthenticated(self, mock_client):
-        with patch("umu_sdk.adapters.mcp.admin._get_client", return_value=mock_client):
-            with patch("umu_sdk.adapters.mcp.admin._require_auth", return_value="未登录"):
-                result = json.loads(await adm_list_personal_learning_programs(scope="owned"))
+        mock_client.auth.is_authenticated.return_value = False
+        tools = admin_mcp._tool_manager._tools
+        tool_fn = tools["adm_list_personal_learning_programs"].fn
+        with patch("umu_sdk.adapters.mcp.admin._umu_client", mock_client):
+            result = json.loads(await tool_fn(scope="owned"))
         assert result["success"] is False
         assert result["error_code"] == "NOT_AUTHENTICATED"

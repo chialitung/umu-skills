@@ -18,7 +18,7 @@ from ._runner import run_umu_command
 @skill(
     name="umu-admin",
     description="使用 admin 账号执行 UMU 操作（/umua /umuadmin）",
-    required_servers=[],
+    required_capabilities=[],
     return_description="统一返回信封",
 )
 async def umu_admin(

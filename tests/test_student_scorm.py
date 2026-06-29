@@ -73,11 +73,11 @@ async def test_stu_complete_scorm_section_success() -> None:
         client.http.post.return_value.text = "true\n0"
         client.post.return_value = {}
 
-        with patch("umu_sdk.adapters.mcp.student.stu_get_lesson_status") as mock_status:
-            mock_status.return_value = json.dumps({
-                "success": True,
-                "data": {"is_completed": True, "element_id": "e123"},
-            })
+        with patch("umu_sdk.tools.operations.learning.get_lesson_status") as mock_status:
+            mock_status.return_value = {
+                "is_completed": True,
+                "element_id": "e123",
+            }
             result = await stu_complete_scorm_section(
                 element_id="e123",
                 scorm_launch_url=launch_url,
@@ -127,10 +127,10 @@ async def test_stu_get_course_structure_scorm_detection() -> None:
 
     with _patch_student_client() as client, \
             patch(
-                "umu_sdk.adapters.mcp.student._resolve_course_identifier",
+                "umu_sdk.tools.operations.learning._resolve_course_identifier",
                 return_value=("g1", "sk1", "https://m.umu.cn/course?groupId=g1&sKey=sk1"),
             ), \
-            patch("umu_sdk.adapters.mcp.student._check_needs_enroll", return_value=(False, None)):
+            patch("umu_sdk.tools.operations.learning._check_needs_enroll", return_value=(False, None)):
         client.get.return_value = {
             "error_code": 0,
             "data": {
@@ -230,18 +230,18 @@ async def test_stu_complete_scorm_section_wrapper_success() -> None:
         client.http.get.return_value = MagicMock(status_code=200, text="")
 
         with patch(
-            "umu_sdk.adapters.mcp.student._extract_uscorm_runtime",
+            "umu_sdk.tools.shared.learning_helpers._extract_uscorm_runtime",
             return_value=runtime,
         ) as mock_extract, \
                 patch(
-            "umu_sdk.adapters.mcp.student._post_uscorm_commit",
+            "umu_sdk.tools.operations.learning._post_uscorm_commit",
             return_value={"error_code": 0, "data": {"status": 1}},
         ) as mock_commit, \
-                patch("umu_sdk.adapters.mcp.student.stu_get_lesson_status") as mock_status:
-            mock_status.return_value = json.dumps({
-                "success": True,
-                "data": {"is_completed": True, "element_id": "e789"},
-            })
+                patch("umu_sdk.tools.operations.learning.get_lesson_status") as mock_status:
+            mock_status.return_value = {
+                "is_completed": True,
+                "element_id": "e789",
+            }
             result = await stu_complete_scorm_section(
                 element_id="e789",
                 status="completed",

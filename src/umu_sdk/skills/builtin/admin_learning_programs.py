@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="list_learning_programs",
     description="查询企业学习项目清单，支持按名称/标签/访问码/创建人/权限/知识库/分类/创建时间等筛选",
-    required_servers=["admin"],
+    required_capabilities=['program_management'],
     return_description="学习项目列表及分页信息",
 )
 async def list_learning_programs(
@@ -59,11 +59,7 @@ async def list_learning_programs(
     if end_day:
         arguments["end_day"] = end_day
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_learning_programs",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="list_learning_programs", arguments=arguments)
 
     if not result["success"]:
         return {

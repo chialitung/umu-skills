@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="resolve_course_identifier",
     description="解析课程标识（访问码/短域名/URL）为课程信息",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="解析后的课程信息（group_id, s_key 等）",
 )
 async def resolve_course_identifier(
@@ -22,9 +22,9 @@ async def resolve_course_identifier(
     course_identifier: str,
 ) -> dict[str, Any]:
     """解析课程标识."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_resolve_course_url",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="resolve_course_url",
         arguments={"course_identifier": course_identifier},
     )
 
@@ -51,7 +51,7 @@ async def resolve_course_identifier(
 @skill(
     name="list_my_courses_student",
     description="列出当前学员的课程",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="课程列表及分页信息",
 )
 async def list_my_courses_student(
@@ -61,9 +61,9 @@ async def list_my_courses_student(
     fetch_all: bool = False,
 ) -> dict[str, Any]:
     """列出我的课程."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_get_my_courses",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="list_participated_courses",
         arguments={
             "page": page,
             "page_size": page_size,
@@ -94,7 +94,7 @@ async def list_my_courses_student(
 @skill(
     name="complete_browse_lesson",
     description="完成浏览类小节（视频/文章）",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="小节完成结果",
 )
 async def complete_browse_lesson(
@@ -103,9 +103,9 @@ async def complete_browse_lesson(
     duration_seconds: int = 0,
 ) -> dict[str, Any]:
     """完成浏览小节."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_browse_lesson",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="browse_lesson",
         arguments={"element_id": element_id, "duration_seconds": duration_seconds},
     )
 
@@ -132,7 +132,7 @@ async def complete_browse_lesson(
 @skill(
     name="complete_scorm_section",
     description="完成 SCORM 1.2 小节，支持状态、得分、学习时长",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="SCORM 小节完成结果",
 )
 async def complete_scorm_section(
@@ -166,9 +166,9 @@ async def complete_scorm_section(
     if scorm_launch_url:
         arguments["scorm_launch_url"] = scorm_launch_url
 
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_complete_scorm_section",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="complete_scorm_section",
         arguments=arguments,
     )
 
@@ -195,7 +195,7 @@ async def complete_scorm_section(
 @skill(
     name="complete_checkin",
     description="完成签到小节",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="签到结果",
 )
 async def complete_checkin(
@@ -203,9 +203,9 @@ async def complete_checkin(
     element_id: str,
 ) -> dict[str, Any]:
     """完成普通签到."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_check_in",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="check_in",
         arguments={"element_id": element_id},
     )
 
@@ -232,7 +232,7 @@ async def complete_checkin(
 @skill(
     name="complete_rating_checkin",
     description="完成评分签到小节",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="评分签到结果",
 )
 async def complete_rating_checkin(
@@ -242,9 +242,9 @@ async def complete_rating_checkin(
     comment: str = "",
 ) -> dict[str, Any]:
     """完成评分签到."""
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_check_in_with_rating",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="check_in_with_rating",
         arguments={"element_id": element_id, "rating": rating, "comment": comment},
     )
 
@@ -271,7 +271,7 @@ async def complete_rating_checkin(
 @skill(
     name="check_lesson_completion",
     description="查询小节完成状态",
-    required_servers=["student"],
+    required_capabilities=["learning"],
     return_description="小节完成状态",
 )
 async def check_lesson_completion(
@@ -284,9 +284,9 @@ async def check_lesson_completion(
     if group_id:
         arguments["group_id"] = group_id
 
-    result = await ctx.call_tool(
-        server="student",
-        tool="stu_get_lesson_status",
+    result = await ctx.call_capability_tool(
+        capability="learning",
+        operation="get_lesson_status",
         arguments=arguments,
     )
 

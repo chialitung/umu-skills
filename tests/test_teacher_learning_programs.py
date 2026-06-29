@@ -10,11 +10,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from umu_sdk.adapters.mcp.teacher import (
+    mcp as teacher_mcp,
     tch_add_program_access_accounts,
     tch_cancel_all_program_permissions,
     tch_get_program_access_list,
     tch_get_program_access_permission,
-    tch_list_learning_programs,
     tch_remove_program_access_accounts,
     tch_search_program_access_accounts,
     tch_set_program_access_permission,
@@ -32,6 +32,7 @@ def mock_client():
 def _auth_patch(mock_client):
     stack = ExitStack()
     stack.enter_context(patch("umu_sdk.adapters.mcp.teacher._get_client", return_value=mock_client))
+    stack.enter_context(patch("umu_sdk.adapters.mcp.teacher._umu_client", mock_client))
     stack.enter_context(patch("umu_sdk.adapters.mcp.teacher._require_auth", return_value=None))
     return stack
 
@@ -72,7 +73,7 @@ class TestTchListLearningPrograms:
         )
         mock_client.get.return_value = resp
         with _auth_patch(mock_client):
-            result = json.loads(await tch_list_learning_programs(scope="owned"))
+            result = json.loads(await teacher_mcp._tool_manager._tools["tch_list_learning_programs"].fn(scope="owned"))
 
         assert result["success"] is True
         assert result["data"]["scope"] == "owned"
@@ -83,15 +84,15 @@ class TestTchListLearningPrograms:
         assert "owner=1" in call_args.kwargs["params"].values() or call_args.kwargs["params"].get("owner") == "1"
 
     async def test_unauthenticated(self, mock_client):
-        with patch("umu_sdk.adapters.mcp.teacher._get_client", return_value=mock_client):
-            with patch("umu_sdk.adapters.mcp.teacher._require_auth", return_value="未登录"):
-                result = json.loads(await tch_list_learning_programs(scope="owned"))
+        mock_client.auth.is_authenticated.return_value = False
+        with patch("umu_sdk.adapters.mcp.teacher._umu_client", mock_client):
+            result = json.loads(await teacher_mcp._tool_manager._tools["tch_list_learning_programs"].fn(scope="owned"))
         assert result["success"] is False
         assert result["error_code"] == "NOT_AUTHENTICATED"
 
     async def test_invalid_scope(self, mock_client):
         with _auth_patch(mock_client):
-            result = json.loads(await tch_list_learning_programs(scope="unknown"))
+            result = json.loads(await teacher_mcp._tool_manager._tools["tch_list_learning_programs"].fn(scope="unknown"))
         assert result["success"] is False
         assert result["error_code"] == "INVALID_SCOPE"
 

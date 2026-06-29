@@ -18,7 +18,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="list_admin_personal_learning_programs",
     description="查询管理员视角的学习项目清单，支持我拥有的/协同给我的/我报名的三个视角",
-    required_servers=["admin"],
+    required_capabilities=['program_management'],
     return_description="学习项目列表",
 )
 async def list_admin_personal_learning_programs(
@@ -39,11 +39,7 @@ async def list_admin_personal_learning_programs(
     if keywords:
         arguments["keywords"] = keywords
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_personal_learning_programs",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="list_personal_learning_programs", arguments=arguments)
     if not result["success"]:
         return {
             "success": False,
@@ -80,7 +76,7 @@ async def _list_programs_by_scope(
 @skill(
     name="list_owned_learning_programs_admin",
     description="查询管理员拥有的学习项目清单",
-    required_servers=["admin"],
+    required_capabilities=['program_management'],
     return_description="学习项目列表",
 )
 async def list_owned_learning_programs_admin(
@@ -97,7 +93,7 @@ async def list_owned_learning_programs_admin(
 @skill(
     name="list_cooperated_learning_programs_admin",
     description="查询协同给管理员的学习项目清单",
-    required_servers=["admin"],
+    required_capabilities=['program_management'],
     return_description="学习项目列表",
 )
 async def list_cooperated_learning_programs_admin(
@@ -114,7 +110,7 @@ async def list_cooperated_learning_programs_admin(
 @skill(
     name="list_enrolled_learning_programs_admin",
     description="查询管理员报名的学习项目清单",
-    required_servers=["admin"],
+    required_capabilities=['program_management'],
     return_description="学习项目列表",
 )
 async def list_enrolled_learning_programs_admin(
@@ -131,7 +127,7 @@ async def list_enrolled_learning_programs_admin(
 @skill(
     name="delete_learning_program_admin",
     description="管理员删除学习项目",
-    required_servers=["admin"],
+    required_capabilities=['program_management'],
     return_description="删除结果",
 )
 async def delete_learning_program_admin(
@@ -139,11 +135,7 @@ async def delete_learning_program_admin(
     program_id: str,
 ) -> dict[str, Any]:
     """管理员删除学习项目."""
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_delete_learning_program",
-        arguments={"program_id": program_id},
-    )
+    result = await ctx.call_role_tool(role="admin", operation="delete_learning_program", arguments={"program_id": program_id})
     if not result["success"]:
         return {
             "success": False,

@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="get_user_tasks",
     description="查询企业学习任务明细，支持任务类型、完成状态、到期状态、部门、分组、班级、分配者、学员、学习任务名称、课程关键词等多条件组合筛选",
-    required_servers=["admin"],
+    required_capabilities=['data_query'],
     return_description="任务明细列表及分页信息",
 )
 async def get_user_tasks(
@@ -73,11 +73,7 @@ async def get_user_tasks(
         if value:
             arguments[key] = value
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_user_tasks",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="list_user_tasks", arguments=arguments)
 
     if not result["success"]:
         return {

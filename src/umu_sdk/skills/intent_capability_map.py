@@ -18,7 +18,7 @@ class IntentCapabilityMap:
 
     # 关键词到 capability 的映射；同一 capability 内按匹配优先级排列
     KEYWORDS: dict[str, list[str]] = {
-        "teacher": [
+        "course_management": [
             "创建课程",
             "新建课程",
             "上传",
@@ -29,12 +29,18 @@ class IntentCapabilityMap:
             "课程协同",
             "转让课程",
             "提交审核",
-            "访问权限",
-            "指定账户",
             "定时关闭",
             "自动关闭",
         ],
-        "student": [
+        "permission_management": [
+            "访问权限",
+            "指定账户",
+        ],
+        "program_management": [
+            "学习项目",
+            "项目列表",
+        ],
+        "learning": [
             "报名",
             "学习",
             "完成",
@@ -45,27 +51,38 @@ class IntentCapabilityMap:
             "进度",
             "我的课程",
         ],
-        "admin": [
-            "企业课程",
+        "course_audit": [
             "审核课程",
-            "账号",
+            "黑名单",
+        ],
+        "organization": [
             "部门",
             "分组",
             "班级",
             "组织架构",
+        ],
+        "account_management": [
+            "账号",
+        ],
+        "data_query": [
+            "企业课程",
             "学习记录",
-            "授课记录",
             "学习任务",
-            "黑名单",
+        ],
+        "teaching_records": [
+            "授课记录",
+        ],
+        "instructor_management": [
+            "讲师",
         ],
     }
 
     @classmethod
     def classify(cls, intent: str) -> str | None:
-        """根据意图文本返回推荐 capability（teacher/student/admin）.
+        """根据意图文本返回推荐 capability（domain capability 名称）.
 
-        若多个 capability 都有关键词命中，按 teacher > student > admin
-        的优先级返回（创建课程、学习等动作优先于后台查询）。
+        若多个 capability 都有关键词命中，按 course_management / program_management /
+        permission_management / learning 优先于后台查询能力的顺序返回。
         未命中时返回 None。
         """
         lowered = intent.lower()
@@ -81,8 +98,19 @@ class IntentCapabilityMap:
         if not scores:
             return None
 
-        # 优先级：teacher > student > admin
-        for capability in ("teacher", "student", "admin"):
+        # 优先级：课程/学习项目管理 > 学习 > 后台查询
+        for capability in (
+            "course_management",
+            "program_management",
+            "permission_management",
+            "learning",
+            "course_audit",
+            "organization",
+            "account_management",
+            "data_query",
+            "teaching_records",
+            "instructor_management",
+        ):
             if capability in scores:
                 return capability
 

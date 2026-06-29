@@ -19,6 +19,9 @@ from typing import Any, AsyncIterator
 
 from mcp.server.fastmcp import FastMCP
 
+from .auth_config import get_configured_roles
+from .capability_registry import get_capability_registry
+from .capability_resolver import CapabilityResolver
 from .config import get_config
 from .decorators import SkillContext
 from .mcp_client import MCPClientManager
@@ -95,10 +98,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     _skill_registry.load_builtin_skills()
     _skill_registry.load_skill_package("umu_sdk.skills.slash")
 
-    missing = _skill_registry.validate_servers(available_servers)
+    configured_roles = get_configured_roles()
+    missing = _skill_registry.validate_capabilities(configured_roles)
     if missing:
         logger.warning(
-            "以下 Skill 所需子 MCP 未连接: %s",
+            "以下 Skill 所需能力域在当前配置中无可用角色: %s",
             ", ".join(missing),
         )
 
@@ -199,9 +203,6 @@ def _err(
 # 向后兼容：Admin 已删除的原子工具重定向到 Teacher canonical 工具
 # ---------------------------------------------------------------------------
 _ADMIN_TO_TEACHER_TOOL_MAP: dict[str, tuple[str, str]] = {
-    "adm_set_course_access_permission": ("teacher", "tch_set_course_access_permission"),
-    "adm_get_course_access_permission": ("teacher", "tch_get_course_access_permission"),
-    "adm_get_course_access_list": ("teacher", "tch_get_course_access_list"),
     "adm_search_access_accounts": ("teacher", "tch_search_access_accounts"),
     "adm_add_course_access_accounts": ("teacher", "tch_add_course_access_accounts"),
     "adm_remove_course_access_accounts": ("teacher", "tch_remove_course_access_accounts"),
@@ -252,7 +253,7 @@ async def skill_describe(name: str) -> str:
         data={
             "name": info.name,
             "description": info.description,
-            "required_servers": info.required_servers,
+            "required_capabilities": info.required_capabilities,
             "parameters": [p.model_dump(exclude_none=True) for p in info.parameters],
             "return_description": info.return_description,
         },
@@ -276,14 +277,30 @@ async def skill_run(name: str, arguments: dict[str, Any]) -> str:
     except KeyError as e:
         return _err("SKILL_NOT_FOUND", str(e))
 
-    # 校验所需子 MCP 是否可用
-    available = set(_mcp_client.list_servers())
-    missing = [s for s in skill.info.required_servers if s not in available]
-    if missing:
+    # 校验所需能力域在当前配置下是否有可用角色
+    configured_roles = get_configured_roles()
+    resolver = CapabilityResolver(configured_roles=configured_roles)
+    unavailable_capabilities: list[str] = []
+    for capability in skill.info.required_capabilities:
+        operations = get_capability_registry().get_operations_for_capability(capability)
+        # 优先按已注册 operation 的支持角色判断
+        has_available_role = any(
+            any(role in configured_roles for role in roles)
+            for roles in operations.values()
+        )
+        # 对于尚未注册 operation 的角色专属能力域，按默认角色顺序判断
+        if not has_available_role:
+            role_order = resolver._get_role_order(capability)
+            has_available_role = any(role in configured_roles for role in role_order)
+
+        if not has_available_role:
+            unavailable_capabilities.append(capability)
+
+    if unavailable_capabilities:
         return _err(
             "SERVER_UNAVAILABLE",
-            f"Skill [{name}] 所需子 MCP 未连接: {', '.join(missing)}",
-            suggested_action="请检查 orchestrator 配置或启动对应的子 MCP",
+            f"Skill [{name}] 所需能力域在当前账号配置下无可用角色: {', '.join(unavailable_capabilities)}",
+            suggested_action="请在 .env 或环境变量中配置对应角色的 UMU 账号",
         )
 
     ctx = SkillContext(
@@ -291,6 +308,7 @@ async def skill_run(name: str, arguments: dict[str, Any]) -> str:
         skill_name=name,
         logger=logger,
         session_state=_session_state,
+        configured_roles=configured_roles,
     )
 
     try:

@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="list_accounts",
     description="查询企业账号列表",
-    required_servers=["admin"],
+    required_capabilities=['account_management'],
     return_description="账号列表及分页信息",
 )
 async def list_accounts(
@@ -39,11 +39,7 @@ async def list_accounts(
     if account_status is not None:
         arguments["account_status"] = account_status
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_accounts",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="list_accounts", arguments=arguments)
 
     if not result["success"]:
         return {
@@ -68,7 +64,7 @@ async def list_accounts(
 @skill(
     name="disable_account",
     description="禁用企业账号",
-    required_servers=["admin"],
+    required_capabilities=['account_management'],
     return_description="禁用结果",
 )
 async def disable_account(
@@ -96,11 +92,7 @@ async def disable_account(
     if effective_time:
         arguments["effective_time"] = effective_time
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_disable_account",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="disable_account", arguments=arguments)
 
     if not result["success"]:
         return {
@@ -125,7 +117,7 @@ async def disable_account(
 @skill(
     name="enable_account",
     description="启用企业账号",
-    required_servers=["admin"],
+    required_capabilities=['account_management'],
     return_description="启用结果",
 )
 async def enable_account(
@@ -150,11 +142,7 @@ async def enable_account(
     if email:
         arguments["email"] = email
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_enable_account",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="enable_account", arguments=arguments)
 
     if not result["success"]:
         return {
@@ -179,7 +167,7 @@ async def enable_account(
 @skill(
     name="update_account",
     description="编辑企业账号信息",
-    required_servers=["admin"],
+    required_capabilities=['account_management'],
     return_description="更新结果，包含旧值、新值与 warnings",
 )
 async def update_account(
@@ -234,11 +222,7 @@ async def update_account(
     if manager_group_ids is not None:
         arguments["manager_group_ids"] = manager_group_ids
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_update_account",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="update_account", arguments=arguments)
 
     if not result["success"]:
         return {

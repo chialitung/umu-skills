@@ -360,7 +360,7 @@ class TestTchUploadScorm:
         from umu_sdk.adapters.mcp.cos_upload import UploadResult, UploadProgress
 
         with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client, \
-             patch("umu_sdk.adapters.mcp.teacher.ScormUploader") as MockUploader:
+             patch("umu_sdk.tools.operations.resource_management.ScormUploader") as MockUploader:
 
             mock_client = MagicMock()
             mock_client.base_url = "https://www.umu.cn"
@@ -414,7 +414,7 @@ class TestTchUploadScorm:
         from umu_sdk.adapters.mcp.cos_upload import UploadResult
 
         with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client, \
-             patch("umu_sdk.adapters.mcp.teacher.ScormUploader") as MockUploader:
+             patch("umu_sdk.tools.operations.resource_management.ScormUploader") as MockUploader:
 
             mock_client = MagicMock()
             mock_client.base_url = "https://www.umu.cn"
@@ -455,23 +455,22 @@ class TestTchUploadScorm:
         """测试 preObject 失败时返回错误."""
         from umu_sdk.adapters.mcp.teacher import tch_upload_scorm
 
-        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client:
+        with patch("umu_sdk.adapters.mcp.teacher._get_client") as mock_get_client, \
+             patch("umu_sdk.tools.operations.resource_management.ScormUploader") as MockUploader:
             mock_client = MagicMock()
             mock_client.base_url = "https://www.umu.cn"
             mock_client.desktop_url = lambda path: f"https://www.umu.cn{path}"
             mock_get_client.return_value = mock_client
 
-            mock_client.get.return_value = {"data": {"teacher_id": "11872995"}}
-            mock_client.post.return_value = {
-                "error_code": 1001,
-                "error_message": "获取凭证失败",
-            }
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(side_effect=RuntimeError("获取凭证失败"))
+            MockUploader.return_value = mock_instance
 
             result = await tch_upload_scorm(temp_zip_file)
             data = json.loads(result)
 
             assert data["success"] is False
-            assert data["error_code"] == "SCORM_UPLOAD_ERROR"
+            assert data["error_code"] == "TCH_UPLOAD_SCORM_ERROR"
 
 
 # ---------------------------------------------------------------------------

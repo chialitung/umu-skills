@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="add_video_section",
     description="为课程添加视频小节",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="小节创建结果（含 section_id）",
 )
 async def add_video_section(
@@ -36,9 +36,9 @@ async def add_video_section(
     if cover_resource_id:
         arguments["cover_resource_id"] = cover_resource_id
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_video_section",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="create_video_section",
         arguments=arguments,
     )
     return _handle_section_result(result, "视频小节")
@@ -47,7 +47,7 @@ async def add_video_section(
 @skill(
     name="add_article_section",
     description="为课程添加文章小节",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="小节创建结果（含 section_id）",
 )
 async def add_article_section(
@@ -69,9 +69,9 @@ async def add_article_section(
     if cover_resource_id:
         arguments["cover_resource_id"] = cover_resource_id
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_article_section",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="create_article_section",
         arguments=arguments,
     )
     return _handle_section_result(result, "文章小节")
@@ -80,7 +80,7 @@ async def add_article_section(
 @skill(
     name="add_infographic_section",
     description="为课程添加图文小节",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="小节创建结果（含 section_id）",
 )
 async def add_infographic_section(
@@ -99,9 +99,9 @@ async def add_infographic_section(
     if cover_image_path:
         arguments["cover_image_path"] = cover_image_path
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_infographic_section",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="create_infographic_section",
         arguments=arguments,
     )
     return _handle_section_result(result, "图文小节")
@@ -110,7 +110,7 @@ async def add_infographic_section(
 @skill(
     name="add_document_section",
     description="为课程添加文档小节",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="小节创建结果（含 section_id）",
 )
 async def add_document_section(
@@ -130,9 +130,9 @@ async def add_document_section(
     if document_file_path:
         arguments["document_file_path"] = document_file_path
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_document_section",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="create_document_section",
         arguments=arguments,
     )
     return _handle_section_result(result, "文档小节")
@@ -141,7 +141,7 @@ async def add_document_section(
 @skill(
     name="add_survey_section",
     description="为课程添加问卷小节",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="小节创建结果（含 section_id）",
 )
 async def add_survey_section(
@@ -151,9 +151,9 @@ async def add_survey_section(
     questions_json: str,
 ) -> dict[str, Any]:
     """添加问卷小节."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_survey_section",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="create_survey_section",
         arguments={
             "group_id": group_id,
             "session_title": session_title,
@@ -166,7 +166,7 @@ async def add_survey_section(
 @skill(
     name="add_exam_section",
     description="为课程添加考试小节",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="小节创建结果（含 section_id）",
 )
 async def add_exam_section(
@@ -176,9 +176,9 @@ async def add_exam_section(
     questions_json: str,
 ) -> dict[str, Any]:
     """添加考试小节."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_exam_section",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="create_exam_section",
         arguments={
             "group_id": group_id,
             "session_title": session_title,
@@ -191,7 +191,7 @@ async def add_exam_section(
 @skill(
     name="add_signin_section",
     description="为课程添加签到小节",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="小节创建结果（含 section_id）",
 )
 async def add_signin_section(
@@ -201,9 +201,9 @@ async def add_signin_section(
     signin_info_json: str,
 ) -> dict[str, Any]:
     """添加签到小节."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_create_signin_section",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="create_signin_section",
         arguments={
             "group_id": group_id,
             "session_title": session_title,
@@ -216,7 +216,7 @@ async def add_signin_section(
 @skill(
     name="list_course_sections",
     description="列出课程的所有小节",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="小节列表",
 )
 async def list_course_sections(
@@ -224,9 +224,9 @@ async def list_course_sections(
     group_id: str,
 ) -> dict[str, Any]:
     """列出课程小节."""
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_list_sections",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="list_sections",
         arguments={"group_id": group_id},
     )
 

@@ -128,8 +128,9 @@ class TestTchInviteCourseCollaborator:
             result = json.loads(await tch_invite_course_collaborator(group_id="g1", keyword=" ambiguous", role_type="editor"))
 
         assert result["success"] is False
-        assert result["error_code"] == "AMBIGUOUS_ACCOUNT"
-        assert result["next_action"] == "needs_user_input"
+        assert result["error_code"] == "TCH_INVITE_COURSE_COLLABORATOR_ERROR"
+        assert "找到多个匹配账号" in result["error_message"]
+        assert result["next_action"] == "retry"
 
 
 class TestTchUpdateCollaboratorRole:

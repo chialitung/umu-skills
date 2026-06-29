@@ -412,13 +412,13 @@ class TestCheckNeedsEnrollForm:
         }
 
         with patch(
-            "umu_sdk.adapters.mcp.student._get_enroll_short_url",
+            "umu_sdk.tools.shared.learning_helpers._get_enroll_short_url",
             return_value=("580260", "https://m.umu.cn/sse_xxx"),
         ), patch(
-            "umu_sdk.adapters.mcp.student._fetch_enroll_form_page",
+            "umu_sdk.tools.shared.learning_helpers._fetch_enroll_form_page",
             return_value={"data": {}},
         ), patch(
-            "umu_sdk.adapters.mcp.student._parse_enroll_form",
+            "umu_sdk.tools.shared.learning_helpers._parse_enroll_form",
             return_value=parsed_form,
         ):
             needs_form, summary = _check_needs_enroll_form(client, "g1", "sk1")
@@ -437,13 +437,13 @@ class TestCheckNeedsEnrollForm:
         }
 
         with patch(
-            "umu_sdk.adapters.mcp.student._get_enroll_short_url",
+            "umu_sdk.tools.shared.learning_helpers._get_enroll_short_url",
             return_value=("580260", "https://m.umu.cn/sse_xxx"),
         ), patch(
-            "umu_sdk.adapters.mcp.student._fetch_enroll_form_page",
+            "umu_sdk.tools.shared.learning_helpers._fetch_enroll_form_page",
             return_value={"data": {}},
         ), patch(
-            "umu_sdk.adapters.mcp.student._parse_enroll_form",
+            "umu_sdk.tools.shared.learning_helpers._parse_enroll_form",
             return_value=parsed_form,
         ):
             needs_form, summary = _check_needs_enroll_form(client, "g1", "sk1")
@@ -463,13 +463,13 @@ class TestCheckNeedsEnrollForm:
         }
 
         with patch(
-            "umu_sdk.adapters.mcp.student._get_enroll_short_url",
+            "umu_sdk.tools.shared.learning_helpers._get_enroll_short_url",
             return_value=("580260", "https://m.umu.cn/sse_xxx"),
         ), patch(
-            "umu_sdk.adapters.mcp.student._fetch_enroll_form_page",
+            "umu_sdk.tools.shared.learning_helpers._fetch_enroll_form_page",
             return_value={"data": {}},
         ), patch(
-            "umu_sdk.adapters.mcp.student._parse_enroll_form",
+            "umu_sdk.tools.shared.learning_helpers._parse_enroll_form",
             return_value=parsed_form,
         ):
             needs_form, summary = _check_needs_enroll_form(client, "g1", "sk1")
@@ -510,11 +510,11 @@ class TestStuEnrollCourseFormDetection:
 
         with _patch_student_client() as client, \
                 patch(
-                    "umu_sdk.adapters.mcp.student._resolve_course_identifier",
+                    "umu_sdk.tools.operations.learning._resolve_course_identifier",
                     return_value=("g1", "sk1", "https://m.umu.cn/course?groupId=g1&sKey=sk1"),
                 ), \
                 patch(
-                    "umu_sdk.adapters.mcp.student._check_needs_enroll_form",
+                    "umu_sdk.tools.operations.learning._check_needs_enroll_form",
                     return_value=(True, form_summary),
                 ):
             client.post.return_value = {
@@ -540,11 +540,11 @@ class TestStuEnrollCourseFormDetection:
 
         with _patch_student_client() as client, \
                 patch(
-                    "umu_sdk.adapters.mcp.student._resolve_course_identifier",
+                    "umu_sdk.tools.operations.learning._resolve_course_identifier",
                     return_value=("g1", "sk1", "https://m.umu.cn/course?groupId=g1&sKey=sk1"),
                 ), \
                 patch(
-                    "umu_sdk.adapters.mcp.student._check_needs_enroll_form",
+                    "umu_sdk.tools.operations.learning._check_needs_enroll_form",
                     return_value=(False, None),
                 ):
             client.post.return_value = {
@@ -576,15 +576,15 @@ class TestStuGetCourseStructureFormDetection:
 
         with _patch_student_client() as client, \
                 patch(
-                    "umu_sdk.adapters.mcp.student._resolve_course_identifier",
+                    "umu_sdk.tools.operations.learning._resolve_course_identifier",
                     return_value=("g1", "sk1", "https://m.umu.cn/course?groupId=g1&sKey=sk1"),
                 ), \
                 patch(
-                    "umu_sdk.adapters.mcp.student._check_needs_enroll",
+                    "umu_sdk.tools.operations.learning._check_needs_enroll",
                     return_value=(True, "580260"),
                 ), \
                 patch(
-                    "umu_sdk.adapters.mcp.student._check_needs_enroll_form",
+                    "umu_sdk.tools.operations.learning._check_needs_enroll_form",
                     return_value=(True, form_summary),
                 ):
             client.get.return_value = {"error_code": 0, "data": {"list": []}}
@@ -612,15 +612,23 @@ class TestStuCompleteCourseFormDetection:
 
         with _patch_student_client() as client, \
                 patch(
-                    "umu_sdk.adapters.mcp.student._resolve_course_identifier",
+                    "umu_sdk.tools.operations.learning._resolve_course_identifier",
                     return_value=("g1", "sk1", "https://m.umu.cn/course?groupId=g1&sKey=sk1"),
                 ), \
                 patch(
-                    "umu_sdk.adapters.mcp.student._check_needs_enroll",
-                    return_value=(True, "580260"),
+                    "umu_sdk.tools.operations.learning._get_course_structure_impl",
+                    return_value={
+                        "group_id": "g1",
+                        "s_key": "sk1",
+                        "enrollment_status": "needs_enrollment",
+                        "needs_enrollment": True,
+                        "enroll_id": "580260",
+                        "is_enrolled": 1,
+                        "lessons": [],
+                    },
                 ), \
                 patch(
-                    "umu_sdk.adapters.mcp.student._check_needs_enroll_form",
+                    "umu_sdk.tools.operations.learning._check_needs_enroll_form",
                     return_value=(True, form_summary),
                 ):
             client.post.return_value = {

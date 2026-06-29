@@ -19,7 +19,7 @@ from ._runner import run_umu_command
 @skill(
     name="umu",
     description="智能路由用户意图到最佳角色并执行对应的统一 Skill",
-    required_servers=[],
+    required_capabilities=[],
     return_description="统一返回信封，包含 resolved_role、fallback_reason 等字段",
 )
 async def umu(

@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="upload_scorm_resource",
     description="上传 SCORM 包到讲师资源库",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="上传后的资源信息（含 resource_id）",
 )
 async def upload_scorm_resource(
@@ -32,9 +32,9 @@ async def upload_scorm_resource(
     if auto_rename:
         arguments["auto_rename"] = True
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_upload_scorm",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="upload_scorm",
         arguments=arguments,
     )
 
@@ -47,7 +47,7 @@ async def upload_scorm_resource(
 @skill(
     name="upload_document_resource",
     description="上传文档到讲师文档库",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="上传后的文档信息（含 resource_id）",
 )
 async def upload_document_resource(
@@ -65,9 +65,9 @@ async def upload_document_resource(
     if skip_existing:
         arguments["skip_existing"] = True
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_upload_document",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="upload_document",
         arguments=arguments,
     )
 
@@ -80,7 +80,7 @@ async def upload_document_resource(
 @skill(
     name="upload_video_resource",
     description="上传音视频到讲师音视频库",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="上传后的音视频信息（含 resource_id）",
 )
 async def upload_video_resource(
@@ -95,9 +95,9 @@ async def upload_video_resource(
     if title:
         arguments["name"] = title
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_upload_audio_video",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="upload_audio_video",
         arguments=arguments,
     )
 
@@ -110,7 +110,7 @@ async def upload_video_resource(
 @skill(
     name="list_scorm_resources",
     description="列出讲师 SCORM/音视频资源",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="资源列表及分页信息",
 )
 async def list_scorm_resources(
@@ -131,9 +131,9 @@ async def list_scorm_resources(
     if search_keyword:
         arguments["search_keyword"] = search_keyword
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_list_resources",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="list_resources",
         arguments=arguments,
     )
 
@@ -146,7 +146,7 @@ async def list_scorm_resources(
 @skill(
     name="list_document_resources",
     description="列出讲师文档资源",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="文档列表及分页信息",
 )
 async def list_document_resources(
@@ -165,9 +165,9 @@ async def list_document_resources(
     if search_keyword:
         arguments["search_keyword"] = search_keyword
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_list_documents",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="list_documents",
         arguments=arguments,
     )
 
@@ -180,7 +180,7 @@ async def list_document_resources(
 @skill(
     name="list_video_resources",
     description="列出讲师音视频资源",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="音视频列表及分页信息",
 )
 async def list_video_resources(
@@ -199,9 +199,9 @@ async def list_video_resources(
     if search_keyword:
         arguments["search_keyword"] = search_keyword
 
-    result = await ctx.call_tool(
-        server="teacher",
-        tool="tch_list_audio_videos",
+    result = await ctx.call_capability_tool(
+        capability="course_management",
+        operation="list_audio_videos",
         arguments=arguments,
     )
 

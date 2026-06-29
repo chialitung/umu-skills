@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import os
-import tempfile
 
 from umu_sdk.adapters.mcp.teacher import (
     tch_add_course_access_accounts,
@@ -34,8 +33,7 @@ def mock_client():
 
 def _auth_patch(mock_client):
     stack = ExitStack()
-    stack.enter_context(patch("umu_sdk.adapters.mcp.teacher._get_client", return_value=mock_client))
-    stack.enter_context(patch("umu_sdk.adapters.mcp.teacher._require_auth", return_value=None))
+    stack.enter_context(patch("umu_sdk.adapters.mcp.teacher._umu_client", mock_client))
     return stack
 
 

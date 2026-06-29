@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Annotated, Any, AsyncIterator
@@ -78,6 +77,15 @@ from .shared_session_tools import (
     make_list_sessions_tool,
     make_login_tool,
 )
+from .tool_factory import register_operations
+from ...tools.operations import programs as _programs_ops
+from ...tools.operations import access_permissions as _access_permissions_ops
+from ...tools.operations import courses as _courses_ops
+from ...tools.operations import learning as _learning_ops
+from ...tools.operations import course_management as _course_management_ops
+from ...tools.operations import section_management as _section_management_ops
+from ...tools.operations import resource_management as _resource_management_ops
+from ...tools.operations import collaboration as _collaboration_ops
 from . import prompts
 
 # ---------------------------------------------------------------------------
@@ -226,6 +234,16 @@ def _require_auth(client: UMUClient) -> str | None:
     if not client.auth.is_authenticated():
         return "当前未登录或 Token 已过期，请先调用 adm_login 登录"
     return None
+
+
+def _get_client_for_ops(session_id: str | None = None) -> UMUClient:
+    """运行时分发 client；通过包装层保留测试对 _get_client 的 patch 能力."""
+    return _get_client(session_id)
+
+
+def _require_auth_for_ops(client: UMUClient) -> str | None:
+    """运行时分发鉴权检查；通过包装层保留测试对 _require_auth 的 patch 能力."""
+    return _require_auth(client)
 
 
 def _ok(
@@ -379,6 +397,108 @@ mcp.tool()(
         err=_err,
     )
 )
+
+
+# ---------------------------------------------------------------------------
+# Tools: 共享业务操作（自动注册）
+# ---------------------------------------------------------------------------
+
+register_operations(
+    mcp=mcp,
+    module=_programs_ops,
+    role="admin",
+    get_client=_get_client_for_ops,
+    ok=_ok,
+    err=_err,
+    require_auth=_require_auth_for_ops,
+    logger=logger,
+    namespace=globals(),
+)
+
+register_operations(
+    mcp=mcp,
+    module=_access_permissions_ops,
+    role="admin",
+    get_client=_get_client_for_ops,
+    ok=_ok,
+    err=_err,
+    require_auth=_require_auth_for_ops,
+    logger=logger,
+    namespace=globals(),
+)
+
+register_operations(
+    mcp=mcp,
+    module=_courses_ops,
+    role="admin",
+    get_client=_get_client_for_ops,
+    ok=_ok,
+    err=_err,
+    require_auth=_require_auth_for_ops,
+    logger=logger,
+    namespace=globals(),
+)
+
+register_operations(
+    mcp=mcp,
+    module=_learning_ops,
+    role="admin",
+    get_client=_get_client_for_ops,
+    ok=_ok,
+    err=_err,
+    require_auth=_require_auth_for_ops,
+    logger=logger,
+    namespace=globals(),
+)
+
+register_operations(
+    mcp=mcp,
+    module=_course_management_ops,
+    role="admin",
+    get_client=_get_client_for_ops,
+    ok=_ok,
+    err=_err,
+    require_auth=_require_auth_for_ops,
+    logger=logger,
+    namespace=globals(),
+)
+
+register_operations(
+    mcp=mcp,
+    module=_section_management_ops,
+    role="admin",
+    get_client=_get_client_for_ops,
+    ok=_ok,
+    err=_err,
+    require_auth=_require_auth_for_ops,
+    logger=logger,
+    namespace=globals(),
+)
+
+register_operations(
+    mcp=mcp,
+    module=_resource_management_ops,
+    role="admin",
+    get_client=_get_client_for_ops,
+    ok=_ok,
+    err=_err,
+    require_auth=_require_auth_for_ops,
+    logger=logger,
+    namespace=globals(),
+)
+
+register_operations(
+    mcp=mcp,
+    module=_collaboration_ops,
+    role="admin",
+    get_client=_get_client_for_ops,
+    ok=_ok,
+    err=_err,
+    require_auth=_require_auth_for_ops,
+    logger=logger,
+    namespace=globals(),
+)
+
 
 # ---------------------------------------------------------------------------
 # Tools: 账号管理
@@ -3551,68 +3671,6 @@ async def adm_delete_groups(
         next_action="proceed",
         suggested_action="分组已删除",
     )
-
-
-@mcp.tool()
-async def adm_delete_learning_program(
-    program_id: Annotated[str, Field(description="学习项目 ID")],
-    session_id: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="可选的会话 ID。如果提供，在指定会话中执行；如果不提供，使用默认会话。",
-        ),
-    ] = None,
-) -> str:
-    """删除学习项目.
-
-    触发条件：管理员需要删除指定学习项目时调用。
-    前置依赖：需先调用 adm_login 完成管理员登录。
-    副作用：将学习项目移至平台回收站。
-    """
-    client = _get_client(session_id)
-
-    auth_err = _require_auth(client)
-    if auth_err:
-        return _err(
-            error_code="NOT_AUTHENTICATED",
-            error_message=auth_err,
-            suggested_action="调用 adm_login 登录",
-            next_action="retry",
-        )
-
-    if not program_id or str(program_id) in ("0", ""):
-        return _err(
-            error_code="EMPTY_PROGRAM_ID",
-            error_message="program_id 不能为空",
-            suggested_action="提供有效的学习项目 ID",
-        )
-
-    try:
-        resp = client.post(
-            client.desktop_url("/api/program/deleteprogram"),
-            data={"program_id": program_id},
-        )
-
-        if resp.get("status") is True or resp.get("error_code") == 0:
-            return _ok(
-                data={"program_id": program_id, "deleted": True},
-                next_action="proceed",
-                suggested_action="学习项目已删除",
-            )
-
-        return _err(
-            error_code="DELETE_LEARNING_PROGRAM_FAILED",
-            error_message=resp.get("error", "删除学习项目失败"),
-            suggested_action="请确认管理员对该学习项目具有删除权限",
-        )
-    except Exception as e:
-        logger.exception("删除学习项目失败")
-        return _err(
-            error_code="DELETE_LEARNING_PROGRAM_ERROR",
-            error_message=str(e),
-            suggested_action="请检查网络连接和参数后重试",
-        )
 
 
 @mcp.tool()
@@ -7298,165 +7356,6 @@ async def adm_list_learning_programs(
             suggested_action="检查网络连接后重试",
         )
 
-
-# ---------------------------------------------------------------------------
-# Tools: 个人视角学习项目列表查询
-# ---------------------------------------------------------------------------
-
-def _program_list_url_and_params(
-    scope: str,
-    keywords: str,
-    page: int,
-    page_size: int,
-) -> tuple[str, dict[str, str]]:
-    """根据 scope 返回学习项目列表的端点和参数."""
-    base_params: dict[str, str] = {
-        "t": str(int(time.time() * 1000)),
-        "page": str(page),
-        "size": str(page_size),
-    }
-    if scope == "owned":
-        url = "/api/program/getlist"
-        base_params["owner"] = "1"
-        base_params["type"] = "1"
-    elif scope == "cooperated":
-        url = "/api/program/getcooperateprogramlist"
-    elif scope == "enrolled":
-        url = "/api/program/getmyparticipatedprogramlist"
-    else:
-        raise ValueError(f"不支持的 scope: {scope}")
-
-    if keywords:
-        base_params["keywords"] = keywords
-
-    return url, base_params
-
-
-def _format_program_list_item(item: dict[str, Any]) -> dict[str, Any]:
-    """统一格式化 /api/program/getlist 返回的项目字段."""
-    creator = item.get("creator", {}) or {}
-    return {
-        "program_id": str(item.get("program_id", "")),
-        "program_title": item.get("program_title", ""),
-        "desc": item.get("desc", ""),
-        "access_code": item.get("access_code", ""),
-        "share_url": item.get("share_url", ""),
-        "share_pc_url": item.get("share_pc_url", ""),
-        "head_img": item.get("head_img", ""),
-        "bg_img": item.get("setup", {}).get("bg_img", ""),
-        "create_time": item.get("create_time", ""),
-        "update_time": item.get("update_time", ""),
-        "creator_umu_id": str(creator.get("umu_id", "")),
-        "creator_name": creator.get("user_name", item.get("creater_name", "")),
-        "group_num": item.get("group_num", 0),
-        "module_num": item.get("module_num", 0),
-        "is_creator": item.get("is_creator", 0),
-    }
-
-
-@mcp.tool()
-async def adm_list_personal_learning_programs(
-    scope: Annotated[
-        str,
-        Field(description="列表视角：owned=我拥有的, cooperated=协同给我的, enrolled=我报名的"),
-    ],
-    keywords: Annotated[str | None, Field(default=None, description="按标题/访问码模糊搜索")] = None,
-    page: Annotated[int, Field(default=1, ge=1, description="页码")] = 1,
-    page_size: Annotated[int, Field(default=20, ge=1, le=100, description="每页数量")] = 20,
-    fetch_all: Annotated[bool, Field(default=False, description="是否自动获取全量数据")] = False,
-    session_id: Annotated[str | None, Field(default=None, description="可选会话 ID")] = None,
-) -> str:
-    """查询当前管理员作为普通用户的学习项目清单."""
-    client = _get_client(session_id)
-    auth_err = _require_auth(client)
-    if auth_err:
-        return _err(
-            error_code="NOT_AUTHENTICATED",
-            error_message=auth_err,
-            suggested_action="调用 adm_login 登录",
-        )
-
-    try:
-        url, base_params = _program_list_url_and_params(scope, keywords or "", page, page_size)
-    except ValueError as e:
-        return _err(error_code="INVALID_SCOPE", error_message=str(e), next_action="needs_user_input")
-
-    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
-        params = {**base_params, "page": str(p), "size": str(sz)}
-        resp = client.get(client.desktop_url(url), params=params)
-        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
-            raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
-
-        data = resp.get("data", {})
-        page_info = data.get("page_info", {})
-        program_list = data.get("list", [])
-        total_all = int(page_info.get("list_total_num", 0) or 0)
-        return [_format_program_list_item(item) for item in program_list], total_all
-
-    try:
-        if fetch_all:
-            all_items: list[dict[str, Any]] = []
-            total_all = 0
-            current_page = 1
-            batch_size = 20
-
-            while True:
-                items, total_all = _fetch_page(current_page, batch_size)
-                all_items.extend(items)
-
-                report_pagination_progress(
-                    "adm_list_personal_learning_programs",
-                    current_page,
-                    len(all_items),
-                    total_all,
-                    batch_size,
-                    is_complete=len(all_items) >= total_all or not items,
-                )
-
-                if len(all_items) >= total_all or not items:
-                    break
-                current_page += 1
-                if current_page > 50:
-                    report_pagination_progress(
-                        "adm_list_personal_learning_programs",
-                        current_page,
-                        len(all_items),
-                        total_all,
-                        batch_size,
-                        is_safety_limit=True,
-                    )
-                    logger.warning("fetch_all 达到安全上限 50 页，停止获取")
-                    break
-
-            return _ok(
-                data={
-                    "scope": scope,
-                    "programs": all_items,
-                    "total": len(all_items),
-                    "pagination": {
-                        "total_all": total_all,
-                        "current_page": 1,
-                        "page_size": len(all_items) if all_items else 0,
-                    },
-                },
-                next_action="proceed",
-            )
-
-        items, _ = _fetch_page(page, page_size)
-        return _ok(
-            data={
-                "scope": scope,
-                "programs": items,
-                "pagination": {
-                    "current_page": page,
-                    "page_size": page_size,
-                },
-            },
-            next_action="proceed",
-        )
-    except Exception as e:
-        logger.exception("获取学习项目列表失败")
-        return _err("LIST_LEARNING_PROGRAMS_FAILED", str(e))
 
 
 async def _resolve_instructor_tag_names(

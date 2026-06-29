@@ -19,14 +19,14 @@ from umu_sdk.skills.builtin.admin_course_audit import (
 def mock_ctx():
     """构造 mock SkillContext."""
     ctx = MagicMock()
-    ctx.call_tool = AsyncMock()
+    ctx.call_role_tool = AsyncMock()
     return ctx
 
 
 @pytest.mark.asyncio
 async def test_list_course_audit_records_skill(mock_ctx):
     """测试 list_course_audit_records Skill."""
-    mock_ctx.call_tool.return_value = {
+    mock_ctx.call_role_tool.return_value = {
         "success": True,
         "data": {"records": [], "total": 0},
         "error_code": "",
@@ -41,9 +41,9 @@ async def test_list_course_audit_records_skill(mock_ctx):
 
     assert result["success"] is True
     assert result["data"]["total"] == 0
-    mock_ctx.call_tool.assert_awaited_once_with(
-        server="admin",
-        tool="adm_list_course_audit_records",
+    mock_ctx.call_role_tool.assert_awaited_once_with(
+        role="admin",
+        operation="list_course_audit_records",
         arguments={
             "audit_status": 0,
             "page": 1,
@@ -60,7 +60,7 @@ async def test_list_course_audit_records_skill(mock_ctx):
 @pytest.mark.asyncio
 async def test_audit_course_skill(mock_ctx):
     """测试 audit_course Skill."""
-    mock_ctx.call_tool.return_value = {
+    mock_ctx.call_role_tool.return_value = {
         "success": True,
         "data": {"group_ids": "7330085", "action": "通过"},
         "error_code": "",
@@ -74,9 +74,9 @@ async def test_audit_course_skill(mock_ctx):
     )
 
     assert result["success"] is True
-    mock_ctx.call_tool.assert_awaited_once_with(
-        server="admin",
-        tool="adm_audit_course",
+    mock_ctx.call_role_tool.assert_awaited_once_with(
+        role="admin",
+        operation="audit_course",
         arguments={"group_ids": "7330085", "action": "approve"},
     )
 
@@ -84,7 +84,7 @@ async def test_audit_course_skill(mock_ctx):
 @pytest.mark.asyncio
 async def test_list_course_categories_skill(mock_ctx):
     """测试 list_course_categories Skill."""
-    mock_ctx.call_tool.return_value = {
+    mock_ctx.call_role_tool.return_value = {
         "success": True,
         "data": {"categories": [], "total": 0},
         "error_code": "",
@@ -94,9 +94,9 @@ async def test_list_course_categories_skill(mock_ctx):
     result = await list_course_categories(ctx=mock_ctx)
 
     assert result["success"] is True
-    mock_ctx.call_tool.assert_awaited_once_with(
-        server="admin",
-        tool="adm_list_course_categories",
+    mock_ctx.call_role_tool.assert_awaited_once_with(
+        role="admin",
+        operation="list_course_categories",
         arguments={"is_with_course_num": False},
     )
 
@@ -104,7 +104,7 @@ async def test_list_course_categories_skill(mock_ctx):
 @pytest.mark.asyncio
 async def test_list_course_blacklist_skill(mock_ctx):
     """测试 list_course_blacklist Skill."""
-    mock_ctx.call_tool.return_value = {
+    mock_ctx.call_role_tool.return_value = {
         "success": True,
         "data": {"blacklist": [], "total": 0},
         "error_code": "",
@@ -114,9 +114,9 @@ async def test_list_course_blacklist_skill(mock_ctx):
     result = await list_course_blacklist(ctx=mock_ctx)
 
     assert result["success"] is True
-    mock_ctx.call_tool.assert_awaited_once_with(
-        server="admin",
-        tool="adm_list_course_blacklist",
+    mock_ctx.call_role_tool.assert_awaited_once_with(
+        role="admin",
+        operation="list_course_blacklist",
         arguments={"page": 1, "page_size": 15, "fetch_all": False},
     )
 
@@ -124,7 +124,7 @@ async def test_list_course_blacklist_skill(mock_ctx):
 @pytest.mark.asyncio
 async def test_manage_course_blacklist_skill(mock_ctx):
     """测试 manage_course_blacklist Skill."""
-    mock_ctx.call_tool.return_value = {
+    mock_ctx.call_role_tool.return_value = {
         "success": True,
         "data": {"umu_id": "20440690", "action": "加入"},
         "error_code": "",
@@ -138,9 +138,9 @@ async def test_manage_course_blacklist_skill(mock_ctx):
     )
 
     assert result["success"] is True
-    mock_ctx.call_tool.assert_awaited_once_with(
-        server="admin",
-        tool="adm_save_course_blacklist",
+    mock_ctx.call_role_tool.assert_awaited_once_with(
+        role="admin",
+        operation="save_course_blacklist",
         arguments={"umu_id": "20440690", "action": "add"},
     )
 
@@ -148,7 +148,7 @@ async def test_manage_course_blacklist_skill(mock_ctx):
 @pytest.mark.asyncio
 async def test_list_course_audit_records_skill_failure(mock_ctx):
     """测试 Skill 失败时返回统一信封."""
-    mock_ctx.call_tool.return_value = {
+    mock_ctx.call_role_tool.return_value = {
         "success": False,
         "data": None,
         "error_code": "NOT_AUTHENTICATED",

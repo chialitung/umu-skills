@@ -17,6 +17,7 @@ from umu_sdk.skills.builtin.teacher_learning_programs import (
 @pytest.fixture
 def ctx():
     context = MagicMock()
+    context.call_capability_tool = AsyncMock()
     context.call_tool = AsyncMock()
     context.logger = MagicMock()
     return context
@@ -24,7 +25,7 @@ def ctx():
 
 class TestCreateLearningProgram:
     async def test_success_with_explicit_modules(self, ctx):
-        ctx.call_tool.side_effect = [
+        ctx.call_capability_tool.side_effect = [
             {
                 "success": True,
                 "data": {"program_id": "359929"},
@@ -47,7 +48,7 @@ class TestCreateLearningProgram:
         assert result["data"]["program_id"] == "359929"
 
     async def test_success_with_flat_course_ids(self, ctx):
-        ctx.call_tool.side_effect = [
+        ctx.call_capability_tool.side_effect = [
             {
                 "success": True,
                 "data": {"program_id": "359929"},
@@ -63,11 +64,11 @@ class TestCreateLearningProgram:
         ]
         result = await create_learning_program(ctx, title="新项目", course_ids=["1"])
         assert result["success"] is True
-        _, add_call = ctx.call_tool.call_args_list
+        _, add_call = ctx.call_capability_tool.call_args_list
         assert add_call.kwargs["arguments"]["modules"][0]["module_title"] == "必修课程"
 
     async def test_create_failure(self, ctx):
-        ctx.call_tool.return_value = {
+        ctx.call_capability_tool.return_value = {
             "success": False,
             "data": None,
             "error_code": "FAILED",
@@ -80,7 +81,7 @@ class TestCreateLearningProgram:
 
 class TestUpdateLearningProgram:
     async def test_update_basic_success(self, ctx):
-        ctx.call_tool.return_value = {
+        ctx.call_capability_tool.return_value = {
             "success": True,
             "data": {"program_id": "359929"},
             "error_code": "",
@@ -89,12 +90,12 @@ class TestUpdateLearningProgram:
         result = await update_learning_program(ctx, program_id="359929", title="新标题")
         assert result["success"] is True
         assert result["data"]["program_id"] == "359929"
-        _, kwargs = ctx.call_tool.call_args
-        assert kwargs["tool"] == "tch_update_learning_program"
+        _, kwargs = ctx.call_capability_tool.call_args
+        assert kwargs["operation"] == "update_learning_program"
         assert kwargs["arguments"]["title"] == "新标题"
 
     async def test_update_with_modules(self, ctx):
-        ctx.call_tool.side_effect = [
+        ctx.call_capability_tool.side_effect = [
             {
                 "success": True,
                 "data": {"removed": ["1791558"], "failed": []},
@@ -122,10 +123,10 @@ class TestUpdateLearningProgram:
             remove_module_group_ids=["1791558"],
         )
         assert result["success"] is True
-        assert len(ctx.call_tool.call_args_list) == 3
+        assert len(ctx.call_capability_tool.call_args_list) == 3
 
     async def test_update_failure(self, ctx):
-        ctx.call_tool.return_value = {
+        ctx.call_capability_tool.return_value = {
             "success": False,
             "data": None,
             "error_code": "FAILED",
@@ -138,7 +139,7 @@ class TestUpdateLearningProgram:
 
 class TestListProgramParticipants:
     async def test_success(self, ctx):
-        ctx.call_tool.return_value = {
+        ctx.call_capability_tool.return_value = {
             "success": True,
             "data": {
                 "summary": {"total": 1, "completed": 1, "uncompleted": 0, "completion_rate": 1.0},
@@ -151,12 +152,12 @@ class TestListProgramParticipants:
         result = await list_program_participants(ctx, program_id="358416", status_filter="completed")
         assert result["success"] is True
         assert result["data"]["students"][0]["user_name"] == "Alice"
-        _, kwargs = ctx.call_tool.call_args
-        assert kwargs["tool"] == "tch_list_program_participants"
+        _, kwargs = ctx.call_capability_tool.call_args
+        assert kwargs["operation"] == "list_program_participants"
         assert kwargs["arguments"]["status_filter"] == "completed"
 
     async def test_failure(self, ctx):
-        ctx.call_tool.return_value = {
+        ctx.call_capability_tool.return_value = {
             "success": False,
             "data": None,
             "error_code": "FAILED",
@@ -169,7 +170,7 @@ class TestListProgramParticipants:
 
 class TestListProgramLearningTasks:
     async def test_success(self, ctx):
-        ctx.call_tool.return_value = {
+        ctx.call_capability_tool.return_value = {
             "success": True,
             "data": {
                 "summary": {
@@ -188,12 +189,12 @@ class TestListProgramLearningTasks:
         result = await list_program_learning_tasks(ctx, program_id="358416", include_disabled=False)
         assert result["success"] is True
         assert result["data"]["summary"]["has_learning_task"] is True
-        _, kwargs = ctx.call_tool.call_args
-        assert kwargs["tool"] == "tch_list_program_learning_tasks"
+        _, kwargs = ctx.call_capability_tool.call_args
+        assert kwargs["operation"] == "list_program_learning_tasks"
         assert kwargs["arguments"]["include_disabled"] is False
 
     async def test_failure(self, ctx):
-        ctx.call_tool.return_value = {
+        ctx.call_capability_tool.return_value = {
             "success": False,
             "data": None,
             "error_code": "FAILED",

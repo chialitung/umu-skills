@@ -46,7 +46,7 @@ class MockMCPClientManager:
 def mock_registry() -> SkillRegistry:
     registry = SkillRegistry()
 
-    @skill(name="test_double", description="Double a number", required_servers=["teacher"])
+    @skill(name="test_double", description="Double a number", required_capabilities=["program_management"])
     async def test_double(ctx: SkillContext, value: int) -> dict[str, Any]:
         return {
             "success": True,
@@ -67,11 +67,16 @@ def reset_globals():
     """每个测试前重置 server 全局变量."""
     original_mcp = skills_server._mcp_client
     original_registry = skills_server._skill_registry
+    original_get_roles = skills_server.get_configured_roles
+    original_session_state = skills_server._session_state
     skills_server._mcp_client = None
     skills_server._skill_registry = None
+    skills_server._session_state = {"last_role": None, "remembered_role": None}
     yield
     skills_server._mcp_client = original_mcp
     skills_server._skill_registry = original_registry
+    skills_server.get_configured_roles = original_get_roles
+    skills_server._session_state = original_session_state
 
 
 class TestSkillList:
@@ -130,8 +135,8 @@ class TestSkillRun:
     ) -> None:
         skills_server._skill_registry = mock_registry
         skills_server._mcp_client = MockMCPClientManager()
-        # 覆盖 list_servers 使其不包含 teacher
-        skills_server._mcp_client.list_servers = lambda: ["student"]  # type: ignore[method-assign]
+        # 覆盖已配置角色，使其不包含 teacher/admin
+        skills_server.get_configured_roles = lambda: ["student"]  # type: ignore[method-assign]
 
         result = await skills_server.skill_run(
             name="test_double",

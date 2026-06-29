@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="manage_course_collaborators",
     description="管理课程协同者：列出、邀请、调整权限、删除、转让拥有者",
-    required_servers=["teacher"],
+    required_capabilities=["course_management"],
     return_description="操作结果",
 )
 async def manage_course_collaborators(
@@ -37,9 +37,9 @@ async def manage_course_collaborators(
     action = action.lower()
 
     if action == "list":
-        result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_list_course_collaborators",
+        result = await ctx.call_capability_tool(
+            capability="course_management",
+            operation="list_course_collaborators",
             arguments={"group_id": group_id},
         )
     elif action == "invite":
@@ -52,9 +52,9 @@ async def manage_course_collaborators(
                 "suggested_action": "请提供被邀请者关键词和权限类型",
                 "next_action": "needs_user_input",
             }
-        result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_invite_course_collaborator",
+        result = await ctx.call_capability_tool(
+            capability="course_management",
+            operation="invite_course_collaborator",
             arguments={
                 "group_id": group_id,
                 "keyword": keyword,
@@ -63,13 +63,13 @@ async def manage_course_collaborators(
         )
         # 邀请成功后，列出协同者以获取 cooperation_info_id，供后续更新/移除使用
         if result.get("success"):
-            list_result = await ctx.call_tool(
-                server="teacher",
-                tool="tch_list_course_collaborators",
+            list_result = await ctx.call_capability_tool(
+                capability="course_management",
+                operation="list_course_collaborators",
                 arguments={"group_id": group_id},
             )
             if list_result.get("success"):
-                # tch_invite_course_collaborator 返回的 teacher_id 对应列表中的 umu_id
+                # invite_course_collaborator operation 返回的 teacher_id 对应列表中的 umu_id
                 invited_account_id = result.get("data", {}).get("teacher_id") or result.get("data", {}).get("umu_id", "")
                 invited_account = result.get("data", {}).get("account", "")
                 for item in list_result.get("data", {}).get("collaborators", []):
@@ -93,9 +93,9 @@ async def manage_course_collaborators(
                 "suggested_action": "请提供协同关系 ID 和新权限类型",
                 "next_action": "needs_user_input",
             }
-        result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_update_collaborator_role",
+        result = await ctx.call_capability_tool(
+            capability="course_management",
+            operation="update_collaborator_role",
             arguments={
                 "group_id": group_id,
                 "cooperation_info_id": cooperation_info_id,
@@ -112,9 +112,9 @@ async def manage_course_collaborators(
                 "suggested_action": "请提供协同关系 ID",
                 "next_action": "needs_user_input",
             }
-        result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_remove_course_collaborator",
+        result = await ctx.call_capability_tool(
+            capability="course_management",
+            operation="remove_course_collaborator",
             arguments={
                 "group_id": group_id,
                 "cooperation_info_id": cooperation_info_id,
@@ -130,9 +130,9 @@ async def manage_course_collaborators(
                 "suggested_action": "请提供新拥有者关键词",
                 "next_action": "needs_user_input",
             }
-        result = await ctx.call_tool(
-            server="teacher",
-            tool="tch_transfer_course_owner",
+        result = await ctx.call_capability_tool(
+            capability="course_management",
+            operation="transfer_course_owner",
             arguments={
                 "group_id": group_id,
                 "keyword": keyword,

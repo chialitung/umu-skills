@@ -15,6 +15,7 @@ import logging
 import pkgutil
 from typing import Any
 
+from .capability_registry import get_capability_registry
 from .decorators import SkillFunction, get_skill_function, is_skill_function
 from .models import SkillInfo
 
@@ -93,17 +94,26 @@ class SkillRegistry:
         """判断是否存在指定 Skill."""
         return name in self._skills
 
-    def validate_servers(self, available_servers: list[str]) -> list[str]:
-        """校验所有 Skill 所需的子 MCP 是否都在可用列表中.
+    def validate_capabilities(self, configured_roles: list[str]) -> list[str]:
+        """校验所有 Skill 所需的能力域在当前账号配置下是否有可用角色.
 
-        返回缺失的服务器名称列表。
+        返回缺失的能力域名称列表。
         """
-        available = set(available_servers)
+        registry = get_capability_registry()
+        configured = set(configured_roles)
         missing: set[str] = set()
         for sf in self._skills.values():
-            for server in sf.info.required_servers:
-                if server not in available:
-                    missing.add(server)
+            for capability in sf.info.required_capabilities:
+                operations = registry.get_operations_for_capability(capability)
+                if not operations:
+                    missing.add(capability)
+                    continue
+                has_available_role = any(
+                    any(role in configured for role in roles)
+                    for roles in operations.values()
+                )
+                if not has_available_role:
+                    missing.add(capability)
         return sorted(missing)
 
 

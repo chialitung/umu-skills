@@ -14,7 +14,7 @@ from ..decorators import SkillContext, skill
 @skill(
     name="list_course_audit_records",
     description="查询企业知识库课程审核记录，支持待审核/已通过/已拒绝三种状态及多条件筛选",
-    required_servers=["admin"],
+    required_capabilities=['course_audit'],
     return_description="课程审核记录列表及分页信息",
 )
 async def list_course_audit_records(
@@ -60,11 +60,7 @@ async def list_course_audit_records(
     if category_id:
         arguments["category_id"] = category_id
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_course_audit_records",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="list_course_audit_records", arguments=arguments)
 
     if not result["success"]:
         return {
@@ -89,7 +85,7 @@ async def list_course_audit_records(
 @skill(
     name="audit_course",
     description="对企业知识库课程执行通过、拒绝或撤销提交操作",
-    required_servers=["admin"],
+    required_capabilities=['course_audit'],
     return_description="审核操作结果",
 )
 async def audit_course(
@@ -114,11 +110,7 @@ async def audit_course(
     if add_to_blacklist:
         arguments["add_to_blacklist"] = add_to_blacklist
 
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_audit_course",
-        arguments=arguments,
-    )
+    result = await ctx.call_role_tool(role="admin", operation="audit_course", arguments=arguments)
 
     if not result["success"]:
         return {
@@ -143,7 +135,7 @@ async def audit_course(
 @skill(
     name="list_course_categories",
     description="查询企业课程分类列表",
-    required_servers=["admin"],
+    required_capabilities=['course_audit'],
     return_description="课程分类列表",
 )
 async def list_course_categories(
@@ -151,11 +143,7 @@ async def list_course_categories(
     is_with_course_num: bool = False,
 ) -> dict[str, Any]:
     """查询企业课程分类列表."""
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_course_categories",
-        arguments={"is_with_course_num": is_with_course_num},
-    )
+    result = await ctx.call_role_tool(role="admin", operation="list_course_categories", arguments={"is_with_course_num": is_with_course_num})
 
     if not result["success"]:
         return {
@@ -180,7 +168,7 @@ async def list_course_categories(
 @skill(
     name="list_course_blacklist",
     description="查询课程提交黑名单",
-    required_servers=["admin"],
+    required_capabilities=['course_audit'],
     return_description="黑名单用户列表及分页信息",
 )
 async def list_course_blacklist(
@@ -190,15 +178,11 @@ async def list_course_blacklist(
     fetch_all: bool = False,
 ) -> dict[str, Any]:
     """查询课程提交黑名单."""
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_list_course_blacklist",
-        arguments={
+    result = await ctx.call_role_tool(role="admin", operation="list_course_blacklist", arguments={
             "page": page,
             "page_size": page_size,
             "fetch_all": fetch_all,
-        },
-    )
+        })
 
     if not result["success"]:
         return {
@@ -223,7 +207,7 @@ async def list_course_blacklist(
 @skill(
     name="manage_course_blacklist",
     description="将用户加入或移出课程提交黑名单",
-    required_servers=["admin"],
+    required_capabilities=['course_audit'],
     return_description="黑名单操作结果",
 )
 async def manage_course_blacklist(
@@ -235,14 +219,10 @@ async def manage_course_blacklist(
 
     被加入黑名单的账户，其提交的所有课程必须进入审核流程。
     """
-    result = await ctx.call_tool(
-        server="admin",
-        tool="adm_save_course_blacklist",
-        arguments={
+    result = await ctx.call_role_tool(role="admin", operation="save_course_blacklist", arguments={
             "umu_id": umu_id,
             "action": action,
-        },
-    )
+        })
 
     if not result["success"]:
         return {
