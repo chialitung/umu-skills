@@ -24,17 +24,22 @@ import subprocess
 import sys
 import tarfile
 from pathlib import Path
+from typing import NoReturn
 
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Allow running the script before the package is installed (e.g. in CI).
+# Force src to the front of sys.path so an installed umu-skills package does
+# not shadow the local source tree (a .pth file may already have added it).
 SRC_ROOT = ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+_src_path = str(SRC_ROOT)
+if _src_path in sys.path:
+    sys.path.remove(_src_path)
+sys.path.insert(0, _src_path)
 
 
-def fail(message: str) -> None:
+def fail(message: str) -> NoReturn:
     """打印错误并退出."""
     print(f"[FAIL] {message}", file=sys.stderr)
     sys.exit(1)
@@ -207,7 +212,7 @@ def check_git_status() -> None:
 
     dirty = [line for line in result.stdout.strip().splitlines() if line.strip()]
     if dirty:
-        fail(f"工作目录不干净，请先提交或清理以下文件：\n" + "\n".join(dirty))
+        fail("工作目录不干净，请先提交或清理以下文件：\n" + "\n".join(dirty))
     info("工作目录干净")
 
 
