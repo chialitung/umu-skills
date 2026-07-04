@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.1] - 2026-07-04
+
+### Security
+- 清理代码中的硬编码敏感信息：替换测试与设计文档中的真实用户名、企业名、邮箱域名和 UID 示例。
+- 移除 `.gitignore` 中误加的 `.github/` 规则，避免 CI 工作流被意外忽略。
+
 ## [0.25.0] - 2026-06-29
 
 ### Added
