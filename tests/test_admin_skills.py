@@ -693,7 +693,7 @@ class TestAdminLearningPrograms:
             name="list_learning_programs",
             arguments={
                 "keywords": "数据分析",
-                "owner_keywords": "Charlie",
+                "owner_keywords": "测试用户B",
                 "access_permission": 2,
                 "is_in_program_lib": 1,
                 "category_id": "27730",
@@ -710,7 +710,7 @@ class TestAdminLearningPrograms:
                 "adm_list_learning_programs",
                 {
                     "keywords": "数据分析",
-                    "owner_keywords": "Charlie",
+                    "owner_keywords": "测试用户B",
                     "access_permission": 2,
                     "is_in_program_lib": 1,
                     "category_id": "27730",

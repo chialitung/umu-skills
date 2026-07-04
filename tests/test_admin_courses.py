@@ -32,7 +32,7 @@ class TestAdminCourseAutoCloseSkills:
         result = await get_course_auto_close_admin(ctx, "g1")
         assert result["success"] is True
         ctx.call_role_tool.assert_awaited_once_with(
-            role="teacher",
+            role="admin",
             operation="get_course_auto_close",
             arguments={"group_id": "g1"},
         )
@@ -42,12 +42,12 @@ class TestAdminCourseAutoCloseSkills:
         assert result["success"] is True
         calls = ctx.call_role_tool.call_args_list
         assert calls[0].kwargs == {
-            "role": "teacher",
+            "role": "admin",
             "operation": "get_course_auto_close",
             "arguments": {"group_id": "g1"},
         }
         assert calls[1].kwargs == {
-            "role": "teacher",
+            "role": "admin",
             "operation": "set_course_auto_close",
             "arguments": {"group_id": "g1", "close_time": "2026-06-30 10:00"},
         }
@@ -57,12 +57,12 @@ class TestAdminCourseAutoCloseSkills:
         assert result["success"] is True
         calls = ctx.call_role_tool.call_args_list
         assert calls[0].kwargs == {
-            "role": "teacher",
+            "role": "admin",
             "operation": "get_course_auto_close",
             "arguments": {"group_id": "g1"},
         }
         assert calls[1].kwargs == {
-            "role": "teacher",
+            "role": "admin",
             "operation": "cancel_course_auto_close",
             "arguments": {"group_id": "g1", "clear_tips": True},
         }

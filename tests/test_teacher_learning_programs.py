@@ -64,7 +64,7 @@ class TestTchListLearningPrograms:
                 "share_url": "https://m.umu.cn/program/1vDdf372",
                 "share_pc_url": "https://www.umu.cn/program/1vDdf372/detail",
                 "create_time": 1781839949,
-                "creator": {"umu_id": "17580402", "user_name": "测试企业"},
+                "creator": {"umu_id": "12345678", "user_name": "测试企业"},
                 "group_num": 4,
                 "module_num": 1,
                 "is_creator": 1,

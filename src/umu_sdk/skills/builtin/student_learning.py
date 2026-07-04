@@ -59,16 +59,23 @@ async def list_my_courses_student(
     page: int = 1,
     page_size: int = 20,
     fetch_all: bool = False,
+    learn_status: int = 0,
+    fuzzy_title: str = "",
 ) -> dict[str, Any]:
     """列出我的课程."""
+    arguments: dict[str, Any] = {
+        "page": page,
+        "page_size": page_size,
+        "fetch_all": fetch_all,
+    }
+    if learn_status:
+        arguments["learn_status"] = learn_status
+    if fuzzy_title:
+        arguments["fuzzy_title"] = fuzzy_title
     result = await ctx.call_capability_tool(
         capability="learning",
         operation="list_participated_courses",
-        arguments={
-            "page": page,
-            "page_size": page_size,
-            "fetch_all": fetch_all,
-        },
+        arguments=arguments,
     )
 
     if not result["success"]:

@@ -25,15 +25,15 @@ def sample_program():
     """单条学习项目样本."""
     return {
         "id": "358710",
-        "creater_id": "15797500",
+        "creater_id": "12345000",
         "program_title": "IPD 训练营",
         "desc": "",
         "head_img": "https://example.com/cover.png",
         "ctime": "1780897214",
         "access_permission": "2",
         "create_time": "2026-06-08 13:40:14",
-        "username": "Nancy Wang",
-        "umu_id": "15797500",
+        "username": "测试创建者A",
+        "umu_id": "12345000",
         "share_url": "https://m.umu.cn/program/1vjE0723",
         "access_code": "crj556",
         "group_num": "1",
@@ -157,10 +157,10 @@ class TestAdmListLearningPrograms:
         """owner_uids 应解析并传递."""
         mock_client.get.return_value = {**single_page_response, "data": {**single_page_response["data"], "list": []}}
         with _auth_patch(mock_client):
-            json.loads(await adm_list_learning_programs(owner_uids="11875281,15797500"))
+            json.loads(await adm_list_learning_programs(owner_uids="12345001,12345000"))
 
         params = mock_client.get.call_args.kwargs["params"]
-        assert params["uids"] == "11875281,15797500"
+        assert params["uids"] == "12345001,12345000"
 
     async def test_owner_keywords_filter(self, mock_client, single_page_response):
         """owner_keywords 应调用 user-list 解析为 uids."""
@@ -168,7 +168,7 @@ class TestAdmListLearningPrograms:
             "error_code": 0,
             "error_message": "",
             "data": {
-                "list": [{"id": "11875281", "user_name": "Charlie DONG"}],
+                "list": [{"id": "12345001", "user_name": "测试用户B"}],
             },
         }
 
@@ -179,11 +179,11 @@ class TestAdmListLearningPrograms:
 
         mock_client.get.side_effect = side_effect
         with _auth_patch(mock_client):
-            json.loads(await adm_list_learning_programs(owner_keywords="Charlie"))
+            json.loads(await adm_list_learning_programs(owner_keywords="测试用户B"))
 
         calls = mock_client.get.call_args_list
         program_call = [c for c in calls if "getReportProgramList" in c.args[0]][0]
-        assert program_call.kwargs["params"]["uids"] == "11875281"
+        assert program_call.kwargs["params"]["uids"] == "12345001"
 
     async def test_unauthenticated(self, mock_client):
         """未认证时应返回错误信封."""

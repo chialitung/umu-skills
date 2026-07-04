@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -19,6 +20,8 @@ from ...core.client import UMUClient
 from ...core.errors import UMUError
 from ..decorators import umu_operation
 from ..shared.progress import report_pagination_progress
+
+logger = logging.getLogger("umu.tools.operations.programs")
 
 
 def _program_list_url_and_params(
@@ -70,6 +73,32 @@ def _format_program_list_item(item: dict[str, Any]) -> dict[str, Any]:
         "module_num": item.get("module_num", 0),
         "is_creator": item.get("is_creator", 0),
     }
+
+
+# Transient error messages that indicate UMU platform maintenance or temporary
+# unavailability. These are retried with exponential backoff before surfacing.
+_TRANSIENT_ERROR_MARKERS: tuple[str, ...] = (
+    "under maintenance",
+    "维护",
+    "please come back later",
+    "server error",
+    "service unavailable",
+)
+
+
+def _response_error_message(resp: dict[str, Any]) -> str:
+    """Extract a human-readable error message from a UMU response."""
+    for key in ("error", "message", "error_message", "msg"):
+        value = resp.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _is_transient_error(resp: dict[str, Any]) -> bool:
+    """Check whether a UMU response indicates a transient platform issue."""
+    message = _response_error_message(resp).lower()
+    return any(marker in message for marker in _TRANSIENT_ERROR_MARKERS)
 
 
 @umu_operation(
@@ -124,11 +153,33 @@ async def _list_personal_learning_programs_impl(
 
     def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
         params = {**base_params, "page": str(p), "size": str(sz)}
-        resp = client.get(client.desktop_url(url), params=params)
-        if resp.get("status") not in (True, "true") and resp.get("error_code") != 0:
+
+        # Retry on transient platform errors (maintenance pages, temporary 500s).
+        max_retries = 3
+        last_resp: dict[str, Any] = {}
+        for attempt in range(max_retries):
+            resp = client.get(client.desktop_url(url), params=params)
+            last_resp = resp
+            status_ok = resp.get("status") in (True, "true") or resp.get("error_code") == 0
+            if status_ok:
+                break
+            if _is_transient_error(resp) and attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                logger.warning(
+                    "学习项目列表接口返回临时错误（%s），%ds 后重试 (%d/%d)",
+                    _response_error_message(resp),
+                    wait_time,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(wait_time)
+                continue
             raise RuntimeError(resp.get("error", "获取学习项目列表失败"))
 
-        data = resp.get("data", {})
+        if last_resp.get("status") not in (True, "true") and last_resp.get("error_code") != 0:
+            raise RuntimeError(last_resp.get("error", "获取学习项目列表失败"))
+
+        data = last_resp.get("data", {})
         page_info = data.get("page_info", {})
         program_list = data.get("list", [])
         total_all = int(page_info.get("list_total_num", 0) or 0)

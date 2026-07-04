@@ -46,6 +46,21 @@ def _map_role_to_api(role: str) -> str | None:
     return _ROLE_TO_API.get(role.lower())
 
 
+def _safe_page_info(data: dict[str, Any]) -> dict[str, Any]:
+    """从响应 data 中安全提取 page_info 字典.
+
+    UMU 部分接口在空结果或异常场景下会把 table_body / page_info 返回为 list，
+    直接调用 .get() 会触发 AttributeError。本辅助函数在结构非预期时返回空 dict。
+    """
+    table_body = data.get("table_body") or {}
+    if isinstance(table_body, list):
+        return {}
+    page_info = table_body.get("page_info") or {}
+    if isinstance(page_info, list):
+        return {}
+    return page_info
+
+
 # ---------------------------------------------------------------------------
 # 协同账号搜索与匹配
 # ---------------------------------------------------------------------------
@@ -633,8 +648,12 @@ async def list_course_participants(
             raise RuntimeError(resp.get("error", "获取课程学员参与者名单失败"))
 
         data = resp.get("data", {})
-        page_info = data.get("table_body", {}).get("page_info", {})
-        student_list = data.get("table_body", {}).get("list", [])
+        page_info = _safe_page_info(data)
+        table_body = data.get("table_body") or {}
+        if isinstance(table_body, list):
+            student_list: list[dict[str, Any]] = []
+        else:
+            student_list = table_body.get("list") or []
 
         total_all = int(page_info.get("list_total_num", 0) or 0)
         return student_list, total_all, data.get("data_count", {}), page_info
@@ -774,8 +793,12 @@ async def list_course_learning_durations(
             raise RuntimeError(resp.get("error", "获取课程学员学习时长名单失败"))
 
         data = resp.get("data", {})
-        page_info = data.get("table_body", {}).get("page_info", {})
-        student_list = data.get("table_body", {}).get("list", [])
+        page_info = _safe_page_info(data)
+        table_body = data.get("table_body") or {}
+        if isinstance(table_body, list):
+            student_list: list[dict[str, Any]] = []
+        else:
+            student_list = table_body.get("list") or []
 
         total_all = int(page_info.get("list_total_num", 0) or 0)
         return student_list, total_all, data.get("data_count", {}), page_info

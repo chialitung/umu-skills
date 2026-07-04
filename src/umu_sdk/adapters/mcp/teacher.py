@@ -3055,13 +3055,13 @@ async def tch_set_course_enrollment(
         Field(default=0, description="报名价格（分），0 表示免费"),
     ] = 0,
     selected_contact_fields: Annotated[
-        str | None,
+        str,
         Field(
-            default=None,
+            default="",
             description='要勾选的报名联系信息字段 key 列表，JSON 格式: ["username", "mobile"]。'
                         "不传则不勾选任何字段。",
         ),
-    ] = None,
+    ] = "",
     contact_info_json: Annotated[
         str | None,
         Field(

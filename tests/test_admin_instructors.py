@@ -59,12 +59,12 @@ def sample_raw_instructor():
         "has_actived": "1",
         "user_type": "1",
         "register_from": "1",
-        "user_name": "Cecilia Wang",
+        "user_name": "测试讲师A",
         "email": "instructor@example.com",
         "number": "9009732",
         "on_job_status": 1,
         "phone": "13800138000",
-        "login_name": "cecilia.wang",
+        "login_name": "test.instructor.a",
         "avatar": "https://statics-umu-cn.umucdn.cn/image/a/a/1phNq/2944423900.jpg",
         "enterprise_groups": ["TalentDevelopment"],
         "enterprise_departments": ["总公司-首席运营官办公室-运营部-运营平台管理组"],
@@ -107,7 +107,7 @@ class TestInstructorRaw:
         raw = InstructorRaw(**sample_raw_instructor)
         assert raw.teacher_id == "12731630"
         assert raw.umu_id == "12733916"
-        assert raw.user_name == "Cecilia Wang"
+        assert raw.user_name == "测试讲师A"
         assert raw.certification_status == 1
         assert len(raw.tags) == 2
         assert raw.tags[0]["tag_id"] == 393
@@ -132,11 +132,11 @@ class TestInstructor:
         assert instructor.teacher_id == "12731630"
         assert instructor.umu_id == "12733916"
         assert instructor.student_id == "31492212"
-        assert instructor.user_name == "Cecilia Wang"
+        assert instructor.user_name == "测试讲师A"
         assert instructor.email == "instructor@example.com"
         assert instructor.number == "9009732"
         assert instructor.phone == "13800138000"
-        assert instructor.login_name == "cecilia.wang"
+        assert instructor.login_name == "test.instructor.a"
         assert instructor.avatar == "https://statics-umu-cn.umucdn.cn/image/a/a/1phNq/2944423900.jpg"
         assert instructor.role_type == 2
         assert instructor.role_name == "讲师"
@@ -303,8 +303,8 @@ class TestBuildInstructorSearchCondition:
 
     def test_account_keyword(self):
         """账号关键词应使用 account_keyword 键."""
-        condition = _build_instructor_search_condition(account_keyword="jiali")
-        assert condition["account_keyword"] == "jiali"
+        condition = _build_instructor_search_condition(account_keyword="test_keyword")
+        assert condition["account_keyword"] == "test_keyword"
 
     def test_full_condition(self):
         """完整条件应包含所有字段."""
@@ -484,7 +484,7 @@ class TestAdmListInstructors:
         assert parsed["data"]["total"] == 1
         assert parsed["data"]["pagination"]["current_page"] == 1
         assert parsed["data"]["pagination"]["page_size"] == 10
-        assert parsed["data"]["instructors"][0]["user_name"] == "Cecilia Wang"
+        assert parsed["data"]["instructors"][0]["user_name"] == "测试讲师A"
 
     @pytest.mark.asyncio
     async def test_fetch_all_pagination(self, mock_client, sample_raw_instructor):
@@ -533,7 +533,7 @@ class TestAdmListInstructors:
                 tag_ids="354",
                 department_ids="82064",
                 group_ids="136804",
-                account_keyword="jiali",
+                account_keyword="test_keyword",
             )
         parsed = json.loads(result)
         assert parsed["success"] is True
@@ -544,7 +544,7 @@ class TestAdmListInstructors:
         assert condition["tag_ids"] == [354]
         assert condition["department_ids"] == ["82064"]
         assert condition["enterprise_group_ids"] == [136804]
-        assert condition["account_keyword"] == "jiali"
+        assert condition["account_keyword"] == "test_keyword"
 
     @pytest.mark.asyncio
     async def test_merge_explicit_and_resolved_ids(self, mock_client, single_page_response):

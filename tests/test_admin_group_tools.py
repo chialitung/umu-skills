@@ -147,10 +147,10 @@ class TestGetGroup:
                         "group_name": "测试组",
                         "group_name_letter": "ceshizu",
                         "member_count": "3",
-                        "umu_id": "17580402",
+                        "umu_id": "12345678",
                         "create_time": 1781342214,
                         "managers": [{"user_name": "管理员", "email": "admin@example.com"}],
-                        "creator": {"umu_id": "17580402", "user_name": "创建者", "manage_permission": 1},
+                        "creator": {"umu_id": "12345678", "user_name": "创建者", "manage_permission": 1},
                     }
                 ],
             },
@@ -275,7 +275,7 @@ class TestAddGroupManagers:
             _group_user_list_response(
                 [
                     _make_user("20458620", "管理员", role_type=3),
-                    _make_user("17580402", "管理员B", role_type=4),
+                    _make_user("12345678", "管理员B", role_type=4),
                 ]
             ),
         ]
@@ -287,7 +287,7 @@ class TestAddGroupManagers:
 
         with _auth_patch(mock_client):
             result = await adm_add_group_managers(
-                group_id="177155", umu_ids="17580402"
+                group_id="177155", umu_ids="12345678"
             )
 
         parsed = json.loads(result)
@@ -296,7 +296,7 @@ class TestAddGroupManagers:
 
         post_data = mock_client.post.call_args[1]["data"]
         assert json.loads(post_data["member_id"]) == ["20439812"]
-        assert json.loads(post_data["manager_id"]) == ["20458620", "17580402"]
+        assert json.loads(post_data["manager_id"]) == ["20458620", "12345678"]
 
 
 class TestRemoveGroupManagers:
@@ -306,11 +306,11 @@ class TestRemoveGroupManagers:
             _group_user_list_response(
                 [
                     _make_user("20458620", "管理员 A", role_type=3),
-                    _make_user("17580402", "管理员 B", role_type=4),
+                    _make_user("12345678", "管理员 B", role_type=4),
                 ]
             ),
             _group_user_list_response([_make_user("20439812", "张三")]),
-            _group_user_list_response([_make_user("17580402", "管理员 B", role_type=4)]),
+            _group_user_list_response([_make_user("12345678", "管理员 B", role_type=4)]),
         ]
         mock_client.post.return_value = {
             "status": True,
@@ -329,4 +329,4 @@ class TestRemoveGroupManagers:
         assert parsed["data"]["manager_count"] == 1
 
         post_data = mock_client.post.call_args[1]["data"]
-        assert json.loads(post_data["manager_id"]) == ["17580402"]
+        assert json.loads(post_data["manager_id"]) == ["12345678"]

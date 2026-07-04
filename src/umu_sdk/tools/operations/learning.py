@@ -1638,9 +1638,7 @@ async def complete_course(
         lessons = structure.get("lessons", [])
 
     # 3. 检查报名表单
-    needs_enroll_form, form_summary = _check_needs_enroll_form(
-        client, group_id, s_key, structure.get("is_enrolled", 1)
-    )
+    needs_enroll_form, form_summary = _check_needs_enroll_form(client, group_id, s_key)
     if needs_enroll_form:
         return {
             "group_id": group_id,

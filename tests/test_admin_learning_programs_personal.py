@@ -64,3 +64,19 @@ class TestAdmListPersonalLearningPrograms:
             result = json.loads(await tool_fn(scope="owned"))
         assert result["success"] is False
         assert result["error_code"] == "NOT_AUTHENTICATED"
+
+    async def test_retries_on_maintenance_page(self, mock_client):
+        """Maintenance-page responses should be retried before failing."""
+        maintenance = {
+            "status": False,
+            "error_code": -1,
+            "error": "This page is under maintenance, please come back later.",
+        }
+        success = _program_page(1, 20, 1, [{"program_id": "359923", "program_title": "测试项目"}])
+        mock_client.get.side_effect = [maintenance, success]
+        tools = admin_mcp._tool_manager._tools
+        tool_fn = tools["adm_list_personal_learning_programs"].fn
+        with _auth_patch(mock_client):
+            result = json.loads(await tool_fn(scope="owned"))
+        assert result["success"] is True
+        assert mock_client.get.call_count == 2

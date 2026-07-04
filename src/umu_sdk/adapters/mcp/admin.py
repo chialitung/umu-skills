@@ -4095,7 +4095,7 @@ async def adm_add_group_managers(
     group_id: Annotated[str, Field(description="分组 ID")],
     umu_ids: Annotated[
         str,
-        Field(description="要添加的管理员 umu_id 列表，多个用逗号分隔，如 '20458620,17580402'"),
+        Field(description="要添加的管理员 umu_id 列表，多个用逗号分隔，如 '20458620,12345678'"),
     ],
     session_id: Annotated[
         str | None,
@@ -4193,7 +4193,7 @@ async def adm_remove_group_managers(
     group_id: Annotated[str, Field(description="分组 ID")],
     umu_ids: Annotated[
         str,
-        Field(description="要移除的管理员 umu_id 列表，多个用逗号分隔，如 '20458620,17580402'"),
+        Field(description="要移除的管理员 umu_id 列表，多个用逗号分隔，如 '20458620,12345678'"),
     ],
     session_id: Annotated[
         str | None,

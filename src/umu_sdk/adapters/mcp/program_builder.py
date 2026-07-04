@@ -99,7 +99,10 @@ class ProgramBuilder:
             "5": {"show_banner": 1 if skin_id_str == "5" else 0},
         }
 
-        multimedia_id = ""
+        # UMU /api/program/updateinfo 要求多媒体字段必须存在且格式正确；
+        # 即使没有富文本介绍，也需要 multimedia_type=1、multimedia_id=0，
+        # 否则服务端会返回 Server Error。
+        multimedia_id: int | str = 0
         if desc_richtext:
             try:
                 multimedia_id = self._course_builder._create_fulltext(
@@ -108,6 +111,11 @@ class ProgramBuilder:
                 logger.info("项目富文本创建成功: multimedia_id=%s", multimedia_id)
             except Exception as e:
                 logger.warning("项目富文本创建失败（非致命）: %s", e)
+
+        # 平台当前版本创建学习项目时必须要有封面图和背景图；
+        # 如果调用方未提供，则使用 UMU 默认素材，避免 Server Error。
+        default_head_img = "https://statics-cdn-cn.umucdn.cn/statics/image/cover/banner_v3/11.png"
+        default_bg_img = "https://statics-cdn-cn.umucdn.cn/statics/image/cover/bg_v3/23.png"
 
         cover_url = cover_image_url or ""
         if not cover_url and cover_path:
@@ -118,6 +126,8 @@ class ProgramBuilder:
                 logger.info("项目封面上传成功: %s", cover_url)
             except Exception as e:
                 logger.warning("项目封面上传失败（非致命）: %s", e)
+        if not cover_url:
+            cover_url = default_head_img
 
         bg_url = bg_image_url or ""
         if not bg_url and bg_path:
@@ -128,6 +138,8 @@ class ProgramBuilder:
                 logger.info("项目背景上传成功: %s", bg_url)
             except Exception as e:
                 logger.warning("项目背景上传失败（非致命）: %s", e)
+        if not bg_url:
+            bg_url = default_bg_img
 
         category_arr = self._resolve_categories(category_ids, category_names)
         tags_arr = [{"tag": str(tag)} for tag in (tags or [])]
@@ -136,12 +148,13 @@ class ProgramBuilder:
             "program_id": 0,
             "program_title": title,
             "desc": desc_plain or "",
-            "multimedia_type": 1 if multimedia_id else 0,
+            "multimedia_type": 1,
             "multimedia_id": multimedia_id,
             "tags": tags_arr,
             "unlock_type": str(unlock_type),
             "show_type": str(show_type),
             "open_module": str(open_module),
+            "head_img": cover_url,
             "setup": {
                 "pc_skin_id": pc_skin_id_str,
                 "skin_data": skin_data,
@@ -149,12 +162,9 @@ class ProgramBuilder:
                 "enable_certificate": 1 if enable_certificate else 0,
                 "skin_id": skin_id_str,
                 "sort": sort,
+                "bg_img": bg_url,
             },
         }
-        if cover_url:
-            program_info["head_img"] = cover_url
-        if bg_url:
-            program_info["setup"]["bg_img"] = bg_url
         if start_time:
             program_info["start_time"] = str(start_time)
         if end_time:

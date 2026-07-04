@@ -99,12 +99,12 @@ async def get_course_auto_close_admin(
 ) -> dict[str, Any]:
     """管理员查询课程自动关闭时间设置.
 
-    通过 teacher 子 MCP 的原子工具查询，admin 凭据会自动 fallback 登录。
+    通过 admin 子 MCP 的原子工具查询，admin 凭据会自动 fallback 登录。
 
     常见表达：查看课程什么时候自动关闭、查询课程的关闭时间/到期时间。
     注意：这与访问权限、报名开关、课程小节无关。
     """
-    result = await ctx.call_role_tool(role="teacher", operation="get_course_auto_close", arguments={"group_id": group_id})
+    result = await ctx.call_role_tool(role="admin", operation="get_course_auto_close", arguments={"group_id": group_id})
 
     if not result["success"]:
         return {
@@ -144,14 +144,14 @@ async def set_course_auto_close_admin(
 ) -> dict[str, Any]:
     """管理员设置课程定时自动关闭.
 
-    先查询当前状态，再通过 teacher 子 MCP 设置关闭时间。
+    先查询当前状态，再通过 admin 子 MCP 设置关闭时间。
     close_time 支持格式如：2026-06-30 10:00、2026-06-30T10:00:00、2028年5月21日12点。
     也可通过 custom_tips 自定义提示文本。
 
     常见表达：设置课程自动关闭时间、定时关闭课程、把课程关闭时间设为某时、课程某时到期。
     注意：此操作只修改自动关闭时间，不修改谁能看（访问权限）、是否需要报名（报名开关）或课程内容。
     """
-    previous = await ctx.call_role_tool(role="teacher", operation="get_course_auto_close", arguments={"group_id": group_id})
+    previous = await ctx.call_role_tool(role="admin", operation="get_course_auto_close", arguments={"group_id": group_id})
     if not previous["success"]:
         return {
             "success": False,
@@ -166,7 +166,7 @@ async def set_course_auto_close_admin(
     if custom_tips is not None:
         arguments["custom_tips"] = custom_tips
 
-    result = await ctx.call_role_tool(role="teacher", operation="set_course_auto_close", arguments=arguments)
+    result = await ctx.call_role_tool(role="admin", operation="set_course_auto_close", arguments=arguments)
 
     if not result["success"]:
         return {
@@ -206,12 +206,12 @@ async def cancel_course_auto_close_admin(
 ) -> dict[str, Any]:
     """管理员取消课程定时自动关闭.
 
-    先查询当前状态，再通过 teacher 子 MCP 取消关闭时间并清空提示文案。
+    先查询当前状态，再通过 admin 子 MCP 取消关闭时间并清空提示文案。
 
     常见表达：取消课程自动关闭、关闭课程的定时关闭、移除课程的到期时间。
     注意：此操作只清除自动关闭时间，不修改访问权限、报名开关或课程内容。
     """
-    previous = await ctx.call_role_tool(role="teacher", operation="get_course_auto_close", arguments={"group_id": group_id})
+    previous = await ctx.call_role_tool(role="admin", operation="get_course_auto_close", arguments={"group_id": group_id})
     if not previous["success"]:
         return {
             "success": False,
@@ -222,7 +222,7 @@ async def cancel_course_auto_close_admin(
             "next_action": "retry",
         }
 
-    result = await ctx.call_role_tool(role="teacher", operation="cancel_course_auto_close", arguments={"group_id": group_id, "clear_tips": True})
+    result = await ctx.call_role_tool(role="admin", operation="cancel_course_auto_close", arguments={"group_id": group_id, "clear_tips": True})
 
     if not result["success"]:
         return {
