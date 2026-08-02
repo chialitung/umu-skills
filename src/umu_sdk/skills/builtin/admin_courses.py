@@ -247,9 +247,68 @@ async def cancel_course_auto_close_admin(
     }
 
 
+@skill(
+    name="get_course_operation_logs_admin",
+    description=(
+        "管理员查询指定课程的操作日志（课程操作记录、操作历史），"
+        "并识别课程的最初创建人（谁创建了这个课程、课程创建者）。"
+    ),
+    required_capabilities=['course_management'],
+    return_description="课程操作日志列表、最初创建人信息及分页信息",
+)
+async def get_course_operation_logs_admin(
+    ctx: SkillContext,
+    group_id: str,
+    page: int = 1,
+    page_size: int = 200,
+    sort: str = "desc",
+    fetch_all: bool = False,
+    action_types: str = "",
+) -> dict[str, Any]:
+    """管理员查询课程操作日志并识别最初创建人.
+
+    通过 admin 子 MCP 的原子工具查询，admin 凭据会自动 fallback 登录。
+
+    常见表达：查看某课程的操作日志、查询课程是谁创建的、追溯课程创建人。
+    注意：创建人取最早日志条目的操作者；老课程创建可能早于日志记录，
+    此时 creator_confident 为 False，结果仅供参考。
+    """
+    arguments: dict[str, Any] = {
+        "group_id": group_id,
+        "page": page,
+        "page_size": page_size,
+        "sort": sort,
+        "fetch_all": fetch_all,
+    }
+    if action_types:
+        arguments["action_types"] = action_types
+
+    result = await ctx.call_role_tool(role="admin", operation="get_course_operation_logs", arguments=arguments)
+
+    if not result["success"]:
+        return {
+            "success": False,
+            "data": result.get("data"),
+            "error_code": result.get("error_code") or "GET_COURSE_OPERATION_LOGS_FAILED",
+            "error_message": result.get("error_message") or "查询课程操作日志失败",
+            "suggested_action": "请确认 group_id 正确",
+            "next_action": "retry",
+        }
+
+    return {
+        "success": True,
+        "data": result.get("data"),
+        "error_code": "",
+        "error_message": "",
+        "suggested_action": "",
+        "next_action": "proceed",
+    }
+
+
 __all__ = [
     "list_courses",
     "get_course_auto_close_admin",
     "set_course_auto_close_admin",
     "cancel_course_auto_close_admin",
+    "get_course_operation_logs_admin",
 ]

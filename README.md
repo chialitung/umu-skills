@@ -40,7 +40,7 @@ UMU Skills 把 UMU 平台上重复的教务管理、课程运营、学习执行�
   - 审核课程提交、管理课程提交黑名单
   - 查询学习记录、学习任务、授课记录、学习项目与企业课程清单
 
-- **高频流程封装 + 原子工具兜底**：120 个内置 Skill 覆盖常见跨角色流程，AI 优先通过 `skill_run` 语义化调用；低频或新增能力可通过 `skill_call_atomic_tool` 直接透传 280+ 个原子工具。
+- **高频流程封装 + 原子工具兜底**：121 个内置 Skill 覆盖常见跨角色流程，AI 优先通过 `skill_run` 语义化调用；低频或新增能力可通过 `skill_call_atomic_tool` 直接透传 280+ 个原子工具。
 
 - **安全的多身份会话隔离**：教师、学员、管理员三角色由独立 MCP server 承载，凭据加密存储并受系统 keyring 保护；每个身份支持多会话并发，24 小时 TTL 自动过期。
 
@@ -381,7 +381,7 @@ python -m umu_sdk.adapters.mcp.admin
 
 ## 可用工具
 
-### 管理员工具（135）
+### 管理员工具（136）
 
 | 分类 | 工具 |
 |----------|-------|
@@ -394,7 +394,7 @@ python -m umu_sdk.adapters.mcp.admin
 | 分组 | `adm_create_group`, `adm_update_group`, `adm_delete_groups`, `adm_get_group`, `adm_list_group_members`, `adm_list_group_managers`, `adm_add_group_members`, `adm_remove_group_members`, `adm_add_group_managers`, `adm_remove_group_managers` |
 | 班级 | `adm_list_classes` |
 | 课程/学习项目 | `adm_list_courses`, `adm_list_learning_programs`, `adm_list_personal_learning_programs`, `adm_delete_learning_program`, `adm_list_program_participants`, `adm_list_program_learning_tasks` |
-| 课程管理 | `adm_create_course`, `adm_get_course`, `adm_get_course_detail`, `adm_get_categories`, `adm_get_course_auto_close`, `adm_set_course_auto_close`, `adm_cancel_course_auto_close`, `adm_submit_course_for_audit`, `adm_list_created_courses`, `adm_list_cooperated_courses`, `adm_list_participated_courses` |
+| 课程管理 | `adm_create_course`, `adm_get_course`, `adm_get_course_detail`, `adm_get_categories`, `adm_get_course_auto_close`, `adm_set_course_auto_close`, `adm_cancel_course_auto_close`, `adm_submit_course_for_audit`, `adm_list_created_courses`, `adm_list_cooperated_courses`, `adm_list_participated_courses`, `adm_get_course_operation_logs` |
 | 环节 | `adm_create_scorm_section`, `adm_create_video_section`, `adm_create_article_section`, `adm_create_infographic_section`, `adm_create_document_section`, `adm_create_survey_section`, `adm_create_exam_section`, `adm_create_signin_section` |
 | 环节管理 | `adm_get_section`, `adm_list_sections`, `adm_delete_section`, `adm_toggle_section_visibility` |
 | 课程协同 | `adm_list_course_collaborators`, `adm_invite_course_collaborator`, `adm_update_collaborator_role`, `adm_remove_course_collaborator`, `adm_transfer_course_owner`, `adm_list_course_learning_durations`, `adm_list_course_learning_tasks`, `adm_list_course_participants` |
@@ -478,7 +478,7 @@ python -m umu_sdk.skills.server
 - 返回与 Skill 统一的标准信封格式
 - AI 应优先使用 `skill_run` 调用已封装 Skill，仅在工具未覆盖时使用透传
 
-内置 Skill 覆盖高频场景（共 120），并支持通过 `/umu`、`/umua`、`/umut`、`/umus` 斜杠命令直接触发：
+内置 Skill 覆盖高频场景（共 121），并支持通过 `/umu`、`/umua`、`/umut`、`/umus` 斜杠命令直接触发：
 
 | Skill | 涉及子 MCP | 说明 |
 |-------|-----------|------|
@@ -585,6 +585,7 @@ python -m umu_sdk.skills.server
 | `get_course_auto_close_admin` | admin | 获取课程定时自动关闭设置 |
 | `set_course_auto_close_admin` | admin | 设置课程定时自动关闭时间 |
 | `cancel_course_auto_close_admin` | admin | 取消课程定时自动关闭 |
+| `get_course_operation_logs_admin` | admin | 查询课程操作日志并识别最初创建人 |
 | `list_learning_programs` | admin | 查询企业学习项目清单 |
 | `list_admin_personal_learning_programs` | admin | 列出管理员个人的学习项目（支持多种类型） |
 | `list_owned_learning_programs_admin` | admin | 列出管理员负责的学习项目 |

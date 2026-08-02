@@ -9,6 +9,7 @@ import pytest
 from umu_sdk.skills.builtin.admin_courses import (
     cancel_course_auto_close_admin,
     get_course_auto_close_admin,
+    get_course_operation_logs_admin,
     set_course_auto_close_admin,
 )
 
@@ -66,3 +67,38 @@ class TestAdminCourseAutoCloseSkills:
             "operation": "cancel_course_auto_close",
             "arguments": {"group_id": "g1", "clear_tips": True},
         }
+
+
+class TestGetCourseOperationLogsSkill:
+    async def test_get_course_operation_logs_admin(self, ctx):
+        result = await get_course_operation_logs_admin(ctx, "7389227")
+        assert result["success"] is True
+        ctx.call_role_tool.assert_awaited_once_with(
+            role="admin",
+            operation="get_course_operation_logs",
+            arguments={
+                "group_id": "7389227",
+                "page": 1,
+                "page_size": 200,
+                "sort": "desc",
+                "fetch_all": False,
+            },
+        )
+
+    async def test_get_course_operation_logs_admin_with_options(self, ctx):
+        result = await get_course_operation_logs_admin(
+            ctx, "7389227", fetch_all=True, action_types="1001,2000"
+        )
+        assert result["success"] is True
+        ctx.call_role_tool.assert_awaited_once_with(
+            role="admin",
+            operation="get_course_operation_logs",
+            arguments={
+                "group_id": "7389227",
+                "page": 1,
+                "page_size": 200,
+                "sort": "desc",
+                "fetch_all": True,
+                "action_types": "1001,2000",
+            },
+        )

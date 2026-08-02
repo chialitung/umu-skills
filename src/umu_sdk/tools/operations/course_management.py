@@ -22,6 +22,7 @@ from ...adapters.mcp.utils import (
     _parse_auto_close_time,
     fuzzy_filter_items_multi_key,
 )
+from ...core.admin_models import format_timestamp_beijing
 from ...core.client import UMUClient
 from ...core.errors import UMUError
 from ..decorators import umu_operation
@@ -573,4 +574,198 @@ async def cancel_course_auto_close(
         "group_id": str(group_id),
         "close_time": 0,
         "cleared_tips": clear_tips,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 课程操作日志
+# ---------------------------------------------------------------------------
+
+# 创建课程的 action_type（逆向录制证据：课程最早一条创建日志的 action_type 为 1001）
+_CREATE_COURSE_ACTION_TYPE = "1001"
+
+
+def _log_timestamp(log: dict[str, Any]) -> int:
+    """从格式化后的日志条目中解析 create_time 时间戳."""
+    raw = str(log.get("create_time", ""))
+    return int(raw) if raw.isdigit() else 0
+
+
+def _format_operation_log(item: dict[str, Any]) -> dict[str, Any]:
+    """统一格式化课程操作日志条目."""
+    create_time = str(item.get("create_time", ""))
+    ts = int(create_time) if create_time.isdigit() else 0
+    user_info = item.get("user_info") or {}
+    return {
+        "log_id": str(item.get("id", "")),
+        "umu_id": str(item.get("umu_id", "")),
+        "action_type": str(item.get("action_type", "")),
+        "create_time": create_time,
+        "create_time_readable": format_timestamp_beijing(ts),
+        "log_detail": item.get("log_detail"),
+        "user_info": {
+            "user_name": user_info.get("user_name", ""),
+            "avatar": user_info.get("avatar", ""),
+            "login_name": user_info.get("login_name", ""),
+            "email": user_info.get("email", ""),
+            "phone": user_info.get("phone", ""),
+        },
+    }
+
+
+def _derive_course_creator(logs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """从日志列表推导课程最初创建人.
+
+    取 create_time 最早的日志条目，其操作者视为创建人。
+    若该条目 action_type 为 1001（创建课程）则标记 creator_confident=True；
+    否则说明课程创建可能早于日志记录，结果仅供参考。
+    """
+    if not logs:
+        return None
+    earliest = min(logs, key=_log_timestamp)
+    confident = earliest["action_type"] == _CREATE_COURSE_ACTION_TYPE
+    user_info = earliest["user_info"]
+    return {
+        "umu_id": earliest["umu_id"],
+        "user_name": user_info["user_name"],
+        "email": user_info["email"],
+        "avatar": user_info["avatar"],
+        "create_time": earliest["create_time"],
+        "create_time_readable": earliest["create_time_readable"],
+        "action_type": earliest["action_type"],
+        "creator_confident": confident,
+        "note": (
+            ""
+            if confident
+            else "最早日志的动作类型不是「创建课程」(action_type=1001)，"
+            "课程创建可能早于日志记录；此处创建人为最早可见日志的操作者，仅供参考。"
+        ),
+    }
+
+
+@umu_operation(
+    name="get_course_operation_logs",
+    description="查询指定课程的操作日志，并识别课程的最初创建人",
+    roles=["admin"],
+    capabilities=["course_management"],
+    parameter_docs={
+        "group_id": "课程 ID",
+        "page": "页码，从 1 开始",
+        "page_size": "每页数量，默认 200，最大 200",
+        "sort": "排序方式：desc=最新在前（默认）, asc=最早在前",
+        "fetch_all": "是否自动获取全部日志。设为 True 时忽略 page/page_size，自动遍历所有分页并合并结果。",
+        "action_types": "可选的 action_type 过滤，多个用逗号分隔（如 '1001,2000'），客户端过滤",
+    },
+)
+async def get_course_operation_logs(
+    client: UMUClient,
+    group_id: str,
+    page: int = 1,
+    page_size: int = 200,
+    sort: str = "desc",
+    fetch_all: bool = False,
+    action_types: str | None = None,
+) -> dict[str, Any]:
+    """查询指定课程的操作日志，并识别课程的最初创建人.
+
+    调用 /uapi/v1/group/get-operation-log-list（log_type=1 为课程日志）。
+    创建人推导基于全部已拉取日志（不受 action_types 过滤影响）；
+    若未开启 fetch_all 且日志存在多页，创建人结果仅基于已拉取页，可能不准确。
+    """
+    if sort not in ("asc", "desc"):
+        raise UMUError(f"不支持的 sort: {sort}", code="INVALID_SORT")
+    page_size = max(1, min(page_size, 200))
+
+    def _fetch_page(p: int, sz: int) -> tuple[list[dict[str, Any]], int]:
+        resp = client.get(
+            client.desktop_url("/uapi/v1/group/get-operation-log-list"),
+            params={
+                "t": str(int(time.time() * 1000)),
+                "log_type": "1",
+                "log_obj_id": str(group_id),
+                "sort": sort,
+                "page": str(p),
+                "size": str(sz),
+            },
+        )
+        if not isinstance(resp, dict) or resp.get("error_code") != 0:
+            raise UMUError(
+                (resp.get("error_message") if isinstance(resp, dict) else None)
+                or "查询课程操作日志失败",
+                code="GET_COURSE_OPERATION_LOGS_FAILED",
+            )
+        data = resp.get("data", {})
+        page_info = data.get("page_info", {})
+        logs = [_format_operation_log(item) for item in data.get("list", [])]
+        total_all = int(page_info.get("list_total_num", 0) or 0)
+        return logs, total_all
+
+    if fetch_all:
+        all_logs: list[dict[str, Any]] = []
+        total_all = 0
+        current_page = 1
+
+        while True:
+            page_logs, total_all = _fetch_page(current_page, page_size)
+            all_logs.extend(page_logs)
+
+            report_pagination_progress(
+                "get_course_operation_logs",
+                current_page,
+                len(all_logs),
+                total_all,
+                page_size,
+                is_complete=not page_logs or len(all_logs) >= total_all,
+            )
+
+            if not page_logs or len(all_logs) >= total_all:
+                break
+
+            if current_page >= 50:
+                report_pagination_progress(
+                    "get_course_operation_logs",
+                    current_page,
+                    len(all_logs),
+                    total_all,
+                    page_size,
+                    is_safety_limit=True,
+                )
+                break
+
+            current_page += 1
+
+        fetched_logs = all_logs
+    else:
+        fetched_logs, total_all = _fetch_page(page, page_size)
+        current_page = page
+
+    creator = _derive_course_creator(fetched_logs)
+    if (
+        creator is not None
+        and not fetch_all
+        and total_all > len(fetched_logs)
+        and creator["note"]
+    ):
+        creator["note"] += " 日志存在多页且未开启 fetch_all，建议开启 fetch_all 后重试以提高准确性。"
+
+    type_filter = {t.strip() for t in action_types.split(",") if t.strip()} if action_types else set()
+    result_logs = (
+        [log for log in fetched_logs if log["action_type"] in type_filter]
+        if type_filter
+        else fetched_logs
+    )
+
+    return {
+        "logs": result_logs,
+        "creator": creator,
+        "pagination": {
+            "total_all": total_all,
+            "current_page": current_page,
+            "page_size": page_size,
+        },
+        "filter": {
+            "group_id": str(group_id),
+            "sort": sort,
+            "action_types": sorted(type_filter),
+        },
     }
