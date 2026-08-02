@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.2] - 2026-08-02
+
+### Added
+- Admin 新增课程操作日志查询工具 `adm_get_course_operation_logs` 及配套 Skill `get_course_operation_logs_admin`：调用 `/uapi/v1/group/get-operation-log-list` 查询课程操作日志，支持分页、`fetch_all` 全量拉取与 `action_types` 过滤，并基于最早日志条目识别课程最初创建人（`action_type=1001` 时高置信，否则附低置信说明）。
+
+### Changed
+- `transfer_course_owner`（teacher/admin）：目标用户不是课程协同者时，先自动将其加为编辑者再执行拥有权转让。
+
 ## [0.25.1] - 2026-07-04
 
 ### Security
