@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.3] - 2026-08-02
+
+### Fixed
+- 将 `mcp` 依赖约束为 `>=1.0.0,<2.0.0`：mcp 2.0.0 移除了 `mcp.server.fastmcp`（FastMCP 拆分为独立包），导致全新环境下 `umu_sdk.adapters.mcp.*` 全部导入失败，CI 与 PyPI 发布中断（0.25.2 未发布成功）。
+
 ## [0.25.2] - 2026-08-02
 
 ### Added
