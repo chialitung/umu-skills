@@ -359,9 +359,55 @@ async def remove_course_collaborator(
     }
 
 
+def _get_collaborator_raw_list(
+    client: UMUClient,
+    group_id: str,
+) -> list[dict[str, Any]]:
+    """获取课程协同者原始列表（getall 的 data.list）."""
+    resp = client.get(
+        client.desktop_url("/api/cooperation/getall"),
+        params={
+            "t": str(int(time.time() * 1000)),
+            "append_manage_role": "1",
+            "obj_id": group_id,
+            "obj_type": "group",
+            "page": "1",
+            "size": "100",
+        },
+    )
+    ok, data, err = _parse_collaboration_response(resp)
+    if not ok:
+        raise RuntimeError(err or "获取协同者列表失败")
+    if not isinstance(data, dict):
+        return []
+    raw_list = data.get("list") or []
+    return raw_list if isinstance(raw_list, list) else []
+
+
+def _find_collaborator_entry(
+    raw_list: list[dict[str, Any]],
+    account: dict[str, Any],
+) -> dict[str, Any] | None:
+    """在协同者列表中定位目标账号.
+
+    搜索结果 accessaccountmatchv2 的 id 是数值型 umu 用户 ID，
+    与 getall 列表中的 umu_id 对应；email 作为兜底匹配。
+    """
+    account_id = str(account.get("id") or "")
+    account_email = str(account.get("email") or account.get("account") or "")
+    for item in raw_list:
+        if not isinstance(item, dict):
+            continue
+        if account_id and str(item.get("umu_id") or "") == account_id:
+            return item
+        if account_email and str(item.get("teacher_email") or "") == account_email:
+            return item
+    return None
+
+
 @umu_operation(
     name="transfer_course_owner",
-    description="将课程拥有权转让给其他用户",
+    description="将课程拥有权转让给其他用户（目标非协同者时会先自动加为编辑者）",
     roles=["teacher", "admin"],
     capabilities=["course_management"],
     parameter_docs={
@@ -376,7 +422,8 @@ async def transfer_course_owner(
 ) -> dict[str, Any]:
     """将课程拥有权转让给其他用户.
 
-    工具内部会先搜索账号，只有唯一匹配时才会执行转让。
+    复刻前端流程：搜索账号 → 确保目标是协同者（不是则先加为编辑者）→
+    从协同者列表获取 teacher_id → 调用 permission-transfer。
     注意：转让后当前用户将失去拥有者权限，请谨慎操作。
     """
     ok, accounts, err = _search_collaborator_account(client, group_id, keyword)
@@ -387,9 +434,24 @@ async def transfer_course_owner(
     if account is None:
         raise ValueError(err)
 
-    teacher_id = account.get("id")
+    raw_list = _get_collaborator_raw_list(client, group_id)
+    entry = _find_collaborator_entry(raw_list, account)
+
+    added_as_collaborator = False
+    if entry is None:
+        add_ok, add_err = _add_or_update_cooperator(client, group_id, account, "cooperator")
+        if not add_ok:
+            raise RuntimeError(add_err or "添加协同者失败，无法转让拥有者")
+        added_as_collaborator = True
+        raw_list = _get_collaborator_raw_list(client, group_id)
+        entry = _find_collaborator_entry(raw_list, account)
+
+    if entry is None:
+        raise RuntimeError("已在协同者列表中找不到目标账号，无法获取 teacher_id")
+
+    teacher_id = entry.get("teacher_id")
     if not teacher_id:
-        raise ValueError("账号信息缺少 teacher_id，无法转让")
+        raise ValueError("协同者信息缺少 teacher_id，无法转让")
 
     resp = client.post(
         client.desktop_url("/uapi/v1/cooperation/permission-transfer"),
@@ -405,9 +467,10 @@ async def transfer_course_owner(
 
     return {
         "group_id": group_id,
-        "new_owner_id": teacher_id,
+        "new_owner_teacher_id": str(teacher_id),
         "new_owner_name": account.get("user_name"),
         "new_owner_account": account.get("account") or account.get("email"),
+        "added_as_collaborator": added_as_collaborator,
         "status": data.get("status") if isinstance(data, dict) else None,
     }
 

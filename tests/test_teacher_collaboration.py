@@ -172,23 +172,60 @@ class TestTchRemoveCourseCollaborator:
 
 
 class TestTchTransferCourseOwner:
-    async def test_transfer_success(self) -> None:
-        from umu_sdk.adapters.mcp.teacher import tch_transfer_course_owner
-
-        search_resp = _search_response([{
-            "id": "999",
-            "umu_id": "u-999",
+    @staticmethod
+    def _search_resp() -> dict[str, Any]:
+        # accessaccountmatchv2：id 为数值型 umu 用户 ID，umu_id 为哈希串
+        return _search_response([{
+            "id": "12734335",
+            "umu_id": "6aec27240408fe95812df019062a8fd4",
             "account": "new@example.com",
             "account_type": "user",
             "user_name": "New Owner",
             "email": "new@example.com",
             "is_exist": 1,
         }])
+
+    @staticmethod
+    def _getall_hit() -> dict[str, Any]:
+        return _coop_response(collaborators=[{
+            "cooperation_info_id": "c1",
+            "teacher_id": "12732049",
+            "umu_id": "12734335",
+            "role_type": "cooperator",
+            "teacher_name": "New Owner",
+            "teacher_email": "new@example.com",
+        }])
+
+    async def test_transfer_existing_collaborator(self) -> None:
+        from umu_sdk.adapters.mcp.teacher import tch_transfer_course_owner
+
         transfer_resp = {"error_code": 0, "error_message": "", "data": {"status": 1}}
 
         with _patch_teacher_auth() as client:
-            client.post.side_effect = [search_resp, transfer_resp]
+            client.post.side_effect = [self._search_resp(), transfer_resp]
+            client.get.return_value = self._getall_hit()
             result = json.loads(await tch_transfer_course_owner(group_id="g1", keyword="new@example.com"))
 
         assert result["success"] is True
-        assert result["data"]["new_owner_id"] == "999"
+        assert result["data"]["new_owner_teacher_id"] == "12732049"
+        assert result["data"]["added_as_collaborator"] is False
+        # permission-transfer 必须使用 getall 的 teacher_id，而非搜索结果的 id
+        transfer_call = client.post.call_args_list[-1]
+        assert transfer_call.kwargs["data"]["transferred_teacher_id"] == "12732049"
+
+    async def test_transfer_adds_collaborator_first(self) -> None:
+        from umu_sdk.adapters.mcp.teacher import tch_transfer_course_owner
+
+        add_resp = {"status": True, "error_code": 0, "data": []}
+        transfer_resp = {"error_code": 0, "error_message": "", "data": {"status": 1}}
+
+        with _patch_teacher_auth() as client:
+            client.post.side_effect = [self._search_resp(), add_resp, transfer_resp]
+            client.get.side_effect = [_coop_response(), self._getall_hit()]
+            result = json.loads(await tch_transfer_course_owner(group_id="g1", keyword="new@example.com"))
+
+        assert result["success"] is True
+        assert result["data"]["new_owner_teacher_id"] == "12732049"
+        assert result["data"]["added_as_collaborator"] is True
+        transfer_call = client.post.call_args_list[-1]
+        assert transfer_call.kwargs["data"]["transferred_teacher_id"] == "12732049"
