@@ -67,9 +67,14 @@ umu_skills/
 
 ## 安装
 
+前置要求：**Python >= 3.10**。
+
 ```bash
-pip install umu-skills
+pip install "umu-skills[mcp]"
 ```
+
+> **必须带 `[mcp]` 额外依赖**：`mcp`、`keyring`、`openpyxl` 等包只在 `[mcp]` extra 中。
+> 只执行 `pip install umu-skills` 会导致 MCP server 无法启动、加密凭证功能不可用。
 
 > 如果你正在修改本仓库源码，使用开发模式安装：
 > ```bash
@@ -78,6 +83,13 @@ pip install umu-skills
 
 ## 快速开始
 
+`/umu` skill 支持多种 AI 客户端，按你使用的工具选择对应章节：
+
+- **Claude Code**：见下方「3 分钟在 Claude Code 中使用 `/umu`（推荐）」
+- **Kimi Code CLI**：见「[在 Kimi Code CLI 中使用](#在-kimi-code-cli-中使用)」
+- **腾讯 WorkBuddy**：见「[在腾讯 WorkBuddy 中使用](#在腾讯-workbuddy-中使用)」
+- **Cursor 等其他 MCP 客户端**：见「[进阶：作为 MCP 服务器使用](#进阶作为-mcp-服务器使用)」，手动配置 MCP server
+
 ### 3 分钟在 Claude Code 中使用 `/umu`（推荐）
 
 这是最快捷的使用方式。你不需要记住任何工具名，只需用自然语言告诉 AI 你想做什么。
@@ -85,7 +97,7 @@ pip install umu-skills
 #### 1. 安装 Python 包
 
 ```bash
-pip install umu-skills
+pip install "umu-skills[mcp]"
 ```
 
 #### 2. 一键配置 Claude Code
@@ -184,24 +196,51 @@ Skill 文件仍位于各 AI 工具默认目录（Claude Code 为 `~/.claude/skil
 
 Kimi Code CLI 安装后，可以通过 `/umu` 斜杠命令操作 UMU 平台。
 
-### 安装
+### 1. 安装 Python 包
 
 ```bash
-python -m umu_sdk.skills.kimi.install
+pip install "umu-skills[mcp]"
 ```
 
-或使用 PyPI 安装后的命令：
+> **注意**：必须先完成这一步再运行下面的安装脚本。`python -m umu_sdk.skills.kimi.install`
+> 只有在 `umu_sdk` 包已安装时才能运行，在全新机器上直接执行会报
+> `ModuleNotFoundError: No module named 'umu_sdk'`。
+
+### 2. 一键配置 Kimi Code CLI
 
 ```bash
 umu-skills-install-kimi
 ```
 
+或等价地：
+
+```bash
+python -m umu_sdk.skills.kimi.install
+```
+
 安装脚本会：
 
-1. 检查并安装 `umu-skills[mcp]` 包。
+1. 检查 `umu-skills[mcp]` 包是否已安装（已安装则跳过）。
 2. 将 4 个 skill 复制到 `~/.kimi-code/skills/`。
 3. 在 `~/.kimi-code/mcp.json` 注册 `umu-teacher`、`umu-student`、`umu-admin` 三个 MCP server。
 4. 初始化加密凭证目录 `~/.umu_skills/`。
+
+### 3. 重启 Kimi Code CLI
+
+安装完成后**必须重启 Kimi Code CLI**，新 skill 和 MCP server 才会生效。
+
+### 4. 配置账号
+
+首次触发 `/umu` 时，会引导你录入至少一个角色的账号和密码。账号信息加密保存在 `~/.umu_skills/credentials.enc`，与 Claude Code、WorkBuddy 共用。
+
+### 5. 使用示例
+
+```
+/umu 帮我创建一个课程
+/umu-teacher 上传 SCORM 课件
+/umu-student 帮我报名课程 aet504
+/umu-admin 查询最近的学习记录
+```
 
 ### 启用语义自动触发（可选）
 
@@ -215,23 +254,6 @@ python -m umu_sdk.skills.kimi.install --semantic-trigger
 
 ```bash
 python -m umu_sdk.skills.kimi.install --no-semantic-trigger
-```
-
-### 重启 Kimi Code CLI
-
-安装完成后**必须重启 Kimi Code CLI**，新 skill 和 MCP server 才会生效。
-
-### 配置账号
-
-首次触发 `/umu` 时，会引导你录入至少一个角色的账号和密码。账号信息加密保存在 `~/.umu_skills/credentials.enc`。
-
-### 使用示例
-
-```
-/umu 帮我创建一个课程
-/umu-teacher 上传 SCORM 课件
-/umu-student 帮我报名课程 aet504
-/umu-admin 查询最近的学习记录
 ```
 
 ### 故障排查
@@ -248,15 +270,22 @@ python -m umu_sdk.skills.kimi.install --check
 python -m umu_sdk.skills.kimi.install --upgrade
 ```
 
+**注意事项：**
 
-### 在腾讯 WorkBuddy 中使用
+- `mcp.json` 中三个 MCP server 的启动命令绑定的是**运行安装脚本时的 Python 解释器路径**。
+  如果之后卸载、移动或更换了 Python 环境，MCP server 会启动失败，需用新的 Python
+  重新执行 `pip install "umu-skills[mcp]"` 和安装脚本。
+- 安装后若 `/umu` 无反应，先确认已重启 Kimi Code CLI，再运行 `--check` 逐项核对。
+
+
+## 在腾讯 WorkBuddy 中使用
 
 如果你使用腾讯 [WorkBuddy](https://workbuddy.qq.com/) AI 桌面助手，可以通过一条命令完成集成：
 
 #### 1. 安装 Python 包
 
 ```bash
-pip install umu-skills
+pip install "umu-skills[mcp]"
 ```
 
 #### 2. 一键配置 WorkBuddy
@@ -325,7 +354,7 @@ macOS/Linux: ~/.umu_skills/credentials.enc
 
 WorkBuddy 会通过 `umu-skills` orchestrator 自动调用合适的 Skill 完成操作。
 
-### 进阶：作为 Python SDK 使用
+## 进阶：作为 Python SDK 使用
 
 如果你不想通过 AI 客户端，而是直接在自己的 Python 代码里调用 UMU 能力：
 
@@ -340,7 +369,7 @@ for course in courses.data:
     print(f"{course.id}: {course.title}")
 ```
 
-### 进阶：作为 MCP 服务器使用
+## 进阶：作为 MCP 服务器使用
 
 如果你使用 Claude Desktop、WorkBuddy 等其他 MCP 客户端，可以手动启动单个角色的 MCP server。
 
