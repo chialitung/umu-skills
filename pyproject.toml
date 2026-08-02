@@ -41,8 +41,10 @@ mcp = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "ruff>=0.4.0",
-    "mypy>=1.10.0",
+    # 锁定 ruff/mypy 上界：CI 全新安装会拉到最新版，新版规则集变化
+    # （如 ruff 0.16 的 isort 行为）会导致存量代码 lint 失败
+    "ruff>=0.4.0,<0.16.0",
+    "mypy>=1.10.0,<2.2.0",
     "build>=1.0.0",
     "twine>=5.0.0",
 ]
