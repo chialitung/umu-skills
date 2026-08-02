@@ -492,6 +492,10 @@ class TestCredentialLoaderSourceAndPriority:
         """旧签名仍返回二元组."""
         from umu_sdk.core import credential_loader as cl
 
+        # 隔离环境变量，确保 .env 文件凭据优先被读取
+        monkeypatch.delenv("UMU_TEACHER_USERNAME", raising=False)
+        monkeypatch.delenv("UMU_TEACHER_PASSWORD", raising=False)
+
         self._write_dotenv(dotenv_file, "teacher", "dotenv_user", "dotenv_pass")
         result = cl.load_credentials("teacher")
         assert result == ("dotenv_user", "dotenv_pass")
